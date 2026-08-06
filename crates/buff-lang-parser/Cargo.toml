@@ -11,6 +11,7 @@ buff-lang-lexer.workspace = true
 buff-lang-error.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 # T29: module_system integration tests exercise the module-graph pass from
-# the parser surface (parse imports/exports â†’ build_graph â†’ verify).
+# the parser surface (parse imports/exports -> build_graph -> verify).
 buff-lang-types.workspace = true
