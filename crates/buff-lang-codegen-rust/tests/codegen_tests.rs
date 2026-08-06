@@ -367,7 +367,7 @@ fn test_codegen_string_and_bool_literals() {
     let src = generate_rust(&[Decl::FuncDecl(func)]).unwrap();
     // T12: type annotations inferred — `let s = "hi"` → `let s: String = "hi"`,
     // `let b = true` → `let b: bool = true`.
-    assert!(src.contains(r#"let s: String = "hi";"#), "src = {src}");
+    assert!(src.contains(r#"let s: String = "hi".to_string();"#), "src = {src}");
     assert!(src.contains("let b: bool = true;"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("literals must re-parse");
 }
