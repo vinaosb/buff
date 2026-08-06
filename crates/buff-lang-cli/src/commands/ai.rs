@@ -120,7 +120,7 @@ fn enhance_report(mut report: CheckReport, _file: &Path) -> CheckReport {
 /// - Mentions an unknown identifier that's a near-miss of a prelude type.
 /// - Generic hint for parse errors (suggest running `buff fmt`).
 fn hint_for_diagnostic(message: &str) -> Option<String> {
-    use buff_lang_types::PreludeFn;
+    use buff_lang_types::{PreludeFn, PreludeType};
     let lower = message.to_lowercase();
     if lower.contains("parse") || lower.contains("unexpected token") {
         return Some(
@@ -129,34 +129,40 @@ fn hint_for_diagnostic(message: &str) -> Option<String> {
                 .to_string(),
         );
     }
+    let typo = extract_unknown_ident(message)?;
+    if typo.len() < 3 {
+        return None;
+    }
+    // Find the BEST match (minimum Levenshtein distance) across both
+    // PreludeFn and PreludeType, rather than returning the first match.
+    let mut best: Option<(&str, usize, bool)> = None; // (name, distance, is_fn)
     for &pf in PreludeFn::ALL {
         let name = pf.name();
         if message.contains(name) {
             continue;
         }
-        if let Some(typo) = extract_unknown_ident(message) {
-            if levenshtein(typo, name) <= 2 && typo.len() >= 3 {
-                return Some(format!(
-                    "AI hint: unknown name `{typo}` — did you mean the prelude function `{name}`?"
-                ));
-            }
+        let dist = levenshtein(typo, name);
+        if dist <= 2 && best.is_none_or(|(_, bd, _)| dist < bd) {
+            best = Some((name, dist, true));
         }
     }
-    use buff_lang_types::PreludeType;
     for &pt in PreludeType::ALL {
         let name = pt.name();
         if message.contains(name) {
             continue;
         }
-        if let Some(typo) = extract_unknown_ident(message) {
-            if levenshtein(typo, name) <= 2 && typo.len() >= 3 {
-                return Some(format!(
-                    "AI hint: unknown type `{typo}` — did you mean the prelude type `{name}`?"
-                ));
-            }
+        let dist = levenshtein(typo, name);
+        if dist <= 2 && best.is_none_or(|(_, bd, _)| dist < bd) {
+            best = Some((name, dist, false));
         }
     }
-    None
+    best.map(|(name, _, is_fn)| {
+        if is_fn {
+            format!("AI hint: unknown name `{typo}` — did you mean the prelude function `{name}`?")
+        } else {
+            format!("AI hint: unknown type `{typo}` — did you mean the prelude type `{name}`?")
+        }
+    })
 }
 
 /// Best-effort extraction of an unknown identifier from a diagnostic

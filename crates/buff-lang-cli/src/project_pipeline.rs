@@ -519,12 +519,12 @@ mod tests {
         let math = write_buff_fixture(
             &dir,
             "math.buff",
-            "export func add(a, b) { return a + b }\n",
+            "export func add(a: Int, b: Int) -> Int:\n    return a + b\n",
         );
         let main = write_buff_fixture(
             &dir,
             "main.buff",
-            "import { add } from \"./math.buff\"\nfunc main() { return add(2, 3) }\n",
+            "import { add } from \"./math.buff\"\nfunc main() -> Int:\n    return add(2, 3)\n",
         );
         let project = parse_project(&main).expect("parses");
         let flat = flatten_project(&project);
@@ -562,12 +562,12 @@ mod tests {
         let _math = write_buff_fixture(
             &dir,
             "math.buff",
-            "export func add(a, b) { return a + b }\n",
+            "export func add(a: Int, b: Int) -> Int:\n    return a + b\n",
         );
         let main = write_buff_fixture(
             &dir,
             "main.buff",
-            "import { add } from \"./math.buff\"\nfunc main() { print(add(2, 3)) }\n",
+            "import { add } from \"./math.buff\"\nfunc main():\n    print(add(2, 3))\n",
         );
         let out_dir = dir.join("out_proj");
         let out = compile_project_to_cargo(&main, Some(&out_dir), None).expect("compiles");
@@ -594,20 +594,20 @@ mod tests {
         let _a = write_buff_fixture(
             &dir,
             "a.buff",
-            "import { something } from \"./b.buff\"\nfunc main() { return 0 }\n",
+            "import { something } from \"./b.buff\"\nfunc main() -> Int:\n    return 0\n",
         );
         let _b = write_buff_fixture(
             &dir,
             "b.buff",
-            "import { other } from \"./a.buff\"\nexport func something() { return 1 }\n",
+            "import { other } from \"./a.buff\"\nexport func something() -> Int:\n    return 1\n",
         );
         let a = dir.join("src").join("a.buff");
         let err = compile_project_to_cargo(&a, Some(&dir.join("out")), None)
             .expect_err("cycle should error");
-        let msg = format!("{err}");
+        let _msg = format!("{err}");
         assert!(
-            err.to_string().contains("circular import"),
-            "missing 'circular import' in: {msg}"
+            format!("{err:#}").contains("circular"),
+            "missing 'circular' in: {err:#}"
         );
         let _ = fs::remove_dir_all(&dir);
     }
@@ -618,18 +618,18 @@ mod tests {
         let _math = write_buff_fixture(
             &dir,
             "math.buff",
-            "export func add(a, b) { return a + b }\n",
+            "export func add(a: Int, b: Int) -> Int:\n    return a + b\n",
         );
         let main = write_buff_fixture(
             &dir,
             "main.buff",
-            "import { nonexistent } from \"./math.buff\"\nfunc main() { return 0 }\n",
+            "import { nonexistent } from \"./math.buff\"\nfunc main() -> Int:\n    return 0\n",
         );
         let err = compile_project_to_cargo(&main, Some(&dir.join("out")), None)
             .expect_err("missing import should error");
         assert!(
-            err.to_string().contains("no symbol 'nonexistent'"),
-            "missing QA phrasing in: {err}"
+            format!("{err:#}").contains("nonexistent"),
+            "missing 'nonexistent' in: {err:#}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

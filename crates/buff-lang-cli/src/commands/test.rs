@@ -292,7 +292,14 @@ fn extract_snapshot_body(content: &str) -> String {
     // If we found the second `---`, take everything after it.
     // Otherwise, the entire content is the body.
     if dash_count >= 2 {
-        lines[body_start..].join("\n")
+        let body = lines[body_start..].join("\n");
+        // Restore trailing newline if the original content had one
+        // (lines() strips it, join("\n") doesn't restore it).
+        if content.ends_with('\n') && !body.is_empty() {
+            body + "\n"
+        } else {
+            body
+        }
     } else {
         content.to_string()
     }
