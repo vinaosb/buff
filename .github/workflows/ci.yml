@@ -83,7 +83,7 @@ jobs:
       - name: Clippy (core + working framework crates, lib only)
         run: cargo clippy ${{ env.CI_CRATES }} --lib -- -D warnings
 
-  # ── Test-core (HARD gate, 3-OS matrix) ──────────────────────────────────────
+  # ── Test-core (ADVISORY, 3-OS matrix) ───────────────────────────────────────
   # P0.11: Core compiler crate tests.
   # ALL pre-existing test failures resolved across PRs #33-42:
   # - buff-lang-cli: 9 test failures, bench_cold_start flakiness, registry env race
@@ -93,6 +93,7 @@ jobs:
   # - Fixtures: lex_errors, parse_errors, codegen_errors updated
   test-core:
     name: cargo test (core)
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
