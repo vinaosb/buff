@@ -115,8 +115,8 @@ fn default_params_codegen_fills_omitted() {
     })]);
     let src = generate_rust(&[fetch, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"fetch("url", 30)"#),
-        "expected `fetch(\"url\", 30)` (default filled) in generated Rust, got: {src}"
+        src.contains(r#"fetch("url".to_string(), 30)"#),
+        "expected `fetch(\"url\".to_string(), 30)` (default filled) in generated Rust, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
@@ -142,11 +142,11 @@ fn default_params_codegen_all_supplied_no_fill() {
     })]);
     let src = generate_rust(&[fetch, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"fetch("url", 60)"#),
-        "expected caller-supplied `fetch(\"url\", 60)` unchanged, got: {src}"
+        src.contains(r#"fetch("url".to_string(), 60)"#),
+        "expected caller-supplied `fetch(\"url\".to_string(), 60)` unchanged, got: {src}"
     );
     assert!(
-        !src.contains(r#"fetch("url", 30)"#),
+        !src.contains(r#"fetch("url".to_string(), 30)"#),
         "should NOT fill default when caller supplied the arg: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
@@ -174,8 +174,8 @@ fn default_params_codegen_multiple_defaults_fill() {
     })]);
     let src = generate_rust(&[cfg, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"cfg("db", 80, 3)"#),
-        "expected both defaults filled `cfg(\"db\", 80, 3)`, got: {src}"
+        src.contains(r#"cfg("db".to_string(), 80, 3)"#),
+        "expected both defaults filled `cfg(\"db\".to_string(), 80, 3)`, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
@@ -203,8 +203,8 @@ fn default_params_codegen_partial_omit_fills_only_trailing() {
     })]);
     let src = generate_rust(&[cfg, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"cfg("db", 8080, 3)"#),
-        "expected only trailing default filled `cfg(\"db\", 8080, 3)`, got: {src}"
+        src.contains(r#"cfg("db".to_string(), 8080, 3)"#),
+        "expected only trailing default filled `cfg(\"db\".to_string(), 8080, 3)`, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
@@ -231,8 +231,8 @@ fn default_params_codegen_named_arg_with_default_fill() {
     })]);
     let src = generate_rust(&[fetch, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"fetch("x", 30)"#),
-        "expected named-arg reorder + default fill `fetch(\"x\", 30)`, got: {src}"
+        src.contains(r#"fetch("x".to_string(), 30)"#),
+        "expected named-arg reorder + default fill `fetch(\"x\".to_string(), 30)`, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
@@ -274,8 +274,8 @@ fn default_params_codegen_unknown_callee_no_fill() {
     let src = generate_rust(&[main]).expect("codegen should succeed");
     // No matching fn decl → no default info → call unchanged.
     assert!(
-        src.contains(r#"other("x")"#),
-        "expected unknown callee unchanged `other(\"x\")`, got: {src}"
+        src.contains(r#"other("x".to_string())"#),
+        "expected unknown callee unchanged `other(\"x\".to_string())`, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }
@@ -301,8 +301,8 @@ fn default_params_codegen_string_default_fill() {
     })]);
     let src = generate_rust(&[greet, main]).expect("codegen should succeed");
     assert!(
-        src.contains(r#"greet("bob", "hi")"#),
-        "expected string default filled `greet(\"bob\", \"hi\")`, got: {src}"
+        src.contains(r#"greet("bob".to_string(), "hi".to_string())"#),
+        "expected string default filled `greet(\"bob\".to_string(), \"hi\".to_string())`, got: {src}"
     );
     let _file: syn::File = syn::parse_str(&src).expect("generated Rust should parse");
 }

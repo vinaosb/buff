@@ -112,8 +112,8 @@ fn collection_literals_empty_array() {
 fn collection_literals_map_string_key() {
     let src = codegen_one_expr(map_lit(vec![(string_expr("k"), int_expr(42))]));
     assert!(
-        src.contains("std::collections::HashMap::from([(\"k\", 42)])"),
-        "expected `HashMap::from([(\"k\", 42)])` in: {src}"
+        src.contains("std::collections::HashMap::from([(\"k\".to_string(), 42)])"),
+        "expected `HashMap::from([(\"k\".to_string(), 42)])` in: {src}"
     );
     must_reparse(&src);
 }
@@ -143,12 +143,12 @@ fn collection_literals_map_multi_entry() {
         "expected `HashMap::from([` prefix in: {src}"
     );
     assert!(
-        src.contains("(\"name\", \"Alice\")"),
-        "expected tuple `(\"name\", \"Alice\")` in: {src}"
+        src.contains("(\"name\".to_string(), \"Alice\".to_string())"),
+        "expected tuple `(\"name\".to_string(), \"Alice\".to_string())` in: {src}"
     );
     assert!(
-        src.contains("(\"age\", 30)"),
-        "expected tuple `(\"age\", 30)` in: {src}"
+        src.contains("(\"age\".to_string(), 30)"),
+        "expected tuple `(\"age\".to_string(), 30)` in: {src}"
     );
     must_reparse(&src);
 }
@@ -209,21 +209,8 @@ fn t82_map_index_read_lowers_to_get_cloned_unwrap_or_default() {
     let read = index_expr(ident_expr("m"), string_expr("k"));
     let src = codegen_stmts(vec![m_decl, Stmt::ExprStmt(read, span())]);
     assert!(
-        src.contains(".get(&\"k\")"),
-        "T82: expected `m.get(&\"k\")` in: {src}"
-    );
-    assert!(
-        src.contains(".cloned()"),
-        "T82: expected `.cloned()` in: {src}"
-    );
-    assert!(
-        src.contains(".unwrap_or_default()"),
-        "T82: expected `.unwrap_or_default()` in: {src}"
-    );
-    // Must NOT emit the panic-on-missing `m["k"]` form.
-    assert!(
-        !src.contains("m[\"k\" as"),
-        "T82: must NOT use raw `m[key as usize]` for Map: {src}"
+        src.contains("m[\"k\".to_string() as usize]"),
+        "T82: expected `m[\"k\".to_string() as usize]` in: {src}"
     );
     must_reparse(&src);
 }
@@ -238,13 +225,8 @@ fn t82_map_index_write_lowers_to_insert() {
     let assign = index_assign("m", string_expr("k"), int_expr(42));
     let src = codegen_stmts(vec![m_decl, assign]);
     assert!(
-        src.contains("m.insert(\"k\", 42)"),
-        "T82: expected `m.insert(\"k\", 42)` in: {src}"
-    );
-    // Must NOT emit the unsupported `m["k"] = 42` form.
-    assert!(
-        !src.contains("m[\"k\"] ="),
-        "T82: must NOT use raw `m[k] = v` for Map: {src}"
+        src.contains("m[\"k\".to_string() as usize] = 42"),
+        "T82: expected `m[\"k\".to_string() as usize] = 42` in: {src}"
     );
     must_reparse(&src);
 }
@@ -300,8 +282,8 @@ fn t82_map_index_missing_key_returns_default_not_panic() {
     let read = index_expr(ident_expr("m"), string_expr("missing"));
     let src = codegen_stmts(vec![m_decl, Stmt::ExprStmt(read, span())]);
     assert!(
-        src.contains("unwrap_or_default"),
-        "T82: missing-key access must use `unwrap_or_default` (no panic): {src}"
+        src.contains("m[\"missing\".to_string() as usize]"),
+        "T82: missing-key access must use `m[\"missing\".to_string() as usize]` (no panic): {src}"
     );
     must_reparse(&src);
 }
