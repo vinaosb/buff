@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/msgpack_codegen.rs
+assertion_line: 496
+expression: src
+---
+fn f() {
+    buff_msgpack::serialize(&"hello".to_string()).unwrap_or_default();
+}

@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/protobuf_codegen.rs
+assertion_line: 774
+expression: src
+---
+fn f() {
+    msg.type_url;
+}

@@ -1,0 +1,33 @@
+---
+source: crates/buff-lang-codegen-rust/tests/simd_codegen.rs
+assertion_line: 349
+expression: src
+---
+fn main() {
+    let a = buff_simd::Simd::from_slice(&arr).unwrap_or_default();
+    let b: buff_simd::Simd = buff_simd::Simd::splat(2.0f64 as f32);
+    let prod = a.mul(b);
+    prod.sum();
+    prod.clone().min;
+    prod.clone().max;
+    prod.clone().to_vec;
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
