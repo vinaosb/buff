@@ -486,7 +486,7 @@ fn test_gpu_context_device_request_bridges_to_runtime_error_gpu_init() {
     let detail = "RequestDeviceError { .. }".to_string();
     let gpu_err: RuntimeError = GpuContextError::DeviceRequest(detail.clone()).into();
     match gpu_err {
-        RuntimeError::GpuInit { detail: got } => assert_eq!(
+        RuntimeError::GpuInit { detail: got, .. } => assert_eq!(
             got, detail,
             "GpuInit detail must be the same string passed to DeviceRequest"
         ),
@@ -499,7 +499,7 @@ fn test_gpu_context_no_adapter_bridges_to_runtime_error_gpu_unavailable() {
     // GpuContextError::NoAdapter must bridge to RuntimeError::GpuUnavailable.
     let gpu_err: RuntimeError = GpuContextError::NoAdapter.into();
     assert!(
-        matches!(gpu_err, RuntimeError::GpuUnavailable),
+        matches!(gpu_err, RuntimeError::GpuUnavailable { .. }),
         "NoAdapter must bridge to GpuUnavailable, got: {gpu_err:?}"
     );
 }

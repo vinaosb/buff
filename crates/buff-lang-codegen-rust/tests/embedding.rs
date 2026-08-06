@@ -109,6 +109,7 @@ fn extend_one_method(target: &str, name: &str, body: Block, ret: TypeRef) -> Ext
             is_unsafe: false,
             is_extern: false,
             attributes: Vec::new(),
+            type_params: Vec::new(),
             span: span(),
         }],
         span: span(),
@@ -189,6 +190,7 @@ fn embedding_multiple_methods() {
                 is_unsafe: false,
                 is_extern: false,
                 attributes: Vec::new(),
+                type_params: Vec::new(),
                 span: span(),
             },
             FuncDecl {
@@ -206,6 +208,7 @@ fn embedding_multiple_methods() {
                 is_unsafe: false,
                 is_extern: false,
                 attributes: Vec::new(),
+                type_params: Vec::new(),
                 span: span(),
             },
         ],
@@ -288,12 +291,13 @@ fn embedding_method_with_extra_params_forwarded() {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
-            attributes: Vec::new(),
+                attributes: Vec::new(),
+                type_params: Vec::new(),
+                span: span(),
+            }],
             span: span(),
-        }],
-        span: span(),
-    });
-    let employee = Decl::StructDecl(struct_decl(
+        });
+        let employee = Decl::StructDecl(struct_decl(
         "Employee",
         vec![("person", named_ty("Person"))],
     ));
