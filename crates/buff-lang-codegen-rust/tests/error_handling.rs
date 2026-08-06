@@ -193,8 +193,8 @@ fn error_handling_err_string_lowers_to_rust_err_call() {
     // `Err("nope")` → Rust `Err(\"nope\")`.
     let src = codegen_one_expr(variant_call("Err", string_expr("nope")));
     assert!(
-        src.contains("Err(\"nope\")"),
-        "expected `Err(\"nope\")` in generated Rust: {src}"
+        src.contains("Err(\"nope\".to_string())"),
+        "expected `Err(\"nope\".to_string())` in generated Rust: {src}"
     );
     must_reparse(&src);
 }
@@ -309,8 +309,8 @@ fn error_handling_return_error_maps_to_err_error_new() {
         span(),
     )]);
     assert!(
-        src.contains("return Err(Error::new(\"fail\"));"),
-        "expected `return Err(Error::new(\"fail\"));` in: {src}"
+        src.contains("return Err(Error::new(\"fail\".to_string()));"),
+        "expected `return Err(Error::new(\"fail\".to_string()));` in: {src}"
     );
     must_reparse(&src);
 }
@@ -382,7 +382,7 @@ fn error_handling_return_error_snapshot() {
     }
     impl std::error::Error for Error {}
     fn f() {
-        return Err(Error::new("nope"));
+        return Err(Error::new("nope".to_string()));
     }
     "###);
     must_reparse(&src);
@@ -410,7 +410,7 @@ fn error_handling_read_func_result_string_error_snapshot() {
         "expected typed read fn in: {src}"
     );
     assert!(
-        src.contains("return Err(Error::new(\"fail\"));"),
+        src.contains("return Err(Error::new(\"fail\".to_string()));"),
         "expected Err(Error::new) body in: {src}"
     );
     assert!(
@@ -459,7 +459,7 @@ fn error_handling_custom_error_enum_codegen_snapshot() {
     };
     let src = generate_rust(&[Decl::EnumDecl(e)]).expect("codegen");
     insta::assert_snapshot!(src, @r###"
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub enum MyError {
         NotFound,
         Invalid(String),
@@ -567,7 +567,7 @@ fn error_handling_end_to_end_program_reparse() {
     );
     assert!(src.contains("let x = inner?;"), "`?` in: {src}");
     assert!(
-        src.contains("return Err(Error::new(\"done\"));"),
+        src.contains("return Err(Error::new(\"done\".to_string()));"),
         "Error return in: {src}"
     );
     must_reparse(&src);
