@@ -291,13 +291,13 @@ fn embedding_method_with_extra_params_forwarded() {
             is_async: false,
             is_unsafe: false,
             is_extern: false,
-                attributes: Vec::new(),
-                type_params: Vec::new(),
-                span: span(),
-            }],
+            attributes: Vec::new(),
+            type_params: Vec::new(),
             span: span(),
-        });
-        let employee = Decl::StructDecl(struct_decl(
+        }],
+        span: span(),
+    });
+    let employee = Decl::StructDecl(struct_decl(
         "Employee",
         vec![("person", named_ty("Person"))],
     ));
