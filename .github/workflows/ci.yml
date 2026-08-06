@@ -85,12 +85,14 @@ jobs:
 
   # ── Test-core (HARD gate, 3-OS matrix) ──────────────────────────────────────
   # P0.11: Core compiler crate tests.
-  # Advisory until pre-existing test failures (project_pipeline fixtures using
-  # brace syntax, features parsing, hint_for_diagnostic) are resolved.
+  # Previously advisory due to pre-existing test failures; all resolved:
+  # - project_pipeline fixtures fixed (PR #33)
+  # - features/hint_for_diagnostic fixed (PR #33)
+  # - buff-lang-ast/codegen-rust/runtime compilation errors fixed (PR #34)
+  # - bench_cold_start CwdGuard race fixed (mutex serialization)
   # Framework crate tests are split into test-framework below.
   test-core:
     name: cargo test (core)
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

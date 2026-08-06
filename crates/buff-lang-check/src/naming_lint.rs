@@ -278,9 +278,18 @@ fn warn_pascal(kind: &str, name: &Ident, out: &mut Vec<Diagnostic>) {
 /// `buff check` unless `--deny-warnings` is passed.
 pub fn lint_common_mistakes(decls: &[Decl]) -> Vec<Diagnostic> {
     let candidates = prelude_candidate_names();
+    // Collect user-defined function names so the lint does NOT flag
+    // calls to them as "unknown function" false positives.
+    let defined_funcs: Vec<String> = decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::FuncDecl(f) => Some(f.name.name.clone()),
+            _ => None,
+        })
+        .collect();
     let mut out = Vec::new();
     for d in decls {
-        lint_mistakes_decl(d, &candidates, &mut out);
+        lint_mistakes_decl(d, &candidates, &defined_funcs, &mut out);
     }
     out
 }
@@ -335,48 +344,63 @@ fn prelude_candidate_names() -> Vec<&'static str> {
     names
 }
 
-fn lint_mistakes_decl(decl: &Decl, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+fn lint_mistakes_decl(
+    decl: &Decl,
+    candidates: &[&str],
+    defined_funcs: &[String],
+    out: &mut Vec<Diagnostic>,
+) {
     match decl {
         Decl::FuncDecl(f) => {
             for stmt in &f.body.stmts {
-                lint_mistakes_stmt(stmt, candidates, out);
+                lint_mistakes_stmt(stmt, candidates, defined_funcs, out);
             }
         }
         Decl::TraitDecl(t) => {
             for d in &t.defaults {
                 for stmt in &d.body.stmts {
-                    lint_mistakes_stmt(stmt, candidates, out);
+                    lint_mistakes_stmt(stmt, candidates, defined_funcs, out);
                 }
             }
         }
         Decl::ExtendBlock(b) => {
             for m in &b.methods {
                 for stmt in &m.body.stmts {
-                    lint_mistakes_stmt(stmt, candidates, out);
+                    lint_mistakes_stmt(stmt, candidates, defined_funcs, out);
                 }
             }
         }
-        Decl::ExportDecl(inner) => lint_mistakes_decl(&inner.inner, candidates, out),
+        Decl::ExportDecl(inner) => lint_mistakes_decl(&inner.inner, candidates, defined_funcs, out),
         _ => {}
     }
 }
 
-fn lint_mistakes_stmt(stmt: &Stmt, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+fn lint_mistakes_stmt(
+    stmt: &Stmt,
+    candidates: &[&str],
+    defined_funcs: &[String],
+    out: &mut Vec<Diagnostic>,
+) {
     match stmt {
-        Stmt::LetDecl { value, .. } => lint_mistakes_expr(value, candidates, out),
+        Stmt::LetDecl { value, .. } => lint_mistakes_expr(value, candidates, defined_funcs, out),
         Stmt::ExprStmt(e, _) | Stmt::Return(Some(e), _) => {
-            lint_mistakes_expr(e, candidates, out);
+            lint_mistakes_expr(e, candidates, defined_funcs, out);
         }
         Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } | Stmt::ForLet { body, .. } => {
             for s in &body.stmts {
-                lint_mistakes_stmt(s, candidates, out);
+                lint_mistakes_stmt(s, candidates, defined_funcs, out);
             }
         }
         _ => {}
     }
 }
 
-fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic>) {
+fn lint_mistakes_expr(
+    expr: &Expr,
+    candidates: &[&str],
+    defined_funcs: &[String],
+    out: &mut Vec<Diagnostic>,
+) {
     if let Expr::FuncCall { callee, args, span } = expr {
         if let Expr::Ident(ident, _) = callee.as_ref() {
             let name = &ident.name;
@@ -384,7 +408,14 @@ fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic
             if buff_lang_types::is_prelude(name) {
                 // Recurse into args and stop here.
                 for a in args {
-                    lint_mistakes_expr(a, candidates, out);
+                    lint_mistakes_expr(a, candidates, defined_funcs, out);
+                }
+                return;
+            }
+            // Skip if it IS a user-defined function.
+            if defined_funcs.iter().any(|f| f == name) {
+                for a in args {
+                    lint_mistakes_expr(a, candidates, defined_funcs, out);
                 }
                 return;
             }
@@ -401,7 +432,7 @@ fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic
                     .with_note(format!("help: did you mean `{lower}`?")),
                 );
                 for a in args {
-                    lint_mistakes_expr(a, candidates, out);
+                    lint_mistakes_expr(a, candidates, defined_funcs, out);
                 }
                 return;
             }
@@ -415,22 +446,24 @@ fn lint_mistakes_expr(expr: &Expr, candidates: &[&str], out: &mut Vec<Diagnostic
         }
         // Recurse into callee + args for nested calls.
         for a in args {
-            lint_mistakes_expr(a, candidates, out);
+            lint_mistakes_expr(a, candidates, defined_funcs, out);
         }
-        lint_mistakes_expr(callee, candidates, out);
+        lint_mistakes_expr(callee, candidates, defined_funcs, out);
         return;
     }
     // Recurse into other expression shapes that may contain calls.
     match expr {
         Expr::BinaryOp { lhs, rhs, .. } => {
-            lint_mistakes_expr(lhs, candidates, out);
-            lint_mistakes_expr(rhs, candidates, out);
+            lint_mistakes_expr(lhs, candidates, defined_funcs, out);
+            lint_mistakes_expr(rhs, candidates, defined_funcs, out);
         }
-        Expr::UnaryOp { operand, .. } => lint_mistakes_expr(operand, candidates, out),
+        Expr::UnaryOp { operand, .. } => {
+            lint_mistakes_expr(operand, candidates, defined_funcs, out)
+        }
         Expr::MethodCall { receiver, args, .. } => {
-            lint_mistakes_expr(receiver, candidates, out);
+            lint_mistakes_expr(receiver, candidates, defined_funcs, out);
             for a in args {
-                lint_mistakes_expr(a, candidates, out);
+                lint_mistakes_expr(a, candidates, defined_funcs, out);
             }
         }
         _ => {}

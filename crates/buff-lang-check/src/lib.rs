@@ -181,7 +181,11 @@ pub fn check_source(src: &str) -> CheckReport {
     let tokens = match tokenize(src, source_id) {
         Ok(t) => t,
         Err(e) => {
-            diagnostics.push(e.inner.diagnostic);
+            let mut diag = e.inner.diagnostic;
+            if diag.code.is_none() {
+                diag.code = Some(buff_lang_error::ErrorCode::UnexpectedChar);
+            }
+            diagnostics.push(diag);
             return CheckReport {
                 diagnostics,
                 outcome: CheckOutcome::HasErrors,
@@ -193,7 +197,11 @@ pub fn check_source(src: &str) -> CheckReport {
     let decls = match parse(&tokens, source_id) {
         Ok(d) => d,
         Err(e) => {
-            diagnostics.push(e.diagnostic);
+            let mut diag = e.diagnostic;
+            if diag.code.is_none() {
+                diag.code = Some(buff_lang_error::ErrorCode::UnexpectedToken);
+            }
+            diagnostics.push(diag);
             return CheckReport {
                 diagnostics,
                 outcome: CheckOutcome::HasErrors,
@@ -226,7 +234,12 @@ pub fn check_source(src: &str) -> CheckReport {
     //    Each call site gets a warning naming the fn + the `since` and
     //    `replacement` (when provided).
     let deprecated_warnings = collect_deprecated_call_warnings(&decls);
-    diagnostics.extend(deprecated_warnings);
+    for mut dw in deprecated_warnings {
+        if dw.code.is_none() {
+            dw.code = Some(buff_lang_error::ErrorCode::DeprecatedApiUsed);
+        }
+        diagnostics.push(dw);
+    }
 
     // 7. T72: Compiler plugin dispatch. Calls into the global plugin
     //    registry (env-var-loaded via BUFF_PLUGIN_DIR /
