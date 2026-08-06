@@ -230,16 +230,17 @@ fn build_help_text_mentions_pgo_pgo_build() {
     // clap renders the `///` doc-comments on each `#[arg]` field into
     // the `--help` output. This test verifies the `--pgo` flag is
     // documented (T62 acceptance: "Help text mentions PGO").
-    let mut cmd = Cli::command();
-    let help = cmd.render_help();
+    let cmd = Cli::command();
+    let mut build_cmd = cmd.find_subcommand("build").cloned().unwrap_or(cmd);
+    let help = build_cmd.render_help();
     let help_str = help.to_string();
     assert!(
         help_str.contains("--pgo"),
-        "`buff --help` must mention `--pgo`, got:\n{help_str}"
+        "`buff build --help` must mention `--pgo`, got:\n{help_str}"
     );
     assert!(
         help_str.contains("Profile-Guided Optimization") || help_str.contains("PGO"),
-        "`buff --help` must mention PGO/Profile-Guided Optimization, got:\n{help_str}"
+        "`buff build --help` must mention PGO/Profile-Guided Optimization, got:\n{help_str}"
     );
 }
 
