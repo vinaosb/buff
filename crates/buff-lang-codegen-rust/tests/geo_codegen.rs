@@ -1,4 +1,4 @@
-﻿//! T45 integration tests - buff-geo prelude types codegen.
+//! T45 integration tests - buff-geo prelude types codegen.
 //!
 //! Verifies that the Rust codegen lowers the three T45 geo types:
 //!
@@ -248,10 +248,7 @@ fn polygon_codegen_new_and_area_lowers_correctly() {
         src.contains("buff_geo::Polygon::new"),
         "expected `buff_geo::Polygon::new(` in: {src}"
     );
-    assert!(
-        src.contains(".area"),
-        "expected `.area` in: {src}"
-    );
+    assert!(src.contains(".area"), "expected `.area` in: {src}");
     must_reparse(&src);
 }
 
@@ -304,10 +301,7 @@ fn line_string_codegen_length_lowers_correctly() {
             expr_stmt(instance_call("ls", "length", vec![])),
         ],
     );
-    assert!(
-        src.contains(".length"),
-        "expected `.length` in: {src}"
-    );
+    assert!(src.contains(".length"), "expected `.length` in: {src}");
     must_reparse(&src);
 }
 

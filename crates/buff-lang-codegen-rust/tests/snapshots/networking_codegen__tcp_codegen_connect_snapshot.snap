@@ -1,7 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1000
 expression: src
 ---
 fn f() {
-    tokio::net::TcpStream::connect(format!("{}:{}", "127.0.0.1", 8080)).await.ok();
+    tokio::net::TcpStream::connect(format!("{}:{}", "127.0.0.1".to_string(), 8080))
+        .await
+        .ok();
 }

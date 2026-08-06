@@ -1,4 +1,4 @@
-﻿//! T124i integration tests - `Yaml` + `Csv` prelude namespace module
+//! T124i integration tests - `Yaml` + `Csv` prelude namespace module
 //! codegen.
 //!
 //! Verifies that the Rust codegen:
@@ -173,10 +173,7 @@ fn yaml_codegen_parse_string_literal() {
         src.contains("serde_yml::from_str"),
         "expected `serde_yml::from_str` in: {src}"
     );
-    assert!(
-        src.contains("HashMap"),
-        "expected `HashMap` in: {src}"
-    );
+    assert!(src.contains("HashMap"), "expected `HashMap` in: {src}");
     // unwrap_or_default (NOT bare unwrap) - panicking-generated-code rule.
     assert!(
         src.contains(".unwrap_or_default()"),

@@ -1,7 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1009
 expression: src
 ---
 fn f() {
-    tokio::net::UdpSocket::bind(format!("{}:{}", "0.0.0.0", 9090)).await.ok();
+    tokio::net::UdpSocket::bind(format!("{}:{}", "0.0.0.0".to_string(), 9090))
+        .await
+        .ok();
 }

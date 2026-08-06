@@ -1,10 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
-assertion_line: 542
+assertion_line: 579
 expression: src
 ---
 fn f() {
-    let r: regex::Regex = regex::Regex::new("\\d")
+    let r: regex::Regex = regex::Regex::new("\\d".to_string())
         .unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
-    r.replace_all("a1b2", "X").to_string();
+    r.replace_all("a1b2".to_string(), "X".to_string()).to_string();
 }

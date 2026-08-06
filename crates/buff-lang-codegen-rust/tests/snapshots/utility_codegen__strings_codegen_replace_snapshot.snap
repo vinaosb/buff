@@ -1,8 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
-assertion_line: 983
+assertion_line: 966
 expression: src
 ---
 fn f() {
-    "a1b2".replace("1", "X");
+    "a1b2".to_string().replace("1".to_string(), "X".to_string());
 }

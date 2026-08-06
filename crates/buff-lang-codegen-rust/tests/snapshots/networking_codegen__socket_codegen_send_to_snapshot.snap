@@ -1,16 +1,19 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1066
 expression: src
 ---
 fn f() {
     let s: Option<tokio::net::UdpSocket> = tokio::net::UdpSocket::bind(
-            format!("{}:{}", "0.0.0.0", 9090),
+            format!("{}:{}", "0.0.0.0".to_string(), 9090),
         )
         .await
         .ok();
     {
         if let Some(s) = s {
-            s.send_to("ping".as_bytes(), "127.0.0.1:9999").await.ok();
+            s.send_to("ping".to_string().as_bytes(), "127.0.0.1:9999".to_string())
+                .await
+                .ok();
         }
     };
 }

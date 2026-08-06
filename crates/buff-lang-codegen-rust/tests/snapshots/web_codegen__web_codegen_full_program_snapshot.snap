@@ -1,6 +1,6 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
-assertion_line: 834
+assertion_line: 890
 expression: src
 ---
 fn main() {
@@ -10,33 +10,54 @@ fn main() {
     );
     let bytes: Vec<u8> = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
-            "aGVsbG8=",
+            "aGVsbG8=".to_string(),
         )
         .unwrap_or_default();
     let h: String = hex::encode(vec![72, 105]);
-    let raw: Vec<u8> = hex::decode("deadbeef").unwrap_or_default();
+    let raw: Vec<u8> = hex::decode("deadbeef".to_string()).unwrap_or_default();
     let enc: String = percent_encoding::utf8_percent_encode(
-            "foo bar?",
+            "foo bar?".to_string(),
             percent_encoding::NON_ALPHANUMERIC,
         )
         .to_string();
-    let dec: String = percent_encoding::percent_decode_str("foo%20bar")
+    let dec: String = percent_encoding::percent_decode_str("foo%20bar".to_string())
         .decode_utf8_lossy()
         .into_owned();
     let id4: String = uuid::Uuid::new_v4().to_string();
     let id7: String = uuid::Uuid::now_v7().to_string();
-    let valid: bool = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000")
+    let valid: bool = uuid::Uuid::parse_str(
+            "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        )
         .is_ok();
-    let u: url::Url = url::Url::parse("https://a.com/b?q=1")
+    let u: url::Url = url::Url::parse("https://a.com/b?q=1".to_string())
         .unwrap_or_else(|_| url::Url::parse("about:blank").unwrap());
     let s = u.scheme().to_string();
     let host = u.clone().host_str().unwrap_or_default().to_string();
     let p = u.clone().path().to_string();
     let q = {
-        let __buff_key = ("q").to_string();
+        let __buff_key = ("q".to_string()).to_string();
         u.clone()
             .query_pairs()
             .find(|(k, _)| *k == __buff_key)
             .map(|(_, v)| v.into_owned())
     };
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

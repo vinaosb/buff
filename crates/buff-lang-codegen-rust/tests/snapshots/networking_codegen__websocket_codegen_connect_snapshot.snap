@@ -1,9 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1022
 expression: src
 ---
 fn f() {
-    tokio_tungstenite::connect_async("ws://example.com/socket")
+    tokio_tungstenite::connect_async("ws://example.com/socket".to_string())
         .await
         .ok()
         .map(|(ws, _)| ws);

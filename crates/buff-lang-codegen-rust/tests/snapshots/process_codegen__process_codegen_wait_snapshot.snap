@@ -1,9 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+assertion_line: 712
 expression: src
 ---
 fn f() {
-    let p: Option<std::process::Child> = std::process::Command::new("ls")
+    let p: Option<std::process::Child> = std::process::Command::new("ls".to_string())
         .args(vec![])
         .spawn()
         .ok();

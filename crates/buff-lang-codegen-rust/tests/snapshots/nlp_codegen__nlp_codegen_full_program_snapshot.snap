@@ -1,19 +1,40 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/nlp_codegen.rs
-assertion_line: 487
+assertion_line: 525
 expression: src
 ---
 fn main() {
     let lang: Option<buff_nlp::Language> = buff_nlp::Text::detect_language(
-        &"A raposa marrom salta sobre o cachorro.",
+        &"A raposa marrom salta sobre o cachorro.".to_string(),
     );
     lang.code;
     lang.clone().name;
     let stem: String = buff_nlp::Text::stem(
-        &"running",
-        buff_nlp::StemAlgorithm::from_code(&"english")
+        &"running".to_string(),
+        buff_nlp::StemAlgorithm::from_code(&"english".to_string())
             .unwrap_or(buff_nlp::StemAlgorithm::English),
     )?;
-    let tokens: Vec<String> = buff_nlp::Text::tokenize(&"Hello, world!");
-    let sents: Vec<String> = buff_nlp::Text::sentences(&"Hello world! How are you?");
+    let tokens: Vec<String> = buff_nlp::Text::tokenize(&"Hello, world!".to_string());
+    let sents: Vec<String> = buff_nlp::Text::sentences(
+        &"Hello world! How are you?".to_string(),
+    );
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

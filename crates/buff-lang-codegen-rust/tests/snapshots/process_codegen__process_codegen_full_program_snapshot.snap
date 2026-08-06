@@ -1,9 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+assertion_line: 787
 expression: src
 ---
 fn main() {
-    let p: Option<std::process::Child> = std::process::Command::new("ls")
+    let p: Option<std::process::Child> = std::process::Command::new("ls".to_string())
         .args(vec![])
         .spawn()
         .ok();
@@ -19,4 +20,23 @@ fn main() {
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_default();
     let ncpus: i64 = num_cpus::get() as i64;
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -1,17 +1,18 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1035
 expression: src
 ---
 fn f() {
     let c: Option<tokio::net::TcpStream> = tokio::net::TcpStream::connect(
-            format!("{}:{}", "127.0.0.1", 8080),
+            format!("{}:{}", "127.0.0.1".to_string(), 8080),
         )
         .await
         .ok();
     {
         use tokio::io::AsyncWriteExt;
         if let Some(mut s) = c {
-            s.write_all("hello".as_bytes()).await.ok();
+            s.write_all("hello".to_string().as_bytes()).await.ok();
         }
     };
 }
