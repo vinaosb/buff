@@ -180,7 +180,7 @@ pub struct WorkspaceSection {
     /// surfaced via Buff `extern` blocks (T119). Each entry is
     /// `name = "version-req"`; members opt in via their `[rust-deps]`
     /// table.
-    #[serde(default)]
+    #[serde(default, rename = "extern")]
     pub extern_crates: BTreeMap<String, String>,
 }
 
@@ -407,7 +407,9 @@ pub struct ProfileOpts {
 pub struct FeaturesSection {
     /// Feature name → list of features it transitively enables (Cargo
     /// shape). Empty `Vec` means the feature enables nothing else.
-    #[serde(default)]
+    /// Uses `#[serde(flatten)]` so TOML keys like `logging = []` are
+    /// collected directly into this map (Cargo-style `[features]` table).
+    #[serde(default, flatten)]
     pub features: BTreeMap<String, Vec<String>>,
     /// `default = [...]` — features enabled unless the user passes
     /// `--no-default-features`. Stored as a separate field so the
@@ -485,7 +487,7 @@ pub struct LintsSection {
     /// unknown value (e.g. `"suggestion"`) survives the round-trip and
     /// can be surfaced by `buff check` rather than rejected at parse
     /// time.
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub lints: BTreeMap<String, String>,
 }
 
