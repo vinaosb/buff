@@ -32,6 +32,11 @@ TESTS=(
     "crates/buff-lang-ffi-guide/selfhost/ffi_guide.buff|buff-lang-ffi-guide|equivalence_ffi_guide"
     "crates/buff-lang-parser/selfhost/parser.buff|buff-lang-parser|equivalence_parser"
     "crates/buff-lang-debug-info/selfhost/debug_info.buff|buff-lang-debug-info|smoke_debug_info"
+    # P5.2 expansion: 4 additional target crates with existing example binaries
+    "crates/buff-lang-lexer/selfhost/lexer.buff|buff-lang-lexer|smoke_lexer"
+    "crates/buff-lang-buffhtml-parser/selfhost/buffhtml_parser.buff|buff-lang-buffhtml-parser|smoke_buffhtml"
+    "crates/buff-eval/selfhost/eval.buff|buff-eval|smoke_eval"
+    "crates/buff-template/selfhost/template.buff|buff-template|smoke_template"
 )
 
 echo "=== Rust-vs-Buff Behavioral Equivalence (raw stdout) ==="
