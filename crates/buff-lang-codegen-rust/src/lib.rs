@@ -29,7 +29,9 @@
 //!     body: Block::empty(Span::dummy()),
 //!     is_async: false,
 //!     is_unsafe: false,
-//!     is_extern: false, attributes: Vec::new(),
+//!     is_extern: false,
+//!     attributes: Vec::new(),
+//!     type_params: Vec::new(),
 //!     span: Span::dummy(),
 //! };
 //! let src = buff_lang_codegen_rust::generate_rust(&[Decl::FuncDecl(func)]).unwrap();

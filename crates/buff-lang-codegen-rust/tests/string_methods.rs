@@ -464,9 +464,11 @@ fn string_methods_unicode_cafe_yields_four_chars() {
         ty: None,
         span: span(),
     });
-    // `"café".chars().count()` — prettyplease keeps the non-ASCII bytes.
+    // `"café".to_string().chars().count()` — prettyplease keeps the non-ASCII
+    // bytes. The `.to_string()` lift is the standard codegen pattern for
+    // Buff `String` literals (Buff hides `&str` from the user).
     assert!(
-        src.contains(r#""café".chars().count()"#),
+        src.contains(r#""café".to_string().chars().count()"#),
         "expected café chars().count() in: {src}"
     );
     syn::parse_str::<syn::File>(&src).expect("unicode test must re-parse");
