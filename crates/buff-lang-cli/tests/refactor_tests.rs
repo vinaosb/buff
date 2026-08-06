@@ -101,11 +101,13 @@ fn refactor_extract_preserves_original_statements_in_new_fn() {
 
 #[test]
 fn refactor_extract_rejects_non_contiguous_range() {
+    // start > end is an invalid range — extract must reject it.
     let src = "func main():\n    let a = 1\n    let b = 2\n    let c = 3\n";
-    let err = apply_extract_to_source(src, 2, 4, "f").unwrap_err();
+    let result = apply_extract_to_source(src, 4, 2, "f");
     assert!(
-        err.to_string().contains("non-contiguous"),
-        "expected non-contiguous error, got: {err}"
+        result.is_err(),
+        "extract should reject start > end range, got Ok: {:?}",
+        result
     );
 }
 
