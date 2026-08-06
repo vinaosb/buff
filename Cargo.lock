@@ -1420,6 +1420,7 @@ dependencies = [
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-types",
+ "proptest",
  "thiserror 1.0.69",
 ]
 
