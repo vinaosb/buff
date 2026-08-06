@@ -1,8 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
-assertion_line: 732
+assertion_line: 776
 expression: src
 ---
 fn f() {
-    uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").is_ok();
+    uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000".to_string()).is_ok();
 }

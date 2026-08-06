@@ -1,9 +1,12 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
-assertion_line: 685
+assertion_line: 718
 expression: src
 ---
 fn f() {
-    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "aGVsbG8=")
+    base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            "aGVsbG8=".to_string(),
+        )
         .unwrap_or_default();
 }

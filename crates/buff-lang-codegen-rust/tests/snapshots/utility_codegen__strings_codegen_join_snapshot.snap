@@ -1,8 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
-assertion_line: 970
+assertion_line: 953
 expression: src
 ---
 fn f() {
-    vec.join(&",");
+    vec.join(&",".to_string());
 }

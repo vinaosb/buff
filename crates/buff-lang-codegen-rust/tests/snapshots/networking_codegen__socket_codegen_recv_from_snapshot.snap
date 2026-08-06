@@ -1,10 +1,11 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1075
 expression: src
 ---
 fn f() {
     let s: Option<tokio::net::UdpSocket> = tokio::net::UdpSocket::bind(
-            format!("{}:{}", "0.0.0.0", 9090),
+            format!("{}:{}", "0.0.0.0".to_string(), 9090),
         )
         .await
         .ok();

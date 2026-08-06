@@ -1,13 +1,13 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/regex_codegen.rs
-assertion_line: 555
+assertion_line: 599
 expression: src
 ---
 fn f() {
-    let r: regex::Regex = regex::Regex::new("(?P<word>\\w+)(\\d)")
+    let r: regex::Regex = regex::Regex::new("(?P<word>\\w+)(\\d)".to_string())
         .unwrap_or_else(|_| regex::Regex::new("a^").unwrap());
     {
-        let __buff_caps = r.captures("hello1");
+        let __buff_caps = r.captures("hello1".to_string());
         let mut __buff_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         if let Some(__buff_c) = __buff_caps {
             for (__buff_i, __buff_opt) in __buff_c.iter().enumerate() {

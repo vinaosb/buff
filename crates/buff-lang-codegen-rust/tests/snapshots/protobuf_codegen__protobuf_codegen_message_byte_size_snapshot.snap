@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/protobuf_codegen.rs
+assertion_line: 768
+expression: src
+---
+fn f() {
+    msg.byte_size;
+}

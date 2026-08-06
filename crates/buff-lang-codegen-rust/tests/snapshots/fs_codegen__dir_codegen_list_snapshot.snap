@@ -1,9 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+assertion_line: 850
 expression: src
 ---
 fn f() {
-    std::fs::read_dir("/tmp")
+    std::fs::read_dir("/tmp".to_string())
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())

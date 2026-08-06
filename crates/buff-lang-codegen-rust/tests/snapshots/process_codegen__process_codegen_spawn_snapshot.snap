@@ -1,7 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/process_codegen.rs
+assertion_line: 703
 expression: src
 ---
 fn f() {
-    std::process::Command::new("ls").args(vec![]).spawn().ok();
+    std::process::Command::new("ls".to_string()).args(vec![]).spawn().ok();
 }

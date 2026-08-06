@@ -1,9 +1,12 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
-assertion_line: 704
+assertion_line: 742
 expression: src
 ---
 fn f() {
-    percent_encoding::utf8_percent_encode("foo bar?", percent_encoding::NON_ALPHANUMERIC)
+    percent_encoding::utf8_percent_encode(
+            "foo bar?".to_string(),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
         .to_string();
 }

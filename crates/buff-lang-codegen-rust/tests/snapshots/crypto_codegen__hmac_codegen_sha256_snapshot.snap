@@ -1,13 +1,14 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/crypto_codegen.rs
+assertion_line: 704
 expression: src
 ---
 fn f() {
     {
         use hmac::Mac;
-        hmac::Hmac::<sha2::Sha256>::new_from_slice("secret".as_bytes())
+        hmac::Hmac::<sha2::Sha256>::new_from_slice("secret".to_string().as_bytes())
             .map(|mut mac| {
-                mac.update("message".as_bytes());
+                mac.update("message".to_string().as_bytes());
                 hex::encode(mac.finalize().into_bytes())
             })
             .unwrap_or_default()

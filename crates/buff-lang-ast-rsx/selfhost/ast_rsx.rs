@@ -386,10 +386,13 @@ fn main() {
     let raw = rsx_raw_html_new("trusted_html".to_string(), sp.clone());
     println!("{}", raw.expr);
     let slot_default = rsx_slot_new(sp.clone());
-    println!("{}", slot_default.name.is_none);
+    match slot_default.name {
+        Some(n) => println!("{}", n),
+        None => println!("{}", 0),
+    };
     let slot_named = rsx_slot_named("header".to_string(), sp.clone());
     match slot_named.name {
-        Some(n) => println!("{}", n),
+        Some(n) => println!("{}", n.clone()),
         None => println!("{}", 0),
     };
     let elem = rsx_element_new(
@@ -414,7 +417,10 @@ fn main() {
     );
     println!("{}", script.lang);
     println!("{}", script.clone().source);
-    println!("{}", script.clone().props.is_none);
+    match script.clone().props {
+        Some(p) => println!("{}", p),
+        None => println!("{}", 0),
+    };
     let script_p = script_block_with_props(
         "buff".to_string(),
         "Props".to_string(),
@@ -423,7 +429,7 @@ fn main() {
     );
     println!("{}", script_p.lang);
     match script_p.clone().props {
-        Some(p) => println!("{}", p),
+        Some(p) => println!("{}", p.clone()),
         None => println!("{}", 0),
     };
     let attr = rsx_attribute_new(
@@ -435,7 +441,10 @@ fn main() {
     println!("{}", branch.cond);
     let if_node = rsx_if_new(vec![branch.clone()], None, sp.clone());
     println!("{}", if_node.branches.len());
-    println!("{}", if_node.clone().else_branch.is_none);
+    match if_node.clone().else_branch {
+        Some(b) => println!("{}", b.len()),
+        None => println!("{}", 0),
+    };
     let each_node = rsx_each_new(
         "items".to_string(),
         sp.clone(),
@@ -448,7 +457,10 @@ fn main() {
     );
     println!("{}", each_node.iterable);
     println!("{}", each_node.clone().binding);
-    println!("{}", each_node.clone().key.is_none);
+    match each_node.clone().key {
+        Some(k) => println!("{}", k),
+        None => println!("{}", 0),
+    };
     let await_node = rsx_await_new(
         "fetchUser(id)".to_string(),
         sp.clone(),
@@ -461,10 +473,16 @@ fn main() {
     );
     println!("{}", await_node.fut_expr);
     println!("{}", await_node.clone().then_binding);
-    println!("{}", await_node.clone().catch_binding.is_none);
+    match await_node.clone().catch_binding {
+        Some(b) => println!("{}", b.clone()),
+        None => println!("{}", 0),
+    };
     let tpl = rsx_template_file_new(None.clone(), vec![], sp.clone());
-    println!("{}", tpl.script.is_none);
-    println!("{}", tpl.clone().root.len());
+    println!("{}", tpl.root.len());
+    match tpl.clone().script {
+        Some(s) => println!("{}", s.lang),
+        None => println!("{}", 0),
+    };
     println!("{}", is_component_tag("Counter".to_string()));
     println!("{}", is_component_tag("Layout".to_string()));
     println!("{}", is_component_tag("div".to_string()));

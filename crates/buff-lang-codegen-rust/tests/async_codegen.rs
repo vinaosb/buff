@@ -506,6 +506,25 @@ fn full_async_pipeline_snapshot() {
     #[tokio::main]
     async fn main() {
         return pipeline().await;
+        {
+            if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+                for __buff_line in __buff_contents.lines() {
+                    let __buff_line = __buff_line.trim();
+                    if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                        let __buff_k = __buff_key.trim().to_string();
+                        let __buff_v = __buff_val.trim().to_string();
+                        if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                            unsafe {
+                                std::env::set_var(&__buff_k, &__buff_v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     "###);
     must_reparse(&src);
@@ -683,6 +702,25 @@ fn block_call_full_snapshot() {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
             rt.block_on(some_async())
         };
+        {
+            if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+                for __buff_line in __buff_contents.lines() {
+                    let __buff_line = __buff_line.trim();
+                    if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                        let __buff_k = __buff_key.trim().to_string();
+                        let __buff_v = __buff_val.trim().to_string();
+                        if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                            unsafe {
+                                std::env::set_var(&__buff_k, &__buff_v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     "###);
     must_reparse(&src);

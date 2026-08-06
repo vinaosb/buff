@@ -1,8 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
-assertion_line: 908
+assertion_line: 899
 expression: src
 ---
 fn f() {
-    rand::seq::SliceRandom::choose(&vec, &mut rand::thread_rng()).cloned();
+    rand::seq::IndexedRandom::choose(&vec, &mut rand::rng()).cloned();
 }

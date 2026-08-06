@@ -1,22 +1,24 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/xml_codegen.rs
-assertion_line: 680
+assertion_line: 681
 expression: src
 ---
 fn main() {
     let doc: buff_xml::XmlDocument = buff_xml::XmlDocument::from_str(
-            &"<root><a>hello</a></root>",
+            &"<root><a>hello</a></root>".to_string(),
         )
         .unwrap_or_default();
     let root = buff_xml::XmlDocument::root(&doc).clone();
     root.name;
     root.clone().text;
-    let found = buff_xml::XmlDocument::find(&doc.clone(), &"root/a").ok().cloned();
+    let found = buff_xml::XmlDocument::find(&doc.clone(), &"root/a".to_string())
+        .ok()
+        .cloned();
     buff_xml::XmlDocument::to_string(&doc.clone()).unwrap_or_default();
     let el: buff_xml::XmlElement = buff_xml::XmlElement::new(
-        &("test").to_string(),
-        &("hello").to_string(),
-        (std::collections::HashMap::from([("key", "val")]))
+        &("test".to_string()).to_string(),
+        &("hello".to_string()).to_string(),
+        (std::collections::HashMap::from([("key".to_string(), "val".to_string())]))
             .into_iter()
             .map(|(k, v)| (
                 std::string::ToString::to_string(&k),
@@ -24,11 +26,11 @@ fn main() {
             ))
             .collect::<Vec<(String, String)>>(),
     );
-    el.attr(&"key").map(|s| s.to_string());
+    el.attr(&"key".to_string()).map(|s| s.to_string());
     el.clone().children().to_vec();
     let el2: buff_xml::XmlElement = buff_xml::XmlElement::new(
-        &("x").to_string(),
-        &("y").to_string(),
+        &("x".to_string()).to_string(),
+        &("y".to_string()).to_string(),
         (std::collections::HashMap::from([]))
             .into_iter()
             .map(|(k, v)| (
@@ -38,4 +40,23 @@ fn main() {
             .collect::<Vec<(String, String)>>(),
     );
     el2.name().to_string();
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

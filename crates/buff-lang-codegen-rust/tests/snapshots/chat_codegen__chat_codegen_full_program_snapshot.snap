@@ -1,0 +1,47 @@
+---
+source: crates/buff-lang-codegen-rust/tests/chat_codegen.rs
+assertion_line: 977
+expression: src
+---
+fn main() {
+    let bot: buff_chat::Bot = buff_chat::Bot::new(
+            buff_chat::Platform::Discord,
+            ("xxx".to_string()).to_string(),
+        )
+        .unwrap_or_default();
+    bot.command(&("ping".to_string()).to_string(), move |msg| |msg| println!("pong!"))
+        .unwrap_or(());
+    bot.clone().on_message(move |msg| |msg| println!("[msg]")).unwrap_or(());
+    let m: buff_chat::Message = buff_chat::Message::new(
+        ("hi".to_string()).to_string(),
+        ("general".to_string()).to_string(),
+        ("alice".to_string()).to_string(),
+        buff_chat::Platform::Discord,
+        false,
+    );
+    bot.clone().dispatch(m).unwrap_or(());
+    println!("{}", m.clone().text().to_string());
+    println!("{}", m.clone().author().to_string());
+    println!("{}", platform_local.is_discord);
+    let platform_local = buff_chat::Platform::Discord;
+    println!("{}", bot.clone().command_count() as i64);
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

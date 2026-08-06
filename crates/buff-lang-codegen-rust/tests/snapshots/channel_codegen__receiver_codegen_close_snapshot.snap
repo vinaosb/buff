@@ -1,0 +1,9 @@
+---
+source: crates/buff-lang-codegen-rust/tests/channel_codegen.rs
+assertion_line: 451
+expression: src
+---
+fn f() {
+    let receiver = buff_lang_runtime::Channel::new(8 as usize);
+    receiver.close();
+}

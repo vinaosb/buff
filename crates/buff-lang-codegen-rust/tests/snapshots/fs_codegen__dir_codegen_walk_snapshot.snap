@@ -1,9 +1,10 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+assertion_line: 874
 expression: src
 ---
 fn f() {
-    walkdir::WalkDir::new("/tmp")
+    walkdir::WalkDir::new("/tmp".to_string())
         .into_iter()
         .filter_map(|e| e.ok())
         .map(|e| e.path().to_path_buf())

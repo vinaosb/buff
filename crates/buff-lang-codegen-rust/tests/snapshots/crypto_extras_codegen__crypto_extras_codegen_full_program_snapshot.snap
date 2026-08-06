@@ -1,0 +1,62 @@
+---
+source: crates/buff-lang-codegen-rust/tests/crypto_extras_codegen.rs
+assertion_line: 735
+expression: src
+---
+fn main() {
+    let key: Vec<u8> = buff_crypto_extras::aes_gcm_api::generate_key();
+    let nonce: Vec<u8> = buff_crypto_extras::aes_gcm_api::generate_nonce();
+    let ct: Vec<u8> = buff_crypto_extras::aes_gcm_api::encrypt(
+            key.as_slice(),
+            nonce.as_slice(),
+            key.clone().as_slice(),
+        )
+        .unwrap_or_default();
+    let pt: Vec<u8> = buff_crypto_extras::aes_gcm_api::decrypt(
+            key.clone().as_slice(),
+            nonce.clone().as_slice(),
+            ct.as_slice(),
+        )
+        .unwrap_or_default();
+    let pair: buff_crypto_extras::RsaKeypair = buff_crypto_extras::rsa_api::generate_keypair(
+            2048 as usize,
+        )
+        .unwrap_or_default();
+    let sig = RSA.sign(pair.private_pem.clone(), ct.clone());
+    let ok = RSA.clone().verify(pair.clone().public_pem.clone(), ct.clone(), sig);
+    let priv_key: Vec<u8> = buff_crypto_extras::ecdh_api::p256_generate_private();
+    let pub_key: Vec<u8> = buff_crypto_extras::ecdh_api::p256_public_from_private(
+            priv_key.as_slice(),
+        )
+        .unwrap_or_default();
+    let shared: Vec<u8> = buff_crypto_extras::ecdh_api::p256_derive_shared(
+            priv_key.clone().as_slice(),
+            pub_key.as_slice(),
+        )
+        .unwrap_or_default();
+    let salt: Vec<u8> = buff_crypto_extras::argon2_api::generate_salt();
+    let dk: Vec<u8> = buff_crypto_extras::argon2_api::derive_key(
+            &"hunter2".to_string(),
+            salt.as_slice(),
+        )
+        .unwrap_or_default();
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

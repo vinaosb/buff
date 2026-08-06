@@ -7195,7 +7195,7 @@ impl RustCodegen {
             // receivers fall through to the existing method-resolution
             // path. T31 (Cache) arm lives below; the guard on this
             // arm skips Cache so the Cache-specific arm fires first.
-            M::Len if !matches!(recv_ty, Type::Cache) => Err(self.unsupported(&format!(
+            M::Len if !matches!(recv_ty, Type::Cache | Type::String) => Err(self.unsupported(&format!(
                 "{recv_ty}.len() is not a recognised prelude instance method",
             ))),
             // T9: Image instance methods. Each filter returning a new

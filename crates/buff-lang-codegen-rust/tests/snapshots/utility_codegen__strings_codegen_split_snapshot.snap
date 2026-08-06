@@ -1,8 +1,12 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
-assertion_line: 957
+assertion_line: 944
 expression: src
 ---
 fn f() {
-    "a,b,c".split(",").map(|s| s.to_string()).collect::<Vec<String>>();
+    "a,b,c"
+        .to_string()
+        .split(",".to_string())
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
 }

@@ -1,8 +1,8 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/web_codegen.rs
-assertion_line: 697
+assertion_line: 733
 expression: src
 ---
 fn f() {
-    hex::decode("deadbeef").unwrap_or_default();
+    hex::decode("deadbeef".to_string()).unwrap_or_default();
 }

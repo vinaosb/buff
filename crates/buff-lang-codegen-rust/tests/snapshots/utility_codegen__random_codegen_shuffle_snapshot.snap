@@ -1,12 +1,12 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/utility_codegen.rs
-assertion_line: 917
+assertion_line: 908
 expression: src
 ---
 fn f() {
     {
         let mut __v = vec;
-        rand::seq::SliceRandom::shuffle(&mut __v, &mut rand::thread_rng());
+        rand::seq::IndexedRandom::shuffle(&mut __v, &mut rand::rng());
         __v
     };
 }

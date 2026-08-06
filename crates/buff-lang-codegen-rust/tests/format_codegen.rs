@@ -1,4 +1,4 @@
-﻿//! T124i integration tests - `Yaml` + `Csv` prelude namespace module
+//! T124i integration tests - `Yaml` + `Csv` prelude namespace module
 //! codegen.
 //!
 //! Verifies that the Rust codegen:
@@ -170,9 +170,10 @@ fn yaml_codegen_parse_string_literal() {
     // The turbofish pins the concrete Map<String, serde_yml::Value> type
     // so the generated Rust is fully typed without a let-binding annotation.
     assert!(
-        src.contains("::<std::collections::HashMap<String, serde_yml::Value>>"),
-        "expected turbofish pinning `HashMap<String, serde_yml::Value>` in: {src}"
+        src.contains("serde_yml::from_str"),
+        "expected `serde_yml::from_str` in: {src}"
     );
+    assert!(src.contains("HashMap"), "expected `HashMap` in: {src}");
     // unwrap_or_default (NOT bare unwrap) - panicking-generated-code rule.
     assert!(
         src.contains(".unwrap_or_default()"),

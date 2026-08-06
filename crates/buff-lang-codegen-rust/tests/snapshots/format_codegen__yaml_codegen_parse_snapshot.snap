@@ -1,9 +1,11 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/format_codegen.rs
-assertion_line: 560
+assertion_line: 571
 expression: src
 ---
 fn f() {
-    serde_yml::from_str::<std::collections::HashMap<String, serde_yml::Value>>("a: 1\n")
+    serde_yml::from_str::<
+        std::collections::HashMap<String, serde_yml::Value>,
+    >("a: 1\n".to_string())
         .unwrap_or_default();
 }

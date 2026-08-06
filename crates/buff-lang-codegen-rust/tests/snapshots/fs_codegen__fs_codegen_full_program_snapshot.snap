@@ -1,9 +1,12 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/fs_codegen.rs
+assertion_line: 931
 expression: src
 ---
 fn main() {
-    let p: std::path::PathBuf = std::path::PathBuf::from("a").join("b").join("c.txt");
+    let p: std::path::PathBuf = std::path::PathBuf::from("a".to_string())
+        .join("b".to_string())
+        .join("c.txt".to_string());
     let parent = p.parent().map(|p| p.to_path_buf());
     let ext = p.clone().extension().map(|e| e.to_string());
     let base = p
@@ -13,7 +16,7 @@ fn main() {
         .unwrap_or_default()
         .to_string();
     let exists = p.clone().exists();
-    let entries: Vec<String> = std::fs::read_dir("/tmp")
+    let entries: Vec<String> = std::fs::read_dir("/tmp".to_string())
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
@@ -21,9 +24,9 @@ fn main() {
                 .collect::<Vec<String>>()
         })
         .unwrap_or_default();
-    std::fs::create_dir_all("/tmp/a").ok();
-    std::fs::remove_dir_all("/tmp/a").ok();
-    let walked: Vec<std::path::PathBuf> = walkdir::WalkDir::new("/tmp")
+    std::fs::create_dir_all("/tmp/a".to_string()).ok();
+    std::fs::remove_dir_all("/tmp/a".to_string()).ok();
+    let walked: Vec<std::path::PathBuf> = walkdir::WalkDir::new("/tmp".to_string())
         .into_iter()
         .filter_map(|e| e.ok())
         .map(|e| e.path().to_path_buf())
@@ -32,4 +35,23 @@ fn main() {
         .map(|f| f.into_temp_path().keep().unwrap_or_default())
         .unwrap_or_default();
     let tmpdir: std::path::PathBuf = std::env::temp_dir();
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

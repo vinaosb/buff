@@ -1,0 +1,8 @@
+---
+source: crates/buff-lang-codegen-rust/tests/protobuf_codegen.rs
+assertion_line: 753
+expression: src
+---
+fn f() {
+    buff_protobuf::roundtrip(&value);
+}

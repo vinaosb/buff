@@ -1,0 +1,37 @@
+---
+source: crates/buff-lang-codegen-rust/tests/protobuf_codegen.rs
+assertion_line: 820
+expression: src
+---
+fn main() {
+    let bytes: Vec<u8> = buff_protobuf::serialize(&"payload".to_string())
+        .unwrap_or_default();
+    let back = buff_protobuf::deserialize(&bytes).unwrap_or_default();
+    let msg: buff_protobuf::Message = buff_protobuf::Message::new(&"payload".to_string())
+        .unwrap_or_default();
+    let m2: buff_protobuf::Message = buff_protobuf::Message::from_bytes(bytes.clone())
+        .unwrap_or_default();
+    (msg.byte_size() as i64);
+    msg.clone().type_url().to_string();
+    msg.clone().payload().unwrap_or_default();
+    msg.clone().encode().to_vec();
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

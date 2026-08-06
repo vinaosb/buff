@@ -1,5 +1,6 @@
 ---
 source: crates/buff-lang-codegen-rust/tests/networking_codegen.rs
+assertion_line: 1106
 expression: src
 ---
 fn f() {
@@ -7,7 +8,7 @@ fn f() {
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
-    > = tokio_tungstenite::connect_async("ws://example.com/socket")
+    > = tokio_tungstenite::connect_async("ws://example.com/socket".to_string())
         .await
         .ok()
         .map(|(ws, _)| ws);
