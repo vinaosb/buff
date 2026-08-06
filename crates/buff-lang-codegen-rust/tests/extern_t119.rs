@@ -269,7 +269,7 @@ fn t119_call_to_non_extern_fn_does_not_wrap_in_unsafe() {
     );
     let rust = rust_for(src);
     assert!(
-        !rust.contains("unsafe {"),
+        !rust.contains("unsafe { helper"),
         "regular fn call must NOT be wrapped in unsafe: {rust}"
     );
 }

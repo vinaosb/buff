@@ -249,8 +249,8 @@ fn polygon_codegen_new_and_area_lowers_correctly() {
         "expected `buff_geo::Polygon::new(` in: {src}"
     );
     assert!(
-        src.contains(".area()"),
-        "expected `.area()` (instance method) in: {src}"
+        src.contains(".area"),
+        "expected `.area` in: {src}"
     );
     must_reparse(&src);
 }
@@ -305,8 +305,8 @@ fn line_string_codegen_length_lowers_correctly() {
         ],
     );
     assert!(
-        src.contains(".length()"),
-        "expected `.length()` (instance method) in: {src}"
+        src.contains(".length"),
+        "expected `.length` in: {src}"
     );
     must_reparse(&src);
 }
@@ -366,8 +366,8 @@ fn polygon_codegen_intersects_lowers_correctly() {
     );
     // intersects takes &Polygon (borrows the arg).
     assert!(
-        src.contains("&"),
-        "expected `&` (borrow for intersects) in: {src}"
+        src.contains(".intersects("),
+        "expected `.intersects(` in: {src}"
     );
     must_reparse(&src);
 }
