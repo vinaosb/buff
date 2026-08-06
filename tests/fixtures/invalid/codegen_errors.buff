@@ -1,4 +1,7 @@
 // INVALID — codegen error: E1301 (unsupported language feature)
-// Tuple destructuring in let is not yet implemented in codegen.
+// A captured mutation in a parallel closure triggers a race-condition
+// rejection in the codegen's race_analysis pre-pass.
 func main():
-    let (a, b) = (1, 2)
+    let mut total = 0
+    [1, 2, 3].par_map({ x => total = total + x })
+    print(total)

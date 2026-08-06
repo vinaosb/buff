@@ -103,9 +103,11 @@ fn templates_lib_creates_lib_buff() {
         project_dir.join("src/lib.buff").exists(),
         "QA case: --lib must create `src/lib.buff`"
     );
+    // T1: --lib scaffold emits BOTH lib.buff + main.buff (multi-file linking).
+    // main.buff imports from lib.buff so `buff run src/main.buff` works.
     assert!(
-        !project_dir.join("src/main.buff").exists(),
-        "lib template should NOT create src/main.buff (no `main`)"
+        project_dir.join("src/main.buff").exists(),
+        "lib template should create src/main.buff (imports from lib.buff)"
     );
 
     let lib = fs::read_to_string(project_dir.join("src/lib.buff")).unwrap_or_default();
@@ -139,9 +141,13 @@ fn templates_server_creates_async_main() {
     );
 
     let main = fs::read_to_string(main_path).unwrap_or_default();
+    // T1: server scaffold puts `async func` in lib.buff, not main.buff.
+    // main.buff imports and spawns the handler.
+    let lib_path = project_dir.join("src/lib.buff");
+    let lib = fs::read_to_string(lib_path).unwrap_or_default();
     assert!(
-        main.contains("async func"),
-        "server main.buff should declare an `async func`\n{main}"
+        lib.contains("async func"),
+        "server lib.buff should declare an `async func`\n{lib}"
     );
     assert!(
         main.contains("spawn"),

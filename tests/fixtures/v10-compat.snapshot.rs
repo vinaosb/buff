@@ -26,24 +26,18 @@ fn classify(n: i64) -> i64 {
                 return 3;
             };
         };
-    };
+    }
 }
 fn describe_int(n: i64) {
     match n {
-        0 => {
-            println!("{}", 100);
-        }
-        1 => {
-            println!("{}", 200);
-        }
-        _ => {
-            println!("{}", 999);
-        }
-    };
+        0 => println!("{}", 100),
+        1 => println!("{}", 200),
+        _ => println!("{}", 999),
+    }
 }
 fn half(n: i64) -> Result<i64, Error> {
     if n < 2 {
-        return Err(Error::new("input too small"));
+        return Err(Error::new("input too small".to_string()));
     }
     return Ok(n / 2);
 }
@@ -82,41 +76,25 @@ fn main() {
     let mut drawer: Vec<i8> = vec![11, 22, 33];
     let taken = drawer.pop();
     match taken {
-        Some(x) => {
-            println!("{}", x);
-        }
-        None => {
-            println!("{}", 0);
-        }
+        Some(x) => println!("{}", x),
+        None => println!("{}", 0),
     };
     let mut empty: Vec<i8> = vec![1];
     let _first = empty.pop();
     let none = empty.clone().pop();
     match none {
-        Some(x) => {
-            println!("{}", x.clone());
-        }
-        None => {
-            println!("{}", 0);
-        }
+        Some(x) => println!("{}", x.clone()),
+        None => println!("{}", 0),
     };
     let good = add_one(10);
     match good {
-        Ok(v) => {
-            println!("{}", v);
-        }
-        Err(_) => {
-            println!("{}", 0);
-        }
+        Ok(v) => println!("{}", v),
+        Err(_) => println!("{}", 0),
     };
     let bad = add_one(1);
     match bad {
-        Ok(v) => {
-            println!("{}", v.clone());
-        }
-        Err(_) => {
-            println!("{}", 0);
-        }
+        Ok(v) => println!("{}", v.clone()),
+        Err(_) => println!("{}", 0),
     };
     let v: Vec<i8> = vec![10, 20, 30, 40];
     println!("{}", v.clone() [0 as usize]);
@@ -142,4 +120,23 @@ fn main() {
     println!("{}", scores.len());
     let big: i64 = 9223372036854775807;
     println!("{}", big);
+    {
+        if let Ok(__buff_contents) = std::fs::read_to_string(".env") {
+            for __buff_line in __buff_contents.lines() {
+                let __buff_line = __buff_line.trim();
+                if __buff_line.is_empty() || __buff_line.starts_with('#') {
+                    continue;
+                }
+                if let Some((__buff_key, __buff_val)) = __buff_line.split_once('=') {
+                    let __buff_k = __buff_key.trim().to_string();
+                    let __buff_v = __buff_val.trim().to_string();
+                    if !__buff_k.is_empty() && std::env::var(&__buff_k).is_err() {
+                        unsafe {
+                            std::env::set_var(&__buff_k, &__buff_v);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -444,9 +444,14 @@ mod tests {
     //! HTTP round-trip coverage lives in `tests/registry_cli_t127.rs`.
 
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serialises tests that mutate `REGISTRY_URL_ENV` (process-wide env var).
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn registry_url_default_when_env_unset() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // Snapshot the env var so we don't bleed state across tests.
         let prev = std::env::var(REGISTRY_URL_ENV).ok();
         std::env::remove_var(REGISTRY_URL_ENV);
@@ -458,6 +463,7 @@ mod tests {
 
     #[test]
     fn registry_url_env_override_wins() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var(REGISTRY_URL_ENV).ok();
         std::env::set_var(REGISTRY_URL_ENV, "http://example.test:9999");
         assert_eq!(registry_url(), "http://example.test:9999");
@@ -469,6 +475,7 @@ mod tests {
 
     #[test]
     fn registry_url_blank_env_falls_back_to_default() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var(REGISTRY_URL_ENV).ok();
         std::env::set_var(REGISTRY_URL_ENV, "   ");
         assert_eq!(registry_url(), DEFAULT_REGISTRY_URL);

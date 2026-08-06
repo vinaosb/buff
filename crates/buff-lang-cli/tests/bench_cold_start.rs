@@ -23,6 +23,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use buff_lang_cli::cli::{Cli, Command};
@@ -36,14 +37,22 @@ use clap::Parser;
 // shared `benchmarks/` cwd path.
 // ---------------------------------------------------------------------------
 
+/// Process-global mutex that serialises CWD changes. Without this, parallel
+/// tests fight over the process working directory because
+/// `std::env::set_current_dir` affects ALL threads, not just the caller.
+static CWD_MUTEX: Mutex<()> = Mutex::new(());
+
 /// Guard that switches cwd to a unique temp dir on construction + restores
 /// the original cwd on drop. Ensures report writes land in a sandbox.
+/// The embedded `MutexGuard` serialises CWD access across parallel tests.
 struct CwdGuard {
     original: PathBuf,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl CwdGuard {
     fn sandbox(label: &str) -> Self {
+        let _guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let thread_id_str = format!("{:?}", std::thread::current().id());
         let thread_id_sanitised: String = thread_id_str
             .chars()
@@ -58,7 +67,7 @@ impl CwdGuard {
         let _ = std::fs::create_dir_all(&dir);
         let original = std::env::current_dir().expect("cwd must be readable");
         std::env::set_current_dir(&dir).expect("set_current_dir must succeed");
-        Self { original }
+        Self { original, _guard }
     }
 }
 
