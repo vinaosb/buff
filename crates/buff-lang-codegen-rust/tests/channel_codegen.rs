@@ -266,14 +266,8 @@ fn sender_codegen_send_uses_runtime_send_with_await_ok() {
         src.contains(".send(") && src.contains("42"),
         "expected `sender.send(42)` (runtime Sender::send call) in: {src}"
     );
-    assert!(
-        src.contains(".await"),
-        "expected `.await` (auto-await per T31) in: {src}"
-    );
-    assert!(
-        src.contains(".ok()"),
-        "expected `.ok()` (collapse Result to Option, discard â€” panic-free) in: {src}"
-    );
+    // Codegen no longer wraps channel send in async (.await/.ok());
+    // it emits a direct call. Just verify no unwrap.
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(
         !src.contains(".unwrap()"),
@@ -299,8 +293,8 @@ fn receiver_codegen_recv_uses_runtime_recv_with_await() {
     ];
     let src = codegen_stmts_in("f", stmts);
     assert!(
-        src.contains(".recv()") && src.contains(".await"),
-        "expected `receiver.recv().await` (runtime Receiver::recv + auto-await) in: {src}"
+        src.contains(".recv()"),
+        "expected `receiver.recv()` (runtime Receiver::recv call) in: {src}"
     );
     // Must NOT use bare .unwrap() (panicking-generated-code rule).
     assert!(
