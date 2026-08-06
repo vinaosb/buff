@@ -626,8 +626,8 @@ fn strings_codegen_split_collects_to_vec_string() {
         ns_assoc_call("Strings", "split", vec![str_expr("a,b,c"), str_expr(",")]),
     );
     assert!(
-        src.contains(".split(\",\")"),
-        "expected `.split(\",\")` in: {src}"
+        src.contains(".split(\",\".to_string())"),
+        "expected `.split(\",\".to_string())` in: {src}"
     );
     assert!(
         src.contains(".map(|s| s.to_string())"),
@@ -660,8 +660,9 @@ fn strings_codegen_split_ident_arg_borrows() {
 
 #[test]
 fn strings_codegen_join_borrows_sep() {
-    // Strings.join(vec, sep) -> vec.join(&sep)
-    // The sep is borrowed via `&` to satisfy `&str` bound.
+    // Strings.join(vec, sep) -> vec.join(&sep.to_string())
+    // The sep is borrowed via `&` to satisfy `&str` bound; the literal is
+    // lifted via `.to_string()` (Buff hides `&str` from the user).
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call("Strings", "join", vec![ident_expr("vec"), str_expr(",")]),
@@ -671,7 +672,7 @@ fn strings_codegen_join_borrows_sep() {
         "expected `vec.join(&...)` (sep borrowed) in: {src}"
     );
     assert!(
-        src.contains("\",\")"),
+        src.contains("\",\".to_string()"),
         "expected the comma separator literal in: {src}"
     );
     must_reparse(&src);
@@ -693,7 +694,7 @@ fn strings_codegen_trim_chains_to_string() {
 
 #[test]
 fn strings_codegen_replace_three_args() {
-    // Strings.replace(text, from, to) -> text.replace(from, to)
+    // Strings.replace(text, from, to) -> text.replace(from.to_string(), to.to_string())
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call(
@@ -703,15 +704,15 @@ fn strings_codegen_replace_three_args() {
         ),
     );
     assert!(
-        src.contains(".replace(\"1\", \"X\")"),
-        "expected `.replace(\"1\", \"X\")` in: {src}"
+        src.contains(".replace(\"1\".to_string(), \"X\".to_string())"),
+        "expected `.replace(\"1\".to_string(), \"X\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
 
 #[test]
 fn strings_codegen_contains_returns_bool_via_method_call() {
-    // Strings.contains(text, substr) -> text.contains(substr)
+    // Strings.contains(text, substr) -> text.contains(substr.to_string())
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call(
@@ -721,15 +722,15 @@ fn strings_codegen_contains_returns_bool_via_method_call() {
         ),
     );
     assert!(
-        src.contains(".contains(\"ell\")"),
-        "expected `.contains(\"ell\")` in: {src}"
+        src.contains(".contains(\"ell\".to_string())"),
+        "expected `.contains(\"ell\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
 
 #[test]
 fn strings_codegen_starts_with_returns_bool() {
-    // Strings.starts_with(text, prefix) -> text.starts_with(prefix)
+    // Strings.starts_with(text, prefix) -> text.starts_with(prefix.to_string())
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call(
@@ -739,8 +740,8 @@ fn strings_codegen_starts_with_returns_bool() {
         ),
     );
     assert!(
-        src.contains(".starts_with(\"he\")"),
-        "expected `.starts_with(\"he\")` in: {src}"
+        src.contains(".starts_with(\"he\".to_string())"),
+        "expected `.starts_with(\"he\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }

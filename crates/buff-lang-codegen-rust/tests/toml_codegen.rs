@@ -150,8 +150,14 @@ fn toml_codegen_parse_string_literal() {
     );
     // The turbofish pins the concrete Map<String, toml::Value> type so
     // the generated Rust is fully typed without a let-binding annotation.
+    // prettyplease may wrap the turbofish across lines, so check the
+    // opening `::<` and the concrete type independently.
     assert!(
-        src.contains("::<std::collections::HashMap<String, toml::Value>>"),
+        src.contains("toml::from_str::<"),
+        "expected `toml::from_str::<` (turbofish opening) in: {src}"
+    );
+    assert!(
+        src.contains("std::collections::HashMap<String, toml::Value>"),
         "expected turbofish pinning `HashMap<String, toml::Value>` in: {src}"
     );
     // unwrap_or_default (NOT bare unwrap) â€” panicking-generated-code rule.

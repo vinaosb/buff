@@ -260,11 +260,13 @@ fn args_codegen_no_extern_crate_registered() {
 
 #[test]
 fn env_codegen_get_var_ok() {
-    // Env.get("HOME") -> std::env::var("HOME").ok()
+    // Env.get("HOME") -> std::env::var("HOME".to_string()).ok()
+    // The literal is lifted via `.to_string()` (Buff hides `&str` from the
+    // user; codegen emits `String` and `std::env::var` borrows via `AsRef`).
     let src = codegen_one_expr_in("f", ns_assoc_call("Env", "get", vec![str_expr("HOME")]));
     assert!(
-        src.contains("std::env::var(\"HOME\")"),
-        "expected `std::env::var(\"HOME\")` in: {src}"
+        src.contains("std::env::var(\"HOME\".to_string())"),
+        "expected `std::env::var(\"HOME\".to_string())` in: {src}"
     );
     assert!(
         src.contains(".ok()"),
@@ -289,25 +291,25 @@ fn env_codegen_get_ident_arg_borrows() {
 
 #[test]
 fn env_codegen_set_var_two_args() {
-    // Env.set("KEY", "v") -> std::env::set_var("KEY", "v")
+    // Env.set("KEY", "v") -> std::env::set_var("KEY".to_string(), "v".to_string())
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call("Env", "set", vec![str_expr("KEY"), str_expr("v")]),
     );
     assert!(
-        src.contains("std::env::set_var(\"KEY\", \"v\")"),
-        "expected `std::env::set_var(\"KEY\", \"v\")` in: {src}"
+        src.contains("std::env::set_var(\"KEY\".to_string(), \"v\".to_string())"),
+        "expected `std::env::set_var(\"KEY\".to_string(), \"v\".to_string())` in: {src}"
     );
     must_reparse(&src);
 }
 
 #[test]
 fn env_codegen_has_var_is_ok() {
-    // Env.has("HOME") -> std::env::var("HOME").is_ok()
+    // Env.has("HOME") -> std::env::var("HOME".to_string()).is_ok()
     let src = codegen_one_expr_in("f", ns_assoc_call("Env", "has", vec![str_expr("HOME")]));
     assert!(
-        src.contains("std::env::var(\"HOME\")"),
-        "expected `std::env::var(\"HOME\")` in: {src}"
+        src.contains("std::env::var(\"HOME\".to_string())"),
+        "expected `std::env::var(\"HOME\".to_string())` in: {src}"
     );
     assert!(
         src.contains(".is_ok()"),
@@ -386,8 +388,8 @@ fn input_codegen_prompt_arg_prints_and_flushes() {
     // module).
     let src = codegen_one_expr_in("f", free_call("input", vec![str_expr("Name: ")]));
     assert!(
-        src.contains("print!(\"Name: \")"),
-        "expected `print!(\"Name: \")` in: {src}"
+        src.contains("print!(\"Name: \".to_string())"),
+        "expected `print!(\"Name: \".to_string())` in: {src}"
     );
     assert!(
         src.contains("use std::io::Write"),
