@@ -18,10 +18,10 @@
 //! * **Explain output** (1 test): cost_model line appears when bpe > 0.
 
 use buff_lang_runtime::{
-    cost_model_favors_gpu, decide_dynamic, estimate_costs, explain_dispatch,
-    DataLocation, DispatchKind, WorkloadContext, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC,
-    CPU_PEAK_FLOPS_PER_SEC, GPU_LAUNCH_OVERHEAD_SECS,
-    GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, GPU_PEAK_FLOPS_PER_SEC, PCIE_BANDWIDTH_BYTES_PER_SEC,
+    cost_model_favors_gpu, decide_dynamic, estimate_costs, explain_dispatch, DataLocation,
+    DispatchKind, WorkloadContext, CPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, CPU_PEAK_FLOPS_PER_SEC,
+    GPU_LAUNCH_OVERHEAD_SECS, GPU_MEMORY_BANDWIDTH_BYTES_PER_SEC, GPU_PEAK_FLOPS_PER_SEC,
+    PCIE_BANDWIDTH_BYTES_PER_SEC,
 };
 
 // ===========================================================================
