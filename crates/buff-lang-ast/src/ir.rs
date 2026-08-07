@@ -818,6 +818,25 @@ impl AstLowerer {
                 header_id
             }
 
+            // BUG-9: `while cond { body }` — identical dataflow shape to
+            // ForWhile (the only difference is the surface keyword).
+            Stmt::While { cond, body, span } => {
+                let mut uses = Vec::new();
+                collect_uses(cond, &mut uses);
+                let header_id = self.graph.add_node(IrNode::compute(ComputeNode {
+                    id: NodeId(0),
+                    source_expr: Some(cond.clone()),
+                    source_stmt: Some(stmt.clone()),
+                    defs: Vec::new(),
+                    uses: uses.clone(),
+                    span: *span,
+                    description: "While({...})".to_string(),
+                }));
+                self.wire_dependencies(header_id, &[], &uses);
+                self.lower_block(body);
+                header_id
+            }
+
             // T72: `for let PAT = EXPR { body }` — a looping binding. The
             // value expression is the data-flow source (consumed each
             // iteration); the pattern's bindings are introduced inside the
@@ -1202,6 +1221,13 @@ fn collect_stmt_uses(stmt: &Stmt, out: &mut Vec<Ident>) {
             out.retain(|i| i.name != var.name);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            collect_uses(cond, out);
+            for s in &body.stmts {
+                collect_stmt_uses(s, out);
+            }
+        }
+        // BUG-9: `while cond { body }` — same use-collection as ForWhile.
+        Stmt::While { cond, body, .. } => {
             collect_uses(cond, out);
             for s in &body.stmts {
                 collect_stmt_uses(s, out);

@@ -825,6 +825,12 @@ impl<'a> Formatter<'a> {
                 self.raw(":");
                 self.write_block_body(body);
             }
+            Stmt::While { cond, body, .. } => {
+                self.raw("while ");
+                self.write_expr(cond);
+                self.raw(":");
+                self.write_block_body(body);
+            }
             Stmt::ForLet {
                 pattern,
                 value,
@@ -907,6 +913,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Assignment { span, .. }
         | Stmt::ForIn { span, .. }
         | Stmt::ForWhile { span, .. }
+        | Stmt::While { span, .. }
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
         | Stmt::Guard { span, .. }

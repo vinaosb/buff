@@ -283,6 +283,10 @@ impl RenameWalker {
                 self.rename_expr(cond);
                 self.rename_block(body);
             }
+            Stmt::While { cond, body, .. } => {
+                self.rename_expr(cond);
+                self.rename_block(body);
+            }
             Stmt::LetPattern { pattern, value, .. } => {
                 self.rename_pattern(pattern);
                 self.rename_expr(value);
@@ -481,6 +485,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Continue(span)
         | Stmt::ForIn { span, .. }
         | Stmt::ForWhile { span, .. }
+        | Stmt::While { span, .. }
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
         | Stmt::Guard { span, .. }
@@ -581,6 +586,12 @@ fn replace_ident_in_stmt(s: &mut Stmt, name: &str, initializer: &Expr) {
             }
         }
         Stmt::ForWhile { cond, body, .. } => {
+            replace_ident_in_expr(cond, name, initializer);
+            for s in &mut body.stmts {
+                replace_ident_in_stmt(s, name, initializer);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
             replace_ident_in_expr(cond, name, initializer);
             for s in &mut body.stmts {
                 replace_ident_in_stmt(s, name, initializer);

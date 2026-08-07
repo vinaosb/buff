@@ -309,6 +309,10 @@ fn collect_stmt_mutations(stmt: &Stmt, name: &str, out: &mut Vec<BinaryOp>) {
             collect_expr_mutations(cond, name, out);
             collect_top_level_mutations(body, name, out);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_expr_mutations(cond, name, out);
+            collect_top_level_mutations(body, name, out);
+        }
         Stmt::ForLet { value, body, .. } => {
             collect_expr_mutations(value, name, out);
             collect_top_level_mutations(body, name, out);
@@ -488,6 +492,10 @@ fn walk_stmt_for_integer_lets(stmt: &Stmt, out: &mut AtomicSet) {
             walk_expr_for_integer_lets(cond, out);
             walk_block_for_integer_lets(body, out);
         }
+        Stmt::While { cond, body, .. } => {
+            walk_expr_for_integer_lets(cond, out);
+            walk_block_for_integer_lets(body, out);
+        }
         Stmt::ForLet { value, body, .. } => {
             walk_expr_for_integer_lets(value, out);
             walk_block_for_integer_lets(body, out);
@@ -653,6 +661,10 @@ fn collect_stmt_accumulating_parallel(stmt: &Stmt, out: &mut Vec<(Vec<Param>, Bl
             collect_accumulating_parallel_closures(body, out);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            collect_expr_accumulating_parallel(cond, out);
+            collect_accumulating_parallel_closures(body, out);
+        }
+        Stmt::While { cond, body, .. } => {
             collect_expr_accumulating_parallel(cond, out);
             collect_accumulating_parallel_closures(body, out);
         }

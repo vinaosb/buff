@@ -216,6 +216,7 @@ impl ComptimeInterpreter {
             | Stmt::Continue(_)
             | Stmt::ForIn { .. }
             | Stmt::ForWhile { .. }
+            | Stmt::While { .. }
             | Stmt::LetPattern { .. }
             | Stmt::ForLet { .. }
             | Stmt::Guard { .. }
@@ -655,6 +656,7 @@ fn walk_stmt(stmt: &Stmt, interp: &mut ComptimeInterpreter, facts: &mut Comptime
         }
         Stmt::ForIn { body, .. }
         | Stmt::ForWhile { body, .. }
+        | Stmt::While { body, .. }
         | Stmt::ForLet { body, .. }
         | Stmt::Guard {
             else_block: body, ..

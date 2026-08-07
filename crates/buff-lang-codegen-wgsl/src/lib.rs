@@ -257,7 +257,7 @@ fn extract_single_expr_body(body: &Block) -> Result<Expr, WgslError> {
                 hint: " (got a flow-control statement; T44 supports only a single expression body)"
                     .to_string(),
             }),
-            Stmt::ForIn { .. } | Stmt::ForWhile { .. } | Stmt::ForLet { .. } => {
+            Stmt::ForIn { .. } | Stmt::ForWhile { .. } | Stmt::While { .. } | Stmt::ForLet { .. } => {
                 Err(WgslError::InvalidLambdaBody {
                     count: 1,
                     hint: " (got a loop statement; T44 supports only a single expression body)"

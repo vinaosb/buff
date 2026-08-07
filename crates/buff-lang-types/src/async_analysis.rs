@@ -237,6 +237,11 @@ fn collect_func_calls_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_func_calls(cond, out);
             collect_func_calls_in_block(body, out);
         }
+        // BUG-9: `while cond { body }` — same as ForWhile.
+        Stmt::While { cond, body, .. } => {
+            collect_func_calls(cond, out);
+            collect_func_calls_in_block(body, out);
+        }
         // T72: `for let PAT = EXPR { body }` — the value may contain calls;
         // the pattern's bindings don't.
         Stmt::ForLet { value, body, .. } => {

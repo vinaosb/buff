@@ -132,6 +132,7 @@ pub(super) fn stmt_uses_dir_walk(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_dir_walk(iter) || block_uses_dir_walk(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_dir_walk(cond) || block_uses_dir_walk(body),
+        Stmt::While { cond, body, .. } => expr_uses_dir_walk(cond) || block_uses_dir_walk(body),
         Stmt::ForLet { value, body, .. } => expr_uses_dir_walk(value) || block_uses_dir_walk(body),
         Stmt::Guard {
             conditions,
@@ -309,6 +310,7 @@ pub(super) fn stmt_uses_sha2(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_sha2(iter) || block_uses_sha2(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_sha2(cond) || block_uses_sha2(body),
+        Stmt::While { cond, body, .. } => expr_uses_sha2(cond) || block_uses_sha2(body),
         Stmt::ForLet { value, body, .. } => expr_uses_sha2(value) || block_uses_sha2(body),
         Stmt::Guard {
             conditions,
@@ -438,6 +440,7 @@ pub(super) fn stmt_uses_md5(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_md5(iter) || block_uses_md5(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_md5(cond) || block_uses_md5(body),
+        Stmt::While { cond, body, .. } => expr_uses_md5(cond) || block_uses_md5(body),
         Stmt::ForLet { value, body, .. } => expr_uses_md5(value) || block_uses_md5(body),
         Stmt::Guard {
             conditions,
@@ -571,6 +574,7 @@ pub(super) fn stmt_uses_hmac(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_hmac(iter) || block_uses_hmac(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_hmac(cond) || block_uses_hmac(body),
+        Stmt::While { cond, body, .. } => expr_uses_hmac(cond) || block_uses_hmac(body),
         Stmt::ForLet { value, body, .. } => expr_uses_hmac(value) || block_uses_hmac(body),
         Stmt::Guard {
             conditions,
@@ -719,6 +723,7 @@ pub(super) fn stmt_uses_num_cpus(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_num_cpus(iter) || block_uses_num_cpus(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_num_cpus(cond) || block_uses_num_cpus(body),
+        Stmt::While { cond, body, .. } => expr_uses_num_cpus(cond) || block_uses_num_cpus(body),
         Stmt::ForLet { value, body, .. } => expr_uses_num_cpus(value) || block_uses_num_cpus(body),
         Stmt::Guard {
             conditions,

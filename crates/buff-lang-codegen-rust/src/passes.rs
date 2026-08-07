@@ -160,6 +160,10 @@ fn collect_called_in_stmt(stmt: &Stmt, called: &mut BTreeSet<String>) {
             collect_called_in_expr(cond, called);
             collect_called_in_block(body, called);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_called_in_expr(cond, called);
+            collect_called_in_block(body, called);
+        }
         Stmt::ForLet { value, body, .. } => {
             collect_called_in_expr(value, called);
             collect_called_in_block(body, called);
@@ -380,6 +384,11 @@ fn eliminate_dead_bindings_in_stmt(stmt: &Stmt) -> Stmt {
             body: eliminate_dead_bindings_in_block(body),
             span: *span,
         },
+        Stmt::While { cond, body, span } => Stmt::While {
+            cond: cond.clone(),
+            body: eliminate_dead_bindings_in_block(body),
+            span: *span,
+        },
         Stmt::ForLet {
             pattern,
             value,
@@ -436,6 +445,10 @@ fn collect_ident_names_in_stmt(stmt: &Stmt, names: &mut BTreeSet<String>) {
             collect_ident_names_in_block(body, names);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            collect_ident_names_in_expr(cond, names);
+            collect_ident_names_in_block(body, names);
+        }
+        Stmt::While { cond, body, .. } => {
             collect_ident_names_in_expr(cond, names);
             collect_ident_names_in_block(body, names);
         }
@@ -700,6 +713,10 @@ fn collect_const_info_stmt(
             collect_const_info_expr(cond, candidates, let_counts, mutated);
             collect_const_info_block(body, candidates, let_counts, mutated);
         }
+        Stmt::While { cond, body, .. } => {
+            collect_const_info_expr(cond, candidates, let_counts, mutated);
+            collect_const_info_block(body, candidates, let_counts, mutated);
+        }
         Stmt::ForLet { value, body, .. } => {
             collect_const_info_expr(value, candidates, let_counts, mutated);
             collect_const_info_block(body, candidates, let_counts, mutated);
@@ -914,6 +931,11 @@ fn propagate_in_stmt(stmt: &Stmt, map: &BTreeMap<String, Literal>) -> Stmt {
             span: *span,
         },
         Stmt::ForWhile { cond, body, span } => Stmt::ForWhile {
+            cond: propagate_in_expr(cond, map),
+            body: propagate_in_block(body, map),
+            span: *span,
+        },
+        Stmt::While { cond, body, span } => Stmt::While {
             cond: propagate_in_expr(cond, map),
             body: propagate_in_block(body, map),
             span: *span,

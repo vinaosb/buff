@@ -4,7 +4,7 @@
 //! Display formatting, error construction, and operator variant count.
 
 use buff_lang_error::Span;
-use buff_lang_lexer::{LexerError, Token, TokenKind};
+use buff_lang_lexer::{tokenize, LexerError, Token, TokenKind};
 
 // ---------------------------------------------------------------------------
 // Keyword tests
@@ -13,12 +13,12 @@ use buff_lang_lexer::{LexerError, Token, TokenKind};
 #[test]
 fn all_keywords_present() {
     let expected: &[&str] = &[
-        "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
-        "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-        "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+        "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "while",
+        "return", "break", "continue", "in", "match", "async", "spawn", "import", "export", "from",
+        "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
     ];
     assert_eq!(TokenKind::all_keywords(), expected);
-    assert_eq!(TokenKind::all_keywords().len(), 29);
+    assert_eq!(TokenKind::all_keywords().len(), 30);
 }
 
 #[test]
@@ -52,6 +52,7 @@ fn from_keyword_specific_mappings() {
     assert_eq!(TokenKind::from_keyword("if"), Some(TokenKind::KwIf));
     assert_eq!(TokenKind::from_keyword("else"), Some(TokenKind::KwElse));
     assert_eq!(TokenKind::from_keyword("for"), Some(TokenKind::KwFor));
+    assert_eq!(TokenKind::from_keyword("while"), Some(TokenKind::KwWhile));
     assert_eq!(TokenKind::from_keyword("return"), Some(TokenKind::KwReturn));
     assert_eq!(TokenKind::from_keyword("break"), Some(TokenKind::KwBreak));
     assert_eq!(
@@ -90,6 +91,24 @@ fn is_keyword_false_for_non_keywords() {
     assert!(!TokenKind::Plus.is_keyword());
     assert!(!TokenKind::Ident("foo".into()).is_keyword());
     assert!(!TokenKind::Eof.is_keyword());
+}
+
+// BUG-9: `while` is a reserved keyword. The lexer must emit `KwWhile`, NOT
+// an `Ident("while")` — otherwise the parser would route `while cond { }` to
+// the assignment/expr-statement path and produce a confusing error.
+#[test]
+fn while_tokenizes_as_keyword_not_ident() {
+    use buff_lang_error::SourceId;
+    let tokens = tokenize("while", SourceId(0)).expect("lexer should succeed");
+    // Filter out layout tokens (Newline/Eof) to find the significant token.
+    let significant = tokens
+        .iter()
+        .find(|t| !matches!(t.kind, TokenKind::Eof | TokenKind::Newline));
+    assert_eq!(
+        significant.map(|t| &t.kind),
+        Some(&TokenKind::KwWhile),
+        "expected `while` to lex as KwWhile, got {significant:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

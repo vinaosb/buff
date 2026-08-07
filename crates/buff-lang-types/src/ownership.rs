@@ -261,6 +261,11 @@ fn collect_bound_names_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_bound_names_in_expr(cond, out);
             collect_bound_names_in_block(body, out);
         }
+        // BUG-9: `while cond { body }` — same as ForWhile.
+        Stmt::While { cond, body, .. } => {
+            collect_bound_names_in_expr(cond, out);
+            collect_bound_names_in_block(body, out);
+        }
         // T72: every pattern binding is a new local name (loop-scoped).
         Stmt::ForLet {
             pattern,
@@ -458,7 +463,7 @@ fn classify_stmt(stmt: &Stmt, copy_vars: &mut BTreeSet<String>, locals: &mut BTr
         }
         // Recurse into nested blocks so lets inside if/for/match branches
         // are classified too. (Cross-scope flattening — see LIMITATIONS.)
-        Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } => {
+        Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } | Stmt::While { body, .. } => {
             classify_stmts(&body.stmts, copy_vars, locals);
         }
         // T72: `for let PAT = EXPR { body }` — record pattern bindings as
@@ -573,6 +578,11 @@ fn collect_spawn_free_vars_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_spawn_free_vars_in_stmts(&body.stmts, out);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            collect_spawn_free_vars_in_expr(cond, out);
+            collect_spawn_free_vars_in_stmts(&body.stmts, out);
+        }
+        // BUG-9: `while cond { body }` — same as ForWhile.
+        Stmt::While { cond, body, .. } => {
             collect_spawn_free_vars_in_expr(cond, out);
             collect_spawn_free_vars_in_stmts(&body.stmts, out);
         }
@@ -864,6 +874,11 @@ fn collect_free_vars_in_block(block: &Block, out: &mut BTreeSet<String>) {
                 collect_free_vars_in_expr(cond, out);
                 collect_free_vars_in_block(body, out);
             }
+            // BUG-9: `while cond { body }` — same as ForWhile.
+            Stmt::While { cond, body, .. } => {
+                collect_free_vars_in_expr(cond, out);
+                collect_free_vars_in_block(body, out);
+            }
             // T72: `for let PAT = EXPR { body }` — value reads outer names;
             // pattern bindings are loop-local.
             Stmt::ForLet { value, body, .. } => {
@@ -930,6 +945,11 @@ fn collect_assignment_targets_in_stmt(stmt: &Stmt, out: &mut BTreeSet<String>) {
             collect_assignment_targets_in_stmts(&body.stmts, out);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            collect_assignment_targets_in_expr(cond, out);
+            collect_assignment_targets_in_stmts(&body.stmts, out);
+        }
+        // BUG-9: `while cond { body }` — same as ForWhile.
+        Stmt::While { cond, body, .. } => {
             collect_assignment_targets_in_expr(cond, out);
             collect_assignment_targets_in_stmts(&body.stmts, out);
         }

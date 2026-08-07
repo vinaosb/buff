@@ -253,6 +253,31 @@ fn test_codegen_for_while() {
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
 
+// BUG-9: `while cond { body }` (Stmt::While) lowers to Rust `while cond { body }`.
+#[test]
+fn test_codegen_while() {
+    // while count > 0 { count -= 1 }
+    let cond = binary(BinaryOp::Gt, ident_expr("count"), int_expr(0));
+    let body = block(vec![Stmt::Assignment {
+        target: ident_expr("count"),
+        op: BinaryOp::SubAssign,
+        value: int_expr(1),
+        span: span(),
+    }]);
+    let stmt = Stmt::While {
+        cond,
+        body,
+        span: span(),
+    };
+    let f = func_with_stmts("f", vec![stmt]);
+    let src = generate_rust(&[f]).unwrap();
+    assert!(
+        src.contains("while count > 0 {"),
+        "expected direct while-loop, src = {src}"
+    );
+    syn::parse_str::<syn::File>(&src).expect("must re-parse");
+}
+
 // ---------------------------------------------------------------------------
 // 6. print() with string literal → println!("hello")
 //    (T96: bare string literal drops the `{}` placeholder, matching the

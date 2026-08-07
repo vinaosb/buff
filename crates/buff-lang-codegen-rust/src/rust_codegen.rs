@@ -1892,6 +1892,20 @@ impl RustCodegen {
                 });
                 Ok(SynStmt::Expr(while_expr, Some(Default::default())))
             }
+            Stmt::While { cond, body, .. } => {
+                // BUG-9: `while cond { body }` — identical lowering to
+                // ForWhile (Rust `while cond { body }`).
+                let cond_expr = self.lower_expr(cond)?;
+                let body_block = self.lower_block(body)?;
+                let while_expr = SynExpr::While(syn::ExprWhile {
+                    attrs: Vec::new(),
+                    label: None,
+                    while_token: Default::default(),
+                    cond: Box::new(cond_expr),
+                    body: body_block,
+                });
+                Ok(SynStmt::Expr(while_expr, Some(Default::default())))
+            }
             Stmt::ForLet {
                 pattern,
                 value,

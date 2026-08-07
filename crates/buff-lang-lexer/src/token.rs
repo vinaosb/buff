@@ -81,6 +81,12 @@ pub enum TokenKind {
     KwIf,
     KwElse,
     KwFor,
+    /// `while cond { body }` conditional loop (BUG-9). Mirrors
+    /// [`Stmt::ForWhile`](buff_lang_ast::Stmt::ForWhile) (the existing
+    /// `for cond { body }` form) but spells the loop with the conventional
+    /// `while` keyword so users don't get confusing "unexpected `while`"
+    /// errors when they reach for the natural spelling.
+    KwWhile,
     KwReturn,
     KwBreak,
     KwContinue,
@@ -267,6 +273,7 @@ impl TokenKind {
             "if" => Some(Self::KwIf),
             "else" => Some(Self::KwElse),
             "for" => Some(Self::KwFor),
+            "while" => Some(Self::KwWhile),
             "return" => Some(Self::KwReturn),
             "break" => Some(Self::KwBreak),
             "continue" => Some(Self::KwContinue),
@@ -304,6 +311,7 @@ impl TokenKind {
                 | Self::KwIf
                 | Self::KwElse
                 | Self::KwFor
+                | Self::KwWhile
                 | Self::KwReturn
                 | Self::KwBreak
                 | Self::KwContinue
@@ -329,9 +337,9 @@ impl TokenKind {
     /// All reserved keywords as a slice of string literals.
     pub fn all_keywords() -> &'static [&'static str] {
         &[
-            "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
-            "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+            "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "while",
+            "return", "break", "continue", "in", "match", "async", "spawn", "import", "export",
+            "from", "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
         ]
     }
 }
@@ -370,6 +378,7 @@ impl fmt::Display for TokenKind {
             Self::KwIf => write!(f, "if"),
             Self::KwElse => write!(f, "else"),
             Self::KwFor => write!(f, "for"),
+            Self::KwWhile => write!(f, "while"),
             Self::KwReturn => write!(f, "return"),
             Self::KwBreak => write!(f, "break"),
             Self::KwContinue => write!(f, "continue"),
