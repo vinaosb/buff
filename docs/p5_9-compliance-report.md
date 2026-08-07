@@ -30,7 +30,7 @@ The self-host front-end milestone is complete. 33 PRs total (#29-#61) are merged
 | 1. Coverage parity (90/85/80/75) | DEFERRED (DR-017) | Tarpaulin infeasible in Docker; proxy provided |
 | 2. M7 span-normalized AST | DEFERRED (DR-016) | JSON dump works; v2 comparison post-M7 refinement |
 | 3. Performance <=10% | MET | Improved 45-77% vs baseline |
-| 4. Oracle VERIFIED | PENDING (iteration 13) | Oracle review in progress; DoD #4 updated after verdict lands |
+| 4. Oracle VERIFIED | VERIFIED (iteration 14) | Oracle verified: no pre-claims, F1-F4 checked, PR counts canonical, all deferrals documented |
 | 5. Audit findings | MET | 29 FIXED, 5 DEFERRED |
 
 ## PRs Shipped (33 merged: #29-61)
