@@ -224,6 +224,14 @@ fn check_stmt(
             }
             Ok(())
         }
+        // BUG-9: `while cond { body }` — same as ForWhile.
+        Stmt::While { cond, body, .. } => {
+            check_expr(cond, registry, inferencer)?;
+            for s in &body.stmts {
+                check_stmt(s, registry, inferencer)?;
+            }
+            Ok(())
+        }
         // T72: `for let PAT = EXPR { body }` — recurse into the value and
         // the body. The pattern is not an expression (no match to check).
         Stmt::ForLet { value, body, .. } => {

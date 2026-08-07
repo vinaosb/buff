@@ -363,6 +363,48 @@ fn test_for_while() {
     }
 }
 
+// BUG-9: `while cond { body }` parses to Stmt::While (brace form).
+#[test]
+fn test_while_braces() {
+    let s = parse_stmt("while count > 0 { count -= 1 }");
+    match s {
+        Stmt::While { cond, body, .. } => {
+            // cond should be a binary `count > 0`
+            assert!(matches!(
+                cond,
+                Expr::BinaryOp {
+                    op: BinaryOp::Gt,
+                    ..
+                }
+            ));
+            assert_eq!(body.stmts.len(), 1);
+        }
+        other => panic!("expected While, got {other:?}"),
+    }
+}
+
+// BUG-9: `while cond:` + indent + body + dedent parses to Stmt::While
+// (layout form). parse_block handles both brace and layout forms.
+#[test]
+fn test_while_layout() {
+    let src = "while x < 10:\n    print(x)\n    x = x + 1";
+    let s = parse_stmt(src);
+    match s {
+        Stmt::While { cond, body, .. } => {
+            // cond should be a binary `x < 10`
+            assert!(matches!(
+                cond,
+                Expr::BinaryOp {
+                    op: BinaryOp::Lt,
+                    ..
+                }
+            ));
+            assert_eq!(body.stmts.len(), 2, "layout body has two stmts");
+        }
+        other => panic!("expected While, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 7. Expression statement + blocks
 // ---------------------------------------------------------------------------

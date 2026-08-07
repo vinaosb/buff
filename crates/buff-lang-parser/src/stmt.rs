@@ -15,6 +15,7 @@
 //! - `break` / `continue`
 //! - `for var in iter { ... }` iterator loop ([`Stmt::ForIn`])
 //! - `for cond { ... }` conditional loop, while-style ([`Stmt::ForWhile`])
+//! - `while cond { ... }` conditional loop ([`Stmt::While`], BUG-9)
 //!
 //! # Function declarations
 //!
@@ -58,6 +59,7 @@ use crate::stream::TokenStream;
 /// | `break`    | [`Stmt::Break`]                          |
 /// | `continue` | [`Stmt::Continue`]                       |
 /// | `for`      | [`Stmt::ForIn`] or [`Stmt::ForWhile`]    |
+/// | `while`    | [`Stmt::While`]                          |
 /// | `func`     | **error** — func decls are top-level     |
 /// | other      | assignment-or-expression statement       |
 ///
@@ -98,6 +100,10 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
             Ok(Stmt::Continue(tok.span))
         }
         Some(TokenKind::KwFor) => parse_for(stream),
+        // BUG-9: `while cond { body }` (or layout `while cond:` + indent +
+        // body + dedent). Structurally identical to `for cond { body }`
+        // (Stmt::ForWhile) — both lower to Rust `while cond { body }`.
+        Some(TokenKind::KwWhile) => parse_while(stream),
         Some(TokenKind::KwGuard) => parse_guard(stream),
         Some(TokenKind::KwDefer) => parse_defer(stream),
         // T53: `comptime` is NOT a reserved keyword. Route to the
@@ -825,6 +831,23 @@ fn parse_for(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     }
 }
 
+/// `while cond { body }` or `while cond:` + layout block (BUG-9).
+///
+/// Mirrors the conditional branch of [`parse_for`]: the leading `while`
+/// keyword is consumed, then a condition expression, then a body block (via
+/// [`parse_block`], which accepts BOTH brace `{ }` and layout `:` forms).
+/// The resulting [`Stmt::While`] is structurally identical to
+/// [`Stmt::ForWhile`] — the only difference is the surface keyword.
+fn parse_while(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    let source_id = stream.source_id();
+    let while_tok = stream.expect(TokenKind::KwWhile)?;
+    let start = while_tok.span.start;
+    let cond = parse_expression(stream)?;
+    let body = parse_block(stream)?;
+    let span = Span::new(start, body.span.end, source_id);
+    Ok(Stmt::While { cond, body, span })
+}
+
 /// Parse the looping-binding form `for let PATTERN = EXPR { body }` (T72).
 /// The leading `for` is already consumed; the cursor is positioned at the
 /// `let` keyword. `start` is the `for`'s start offset; `source_id` is the
@@ -1337,6 +1360,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         | Stmt::Continue(span)
         | Stmt::ForIn { span, .. }
         | Stmt::ForWhile { span, .. }
+        | Stmt::While { span, .. }
         | Stmt::LetPattern { span, .. }
         | Stmt::ForLet { span, .. }
         | Stmt::Guard { span, .. }

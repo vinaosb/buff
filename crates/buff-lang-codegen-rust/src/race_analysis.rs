@@ -341,6 +341,10 @@ fn walk_stmt_for_parallel_calls<F>(
             walk_expr_for_parallel_calls(cond, func_name, is_exempt, errors);
             walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
         }
+        Stmt::While { cond, body, .. } => {
+            walk_expr_for_parallel_calls(cond, func_name, is_exempt, errors);
+            walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
+        }
         Stmt::ForLet { value, body, .. } => {
             walk_expr_for_parallel_calls(value, func_name, is_exempt, errors);
             walk_block_for_parallel_calls(body, func_name, is_exempt, errors);
@@ -625,6 +629,10 @@ fn walk_stmt_for_captured_mutations<F>(
             walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }
         Stmt::ForWhile { cond, body, .. } => {
+            walk_expr_for_captured_mutations(cond, captures, func_name, is_exempt, errors);
+            walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
+        }
+        Stmt::While { cond, body, .. } => {
             walk_expr_for_captured_mutations(cond, captures, func_name, is_exempt, errors);
             walk_body_for_captured_mutations(body, captures, func_name, is_exempt, errors);
         }

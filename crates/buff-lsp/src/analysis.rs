@@ -244,6 +244,12 @@ fn record_expr_types_in_stmt(stmt: &Stmt, infer: &TypeInferencer, types: &mut Ty
                 record_expr_types_in_stmt(s, infer, types);
             }
         }
+        Stmt::While { cond, body, .. } => {
+            record_expr_types(cond, infer, types);
+            for s in &body.stmts {
+                record_expr_types_in_stmt(s, infer, types);
+            }
+        }
         Stmt::ForLet { value, body, .. } => {
             record_expr_types(value, infer, types);
             for s in &body.stmts {
@@ -434,6 +440,7 @@ pub fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::Break(s) | Stmt::Continue(s) => *s,
         Stmt::ForIn { span, .. } => *span,
         Stmt::ForWhile { span, .. } => *span,
+        Stmt::While { span, .. } => *span,
         Stmt::LetPattern { span, .. } => *span,
         Stmt::ForLet { span, .. } => *span,
         Stmt::Guard { span, .. } => *span,

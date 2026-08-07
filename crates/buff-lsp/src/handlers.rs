@@ -1066,6 +1066,7 @@ fn token_type_index(
         | TokenKind::KwIf
         | TokenKind::KwElse
         | TokenKind::KwFor
+        | TokenKind::KwWhile
         | TokenKind::KwReturn
         | TokenKind::KwBreak
         | TokenKind::KwContinue

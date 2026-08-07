@@ -46,6 +46,20 @@ pub enum Stmt {
     },
     /// A conditional loop (while-style): `for cond { body }`.
     ForWhile { cond: Expr, body: Block, span: Span },
+    /// A conditional loop spelled with the `while` keyword (BUG-9):
+    /// `while cond { body }` (layout form `while cond:` + indent + body +
+    /// dedent also works).
+    ///
+    /// This is structurally identical to [`Stmt::ForWhile`] — the ONLY
+    /// difference is the surface syntax (`while` vs `for`). It exists so
+    /// that users reaching for the conventional `while` spelling don't get
+    /// confusing "unexpected `while`" errors. Both variants lower to Rust's
+    /// `while cond { body }`.
+    ///
+    /// This is **additive** (BUG-9): no existing variant was renamed,
+    /// reordered, or had its payload altered. `Stmt::ForWhile` stays 100%
+    /// untouched — `for cond { }` still produces `ForWhile`.
+    While { cond: Expr, body: Block, span: Span },
     /// A destructuring `let`: `let (x, y) = expr` or `let Point { x, y } = e`
     /// (T71). The binding target is a full [`Pattern`] rather than a bare
     /// name. `mutable`/`ty` mirror [`Stmt::LetDecl`] (applied per-binding at
@@ -188,6 +202,7 @@ impl fmt::Display for Stmt {
                 var, iter, body, ..
             } => write!(f, "ForIn({var} in {iter} {body})"),
             Stmt::ForWhile { cond, body, .. } => write!(f, "ForWhile({cond} {body})"),
+            Stmt::While { cond, body, .. } => write!(f, "While({cond} {body})"),
             Stmt::LetPattern {
                 pattern,
                 value,
@@ -316,6 +331,12 @@ impl Stmt {
             }),
             Stmt::ForWhile { cond, body, span } => json!({
                 "type": "ForWhile",
+                "cond": cond.to_json(),
+                "body": body.to_json(),
+                "span": span_to_json(*span),
+            }),
+            Stmt::While { cond, body, span } => json!({
+                "type": "While",
                 "cond": cond.to_json(),
                 "body": body.to_json(),
                 "span": span_to_json(*span),

@@ -48,6 +48,7 @@ pub(super) fn stmt_uses_matrix(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_matrix(iter) || block_uses_matrix(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_matrix(cond) || block_uses_matrix(body),
+        Stmt::While { cond, body, .. } => expr_uses_matrix(cond) || block_uses_matrix(body),
         // T72: `for let PAT = EXPR { body }` — value + body may use Matrix.
         Stmt::ForLet { value, body, .. } => expr_uses_matrix(value) || block_uses_matrix(body),
         // T73: `guard <conds> else { block }` — conditions + else may use
@@ -260,6 +261,7 @@ pub(super) fn stmt_uses_error(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_error(iter) || block_uses_error(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_error(cond) || block_uses_error(body),
+        Stmt::While { cond, body, .. } => expr_uses_error(cond) || block_uses_error(body),
         // T72: `for let PAT = EXPR { body }` — value + body may use Error.
         Stmt::ForLet { value, body, .. } => expr_uses_error(value) || block_uses_error(body),
         // T73: `guard <conds> else { block }` — conditions + else may use
@@ -418,6 +420,7 @@ pub(super) fn stmt_uses_chrono(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_chrono(iter) || block_uses_chrono(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_chrono(cond) || block_uses_chrono(body),
+        Stmt::While { cond, body, .. } => expr_uses_chrono(cond) || block_uses_chrono(body),
         Stmt::ForLet { value, body, .. } => expr_uses_chrono(value) || block_uses_chrono(body),
         Stmt::Guard {
             conditions,
@@ -589,6 +592,7 @@ pub(super) fn stmt_uses_tracing(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_tracing(iter) || block_uses_tracing(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_tracing(cond) || block_uses_tracing(body),
+        Stmt::While { cond, body, .. } => expr_uses_tracing(cond) || block_uses_tracing(body),
         Stmt::ForLet { value, body, .. } => expr_uses_tracing(value) || block_uses_tracing(body),
         Stmt::Guard {
             conditions,
@@ -867,6 +871,7 @@ pub(super) fn stmt_uses_regex(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_regex(iter) || block_uses_regex(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_regex(cond) || block_uses_regex(body),
+        Stmt::While { cond, body, .. } => expr_uses_regex(cond) || block_uses_regex(body),
         Stmt::ForLet { value, body, .. } => expr_uses_regex(value) || block_uses_regex(body),
         Stmt::Guard {
             conditions,
@@ -1034,6 +1039,7 @@ pub(super) fn stmt_uses_toml(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_toml(iter) || block_uses_toml(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_toml(cond) || block_uses_toml(body),
+        Stmt::While { cond, body, .. } => expr_uses_toml(cond) || block_uses_toml(body),
         Stmt::ForLet { value, body, .. } => expr_uses_toml(value) || block_uses_toml(body),
         Stmt::Guard {
             conditions,
@@ -1190,6 +1196,7 @@ pub(super) fn stmt_uses_rand(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_rand(iter) || block_uses_rand(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_rand(cond) || block_uses_rand(body),
+        Stmt::While { cond, body, .. } => expr_uses_rand(cond) || block_uses_rand(body),
         Stmt::ForLet { value, body, .. } => expr_uses_rand(value) || block_uses_rand(body),
         Stmt::Guard {
             conditions,
@@ -1341,6 +1348,7 @@ pub(super) fn stmt_uses_tokio(stmt: &Stmt) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::ForIn { iter, body, .. } => expr_uses_tokio(iter) || block_uses_tokio(body),
         Stmt::ForWhile { cond, body, .. } => expr_uses_tokio(cond) || block_uses_tokio(body),
+        Stmt::While { cond, body, .. } => expr_uses_tokio(cond) || block_uses_tokio(body),
         Stmt::ForLet { value, body, .. } => expr_uses_tokio(value) || block_uses_tokio(body),
         Stmt::Guard {
             conditions,
@@ -1480,6 +1488,9 @@ pub(super) fn stmt_uses_namespace(stmt: &Stmt, namespace: &str) -> bool {
             expr_uses_namespace(iter, namespace) || block_uses_namespace(body, namespace)
         }
         Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_namespace(cond, namespace) || block_uses_namespace(body, namespace)
+        }
+        Stmt::While { cond, body, .. } => {
             expr_uses_namespace(cond, namespace) || block_uses_namespace(body, namespace)
         }
         Stmt::ForLet { value, body, .. } => {
@@ -1660,6 +1671,9 @@ pub(super) fn stmt_uses_url_instance(stmt: &Stmt) -> bool {
             expr_uses_url_instance(iter) || block_uses_url_instance(body)
         }
         Stmt::ForWhile { cond, body, .. } => {
+            expr_uses_url_instance(cond) || block_uses_url_instance(body)
+        }
+        Stmt::While { cond, body, .. } => {
             expr_uses_url_instance(cond) || block_uses_url_instance(body)
         }
         Stmt::ForLet { value, body, .. } => {

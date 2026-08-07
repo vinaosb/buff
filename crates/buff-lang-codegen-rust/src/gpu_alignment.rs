@@ -210,6 +210,10 @@ fn walk_stmt(
             walk_expr(cond, in_parallel_closure, user_structs, found);
             walk_block(body, in_parallel_closure, user_structs, found);
         }
+        Stmt::While { cond, body, .. } => {
+            walk_expr(cond, in_parallel_closure, user_structs, found);
+            walk_block(body, in_parallel_closure, user_structs, found);
+        }
         Stmt::ForLet { value, body, .. } => {
             walk_expr(value, in_parallel_closure, user_structs, found);
             walk_block(body, in_parallel_closure, user_structs, found);

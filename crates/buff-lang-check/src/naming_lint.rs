@@ -214,7 +214,7 @@ fn lint_stmt(stmt: &Stmt, out: &mut Vec<Diagnostic>) {
             warn_snake("loop variable", var, out);
             lint_block(body, out);
         }
-        Stmt::ForWhile { body, .. } | Stmt::ForLet { body, .. } => {
+        Stmt::ForWhile { body, .. } | Stmt::While { body, .. } | Stmt::ForLet { body, .. } => {
             lint_block(body, out);
         }
         Stmt::Guard { else_block, .. } => {
@@ -386,7 +386,10 @@ fn lint_mistakes_stmt(
         Stmt::ExprStmt(e, _) | Stmt::Return(Some(e), _) => {
             lint_mistakes_expr(e, candidates, defined_funcs, out);
         }
-        Stmt::ForIn { body, .. } | Stmt::ForWhile { body, .. } | Stmt::ForLet { body, .. } => {
+        Stmt::ForIn { body, .. }
+        | Stmt::ForWhile { body, .. }
+        | Stmt::While { body, .. }
+        | Stmt::ForLet { body, .. } => {
             for s in &body.stmts {
                 lint_mistakes_stmt(s, candidates, defined_funcs, out);
             }
