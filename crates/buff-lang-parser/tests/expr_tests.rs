@@ -299,6 +299,148 @@ fn test_closure_two_param_parses() {
     );
 }
 
+// ===========================================================================
+// BUG-13: multi-statement lambda bodies.
+//
+// A lambda body may be a sequence of statements separated by `;` or
+// newlines, with the FINAL expression as the implicit return value:
+// `{ params => stmt1; stmt2; final_expr }`. This mirrors how Rust closures
+// work. The single-expression form `{ params => expr }` remains fully
+// supported (see `test_closure_single_param_parses` /
+// `test_closure_two_param_parses` above) — backward compatible.
+// ===========================================================================
+
+/// Assert `e` is a `Lambda` and return a reference to its body `Block`.
+fn lambda_body(e: &Expr) -> &buff_lang_ast::Block {
+    match e {
+        Expr::Lambda { body, .. } => body,
+        other => panic!("expected Lambda, got: {other}"),
+    }
+}
+
+/// Count the statements in a lambda body (terse helper).
+fn lambda_body_len(e: &Expr) -> usize {
+    lambda_body(e).stmts.len()
+}
+
+// BUG-13 case 1: multi-statement body separated by `;`.
+// `{x => print(x); x * 2}` → 2 statements; last is the implicit return.
+#[test]
+fn test_closure_multistmt_semicolon_separator() {
+    let e = parse("{x => print(x); x * 2}");
+    let body = lambda_body(&e);
+    assert_eq!(body.stmts.len(), 2, "semicolon-separated body has 2 stmts");
+    // First stmt: print(x) as an expression statement.
+    assert!(
+        matches!(
+            &body.stmts[0],
+            buff_lang_ast::Stmt::ExprStmt(Expr::FuncCall { .. }, _)
+        ),
+        "first stmt is ExprStmt(FuncCall): {:?}",
+        body.stmts[0]
+    );
+    // Last stmt: x * 2 — the implicit return value.
+    assert!(
+        matches!(
+            &body.stmts[1],
+            buff_lang_ast::Stmt::ExprStmt(Expr::BinaryOp { .. }, _)
+        ),
+        "last stmt is ExprStmt(BinaryOp): {:?}",
+        body.stmts[1]
+    );
+}
+
+// BUG-13 case 2: multi-statement body separated by newlines (layout).
+// The offside rule emits Newline/Indent/Dedent tokens which TokenStream
+// transparently skips — the parser sees two distinct statements.
+#[test]
+fn test_closure_multistmt_newline_separator() {
+    let src = "{x =>\n    print(x)\n    x * 2\n}";
+    let e = parse(src);
+    let body = lambda_body(&e);
+    assert_eq!(body.stmts.len(), 2, "newline-separated body has 2 stmts");
+    assert!(
+        matches!(
+            &body.stmts[1],
+            buff_lang_ast::Stmt::ExprStmt(Expr::BinaryOp { .. }, _)
+        ),
+        "last stmt is the implicit return: {:?}",
+        body.stmts[1]
+    );
+}
+
+// BUG-13 case 3: multi-statement body with a `let` binding as a side-effect
+// statement. `{req => let id = req; fetch(id)}` — the `let` is not the return
+// value; the trailing expression is.
+#[test]
+fn test_closure_multistmt_with_let_binding() {
+    let src = "{req =>\n    let id = req\n    id\n}";
+    let e = parse(src);
+    let body = lambda_body(&e);
+    assert_eq!(body.stmts.len(), 2, "let + expr body has 2 stmts");
+    // First stmt is a let binding.
+    assert!(
+        matches!(&body.stmts[0], buff_lang_ast::Stmt::LetDecl { name, .. } if name.name == "id"),
+        "first stmt is LetDecl(id): {:?}",
+        body.stmts[0]
+    );
+    // Last stmt is the implicit return expression (`id`).
+    assert!(
+        matches!(
+            &body.stmts[1],
+            buff_lang_ast::Stmt::ExprStmt(Expr::Ident(Ident { .. }, ..), _)
+        ),
+        "last stmt is ExprStmt(Ident): {:?}",
+        body.stmts[1]
+    );
+}
+
+// BUG-13 case 4: three statements separated by `;`.
+#[test]
+fn test_closure_multistmt_three_statements() {
+    let e = parse("{x => print(x); log(x); x + 1}");
+    assert_eq!(lambda_body_len(&e), 3, "three semicolon-separated stmts");
+}
+
+// BUG-13 case 5: trailing semicolon before `}` is allowed (consumed, no extra
+// statement added). `{x => x;}` → single-statement body.
+#[test]
+fn test_closure_multistmt_trailing_semicolon() {
+    let e = parse("{x => x;}");
+    assert_eq!(
+        lambda_body_len(&e),
+        1,
+        "trailing semicolon does not add a stmt"
+    );
+}
+
+// BUG-13 backward-compat: the single-expression form is byte-identical to the
+// pre-fix T23 behaviour (1 statement, the expression).
+#[test]
+fn test_closure_single_expr_backward_compat() {
+    let e = parse("{x => x * 2}");
+    assert_eq!(lambda_body_len(&e), 1);
+    assert_eq!(
+        shape(&e),
+        "Lambda(fn(x: _) { ExprStmt(BinaryOp(*, Ident(x), Lit(Int(2)))) })"
+    );
+}
+
+// BUG-13 case 6: zero-param multi-statement lambda.
+// `{ => stmt; final_expr }` — empty param list, multi-statement body.
+#[test]
+fn test_closure_zero_param_multistmt() {
+    let src = "{ =>\n    print(\"hi\")\n    42\n}";
+    let e = parse(src);
+    match &e {
+        Expr::Lambda { params, body, .. } => {
+            assert!(params.is_empty(), "zero params: {params:?}");
+            assert_eq!(body.stmts.len(), 2, "multi-stmt zero-param body");
+        }
+        other => panic!("expected Lambda, got: {other}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 2. Identifier test
 // ---------------------------------------------------------------------------
