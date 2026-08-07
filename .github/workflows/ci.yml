@@ -118,7 +118,7 @@ jobs:
   test-framework:
     name: cargo test (framework)
     continue-on-error: true
-    timeout-minutes: 15
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4

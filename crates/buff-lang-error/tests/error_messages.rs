@@ -187,9 +187,24 @@ fn error_messages_render_unicode_columns_count_chars_not_bytes() {
 }
 
 #[test]
+fn error_messages_render_handles_utf8_bom() {
+    // A UTF-8 BOM (`\u{feff}`, 3 bytes) at the start of the source must not
+    // panic the diagnostic renderer. Before the fix, byte-index slicing
+    // panicked because byte index 1 is inside the 3-byte BOM sequence.
+    let src = "\u{feff}let x = 1";
+    // Use a span at byte offset 0..3 — without BOM stripping this lands
+    // inside the BOM (byte 1 is not a char boundary) and panics.
+    let diag = err_at(0, 3, "test error");
+    let rendered = diag.render(src);
+    // Should not panic and should contain the source text or the header.
+    assert!(
+        rendered.contains("let x = 1") || rendered.contains("test error"),
+        "BOM-prefixed source must not panic the renderer; got:\n{rendered}"
+    );
+}
+
+#[test]
 fn error_messages_render_out_of_bounds_span_omits_source_line() {
-    // Span points past EOF — render must not panic and must still show the
-    // header + notes, just without the source line.
     let src = "short";
     let diag = err_at(99, 100, "post-EOF error").with_note("recoverable");
     let rendered = diag.render(src);

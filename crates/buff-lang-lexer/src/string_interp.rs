@@ -88,6 +88,13 @@ pub fn scan_string(
                 // We keep the raw escape bytes in the StringPart; escape
                 // interpretation is the codegen/parser's job. Skip one extra
                 // byte (the escaped char) if present.
+                //
+                // BUG-12: `\{` and `\}` escape literal braces so they do NOT
+                // trigger interpolation. Because we advance `i` by 2 here
+                // (consuming both `\` and the following byte), the `{` is
+                // never seen by the `b'{' =>` arm below — it stays in the
+                // current string part as `\{`. The codegen then maps it to
+                // Rust's `{{` (literal `{` in `format!`).
                 if i + 1 >= bytes.len() {
                     return Err(LexerError::unterminated_string(Span::new(
                         quote_start,
@@ -495,5 +502,76 @@ mod tests {
                 ("b".to_string(), Some("?".to_string())),
             ]
         );
+    }
+
+    // BUG-12: `\{` and `\}` escape literal braces so they do NOT trigger
+    // interpolation. The escape handler (`i += 2`) consumes both the `\` and
+    // the following byte, so `{` after `\` is never seen by the `b'{' =>`
+    // interpolation arm. The `\{` bytes remain in the string part.
+
+    #[test]
+    fn escaped_open_brace_does_not_trigger_interpolation() {
+        // `"hello \{world\}"` — both braces are escaped, so no interpolation
+        // triggers. The entire content is a single string part. Without the
+        // `\` escape, the `{world}` would be parsed as an interpolation
+        // expression (and a bare `}` would error).
+        let (kinds, interps) = lex_str("\"hello \\{world\\}\"");
+        assert!(
+            interps.is_empty(),
+            "BUG-12: \\{{ must not trigger interpolation; got {interps:?}"
+        );
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::StringStart,
+                TokenKind::StringPart("hello \\{world\\}".into()),
+                TokenKind::StringEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn escaped_close_brace_does_not_error() {
+        // A bare `}` inside a string is normally an error, but `\}` is an
+        // escape — it must not trigger the "unexpected '}'" error.
+        let (kinds, interps) = lex_str("\"a \\} b\"");
+        assert!(
+            interps.is_empty(),
+            "BUG-12: \\}} must not trigger interpolation; got {interps:?}"
+        );
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::StringStart,
+                TokenKind::StringPart("a \\} b".into()),
+                TokenKind::StringEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn escaped_braces_coexist_with_real_interpolation() {
+        // `"{val} and \{literal\}"` — `{val}` IS interpolation (captured),
+        // `\{literal\}` is NOT (both braces escaped). This proves escaped
+        // braces and real interpolation can coexist in the same string.
+        let (_, interps) = lex_str("\"{val} and \\{literal\\}\"");
+        assert_eq!(
+            interps,
+            vec!["val".to_string()],
+            "BUG-12: only {{val}} should interpolate; \\{{literal\\}} must not"
+        );
+    }
+
+    #[test]
+    fn multiple_escaped_braces_no_interpolation() {
+        // All braces escaped → no interpolation at all.
+        let (kinds, interps) = lex_str("\"\\{\\{nested\\}\\}\"");
+        assert!(
+            interps.is_empty(),
+            "BUG-12: all-escaped braces must not interpolate; got {interps:?}"
+        );
+        // The full string part includes all the escape sequences.
+        assert_eq!(kinds.len(), 3); // StringStart, StringPart, StringEnd
+        assert!(matches!(&kinds[1], TokenKind::StringPart(_)));
     }
 }

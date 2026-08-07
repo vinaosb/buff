@@ -1021,6 +1021,18 @@ impl TypeInferencer {
         }
     }
 
+    /// Check if both types are the same user-defined type (same `name`,
+    /// ignoring type arguments). Allows equality comparison for user-defined
+    /// enums and structs whose resolved `Type::User` representations may differ
+    /// in their `args` (e.g. a let-bound variable resolved with type args vs.
+    /// a zero-arg enum variant resolved with empty args).
+    fn is_same_user_type(lhs: &Type, rhs: &Type) -> bool {
+        match (lhs, rhs) {
+            (Type::User { name: ln, .. }, Type::User { name: rn, .. }) => ln == rn,
+            _ => false,
+        }
+    }
+
     fn infer_binary(
         &mut self,
         op: &buff_lang_ast::BinaryOp,
@@ -1057,11 +1069,17 @@ impl TypeInferencer {
                 //    Type::Option(Box<Unknown>). Both representations are
                 //    semantically Option — allow their comparison, mirroring
                 //    Rust's PartialEq derive on Option<T>.
+                // 5. Both sides are the same user-defined type (same `name`).
+                //    Allows `status == Status.Pending` and struct equality
+                //    even when the two sides resolve with different `args`
+                //    (e.g. a param bound with type args vs. a variant with
+                //    empty args).
                 if lhs_ty == rhs_ty
                     || promote_binary(&lhs_ty, &rhs_ty).is_some()
                     || lhs_ty == Type::Unknown
                     || rhs_ty == Type::Unknown
                     || (Self::is_option_like(&lhs_ty) && Self::is_option_like(&rhs_ty))
+                    || Self::is_same_user_type(&lhs_ty, &rhs_ty)
                 {
                     Ok(Type::Bool)
                 } else {
