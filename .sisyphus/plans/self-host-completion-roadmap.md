@@ -708,7 +708,7 @@ Wave 7 (Bootstrap):
 - [ ] **M7.1a — Monolith produces span-normalized AST for ola.buff** — `buff check --dump-ast examples/ola.buff` via `buff_compiler.buff` monolith produces JSON matching Rust-side output (per Equivalence Contract v2 span normalization).
   **Status**: PARTIAL — `--dump-ast` now produces valid JSON (commit `9d6283b`). Monolith passes `buff check` (commit `d1506fc`). Full span-normalized AST matching (Equivalence Contract v2 comparison) is **DEFERRED (DR-016)** — post-M7 refinement.
 - [x] **M7.2 — Performance** — Monolith parse time within 10% of Rust baseline (P0.6). **DONE:** ola.buff +8.8% (within ≤10%), fibonacci.buff -6.6% (improved). See `docs/m7_2-performance-report.md`.
-- [ ] **M7.3 — Oracle VERIFIED** — Oracle reviews all evidence. 3× PARTIAL_VERIFIED = escalate to user replan. **DONE — VERIFIED (iteration 14).**
+- [x] **M7.3 — Oracle VERIFIED** — Oracle reviews all evidence. 3× PARTIAL_VERIFIED = escalate to user replan. **DONE — VERIFIED (iteration 14).**
   **Status**: DONE — Oracle VERIFIED iteration 14 (ses_02514c0c9ffe4995vP3W1dPGOH). No pre-claims. F1-F4 checked with evidence. PR counts canonical. All deferrals documented.
 
 ---

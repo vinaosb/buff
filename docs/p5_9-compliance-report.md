@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The self-host front-end milestone is complete. 33 PRs total (#29-#61) are merged to main across this session. test-core is ADVISORY (`continue-on-error: true`) per DR-020 — a hard gate was attempted (PRs #39/#43, then PR #60) but reverted due to OS-specific CI failures on ubuntu-latest and macos-latest. Docker (Linux x86_64) shows 0 failures across all 10 core crates. The full buff-lang-codegen-rust test suite (82 binaries, 1192 tests) passes with 0 failures in Docker. All formal deferrals are documented via Decision Records (DR-016 through DR-020).
+The self-host front-end milestone is complete. 35 PRs total (#29-#63) are merged to main across this session. test-core is ADVISORY (`continue-on-error: true`) per DR-020 — a hard gate was attempted (PRs #39/#43, then PR #60) but reverted due to OS-specific CI failures on ubuntu-latest and macos-latest. Docker (Linux x86_64) shows 0 failures across all 10 core crates. The full buff-lang-codegen-rust test suite (82 binaries, 1192 tests) passes with 0 failures in Docker. All formal deferrals are documented via Decision Records (DR-016 through DR-020).
 
 ## Phase 5 Task Status
 
@@ -33,7 +33,7 @@ The self-host front-end milestone is complete. 33 PRs total (#29-#61) are merged
 | 4. Oracle VERIFIED | VERIFIED (iteration 14) | Oracle verified: no pre-claims, F1-F4 checked, PR counts canonical, all deferrals documented |
 | 5. Audit findings | MET | 29 FIXED, 5 DEFERRED |
 
-## PRs Shipped (33 merged: #29-61)
+## PRs Shipped (35 merged: #29-#63)
 
 ### Batch 1 — Initial Fixes (#29-44, 16 PRs)
 
