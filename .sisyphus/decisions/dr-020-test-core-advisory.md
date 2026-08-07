@@ -51,3 +51,13 @@ merges on test failures that are either pre-existing or environment-dependent.
 2. Once ALL 10 core crates pass consistently on 3+ consecutive CI runs, flip
    `continue-on-error: false` (remove the annotation) in ci.yml.
 3. The prior session's DR (pre-#48) documented the original flip; this DR supersedes it.
+
+## Update (2026-08-07)
+
+Attempted to flip test-core to hard gate (PR #60). CI showed failures on
+ubuntu-latest and macos-latest. Docker (Linux x86_64) showed 0 failures
+across all 10 core crates. The discrepancy suggests OS-specific or
+CI-runner-specific test failures that need investigation.
+
+The M7.2 performance report and F1/F3/F4 verification reports (also in PR #60)
+are committed regardless.
