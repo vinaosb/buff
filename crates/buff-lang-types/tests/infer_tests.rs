@@ -1690,6 +1690,88 @@ fn same_named_user_types_comparable_with_neq() {
     assert_eq!(ty, Type::Bool);
 }
 
+/// BUG-14 (bare variants): a bare enum variant identifier resolves to its
+/// enum type via the `enum_registry`. Before the fix, `Pending` (a unit
+/// variant of a registered `enum Status { Pending, Done }`) went through
+/// `Expr::Ident` → `lookup_ident` → FAILED with "undefined variable: Pending"
+/// because the registry was never consulted on the bare-ident path. The fix
+/// adds a registry fallback in the `Expr::Ident` arm (after the env lookup
+/// misses). This is the unit-level companion to the qualified-variant test
+/// above (`qualified_enum_variant_resolves_to_user_type`).
+#[test]
+fn bare_enum_variant_resolves_to_user_type() {
+    let decls = vec![unit_enum_decl("Status", &["Pending", "Done"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+
+    // Bare `Pending` (NOT `Status.Pending`) must resolve to the enum type.
+    let ty = inf
+        .infer_expr(&ident("Pending"))
+        .expect("BUG-14: bare enum variant must resolve to Type::User(EnumName, [])");
+    assert_eq!(
+        ty,
+        Type::user("Status", Vec::new()),
+        "bare `Pending` should resolve to Type::User(\"Status\", [])"
+    );
+}
+
+/// BUG-14 (bare variants) end-to-end: `status == Pending` type-checks when
+/// `status` is bound to the enum type. This is the motivating scenario — a
+/// comparison between a variable of enum type and a BARE variant name (no
+/// `EnumName.` qualifier). Before the fix this surfaced as
+/// "undefined variable: Pending".
+#[test]
+fn bare_enum_variant_in_comparison_yields_bool() {
+    let decls = vec![unit_enum_decl("Status", &["Pending", "Done"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    inf.bind("status", Type::user("Status", Vec::new()));
+
+    // Build: status == Pending  (bare variant, NOT Status.Pending)
+    let e = binary(BinaryOp::Eq, ident("status"), ident("Pending"));
+    let ty = inf.infer_expr(&e).expect(
+        "BUG-14: status == Pending must type-check (bare variant resolves via enum_registry)",
+    );
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "status == Pending should yield Bool once bare variants resolve"
+    );
+}
+
+/// BUG-14 (bare variants): local variable bindings take precedence over enum
+/// variants (shadowing). If a local named `Pending` is bound, the bare
+/// `Pending` identifier must resolve to the local's type, NOT the enum
+/// variant. This guards against the fix being too aggressive — a user who
+/// shadows a variant name with a local must see the local's type.
+#[test]
+fn local_binding_shadows_bare_enum_variant() {
+    let decls = vec![unit_enum_decl("Status", &["Pending", "Done"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind a local named `Pending` to Int — must win over the enum variant.
+    inf.bind(
+        "Pending",
+        Type::Int {
+            width: IntWidth::W64,
+        },
+    );
+
+    let ty = inf
+        .infer_expr(&ident("Pending"))
+        .expect("local binding must resolve (shadowing the variant)");
+    assert_eq!(
+        ty,
+        Type::Int {
+            width: IntWidth::W64
+        },
+        "local binding must shadow the enum variant of the same name"
+    );
+}
+
 /// Regression: two DIFFERENTLY-named user types must still error (the fix
 /// is not over-permissive). `Color != Status` should be a type error.
 #[test]

@@ -401,7 +401,28 @@ impl TypeInferencer {
                 if name.name == "not" {
                     return Ok(Type::Unknown);
                 }
-                self.lookup_ident(name, *span)
+                // BUG-14: bare enum variant identifiers resolve to their enum
+                // type. `status == Pending` (where `Pending` is a unit variant
+                // of a registered `enum Status { Pending, Done }`) must
+                // type-check, not fail with "undefined variable: Pending".
+                // Local variables take precedence (shadowing): `lookup_ident`
+                // consults the env FIRST and only errors when the env misses,
+                // so on that error path we fall back to the `enum_registry` —
+                // scanning for any enum declaring `name.name` as a variant and
+                // returning `Type::User(EnumName, [])`. The original error
+                // (with its prelude did-you-mean suggestion) is preserved if
+                // the registry also misses. This mirrors the qualified-variant
+                // path (`EnumName.Variant`) in the MethodCall arm above
+                // (lines 504-512) and the exhaustiveness `Pattern::Variant`
+                // check — all three consult the SAME `enum_registry`.
+                self.lookup_ident(name, *span).or_else(|original_err| {
+                    for (enum_name, variants) in &self.enum_registry {
+                        if variants.iter().any(|v| v == &name.name) {
+                            return Ok(Type::user(enum_name.clone(), Vec::new()));
+                        }
+                    }
+                    Err(original_err)
+                })
             }
             Expr::BinaryOp { op, lhs, rhs, span } => self.infer_binary(op, lhs, rhs, *span),
             Expr::UnaryOp { op, operand, span } => self.infer_unary(op, operand, *span),
