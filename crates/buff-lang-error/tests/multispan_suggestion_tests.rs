@@ -415,13 +415,13 @@ fn snapshot_multispan_primary_plus_secondary() {
     [Error] error[E1203]: expected `Int`, found `String`
       |
     2 |     return add("hi", 2)
-      |              ^^^^^^
+      |              ^^^^
       |
       |
     1 | func add(a: Int, b: Int)
       |          ~ parameter `a` declared here
       |
-    "#);
+      "#);
 }
 
 #[test]
