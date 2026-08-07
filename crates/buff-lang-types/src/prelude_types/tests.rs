@@ -6,44 +6,29 @@ fn prelude_type_lookup_known_names() {
     for &t in PreludeType::ALL {
         assert_eq!(prelude_type_lookup(t.name()), Some(t));
         assert!(is_prelude_type(t.name()));
-        // Each DATETIME-FAMILY type's `buff_type()` round-trips
-        // through the `is_prelude_datetime` predicate. Namespace-only
-        // modules (T124c: `Log`) skip this check — they have no
-        // value representation, so `buff_type()` returns `Void`
-        // (which is correctly NOT a datetime).
-        //
-        // T124d: `Regex` is a runtime value but NOT a datetime, so
-        // it also skips the `is_prelude_datetime` check (its
-        // `buff_type()` returns `Type::Regex`, which round-trips
-        // through `is_prelude_regex()` instead).
-        //
-        // T124h: `URL` is the second runtime-value-with-methods
-        // type after Regex (T124d). Like Regex it's NOT a datetime,
-        // so it skips the `is_prelude_datetime` check (its
-        // `buff_type()` returns `Type::Url`, which round-trips
-        // through `is_prelude_url()` instead).
-        //
-        // T124j: `Path` is the third runtime-value-with-methods
-        // type after Regex (T124d) + URL (T124h). Like Regex +
-        // URL it's NOT a datetime, so it skips the
-        // `is_prelude_datetime` check (its `buff_type()` returns
-        // `Type::Path`, which round-trips through
-        // `is_prelude_path()` instead).
-        //
-        // T124l: `Process` is the fourth runtime-value-with-
-        // methods type after Regex (T124d) + URL (T124h) + Path
-        // (T124j). Like Regex + URL + Path it's NOT a datetime,
-        // so it skips the `is_prelude_datetime` check (its
-        // `buff_type()` returns `Type::Process`, which round-
-        // trips through `is_prelude_process()` instead).
-        if !t.is_namespace_only()
-            && t != PreludeType::Regex
-            && t != PreludeType::URL
-            && t != PreludeType::Path
-            && t != PreludeType::Process
-            && t != PreludeType::Web
-        {
+        // The datetime family (DateTime/Date/Time/Duration/Instant) is
+        // the ONLY set whose `buff_type()` round-trips through
+        // `is_prelude_datetime()`. Every other runtime-value type is NOT
+        // a datetime — some have their own predicate (Regex ->
+        // is_prelude_regex, URL -> is_prelude_url, Path ->
+        // is_prelude_path, Process -> is_prelude_process; exercised in
+        // `buff_type_constructors_and_predicate`), and the rest
+        // (Faker/Cache/Image/Tensor/DataFrame/Web/Decimal/... ) are
+        // opaque runtime values that are correctly NOT datetimes.
+        // Namespace-only modules return `Type::Void` (also not a
+        // datetime, but skipped here since they carry no value type).
+        let is_datetime_family = matches!(
+            t,
+            PreludeType::DateTime
+                | PreludeType::Date
+                | PreludeType::Time
+                | PreludeType::Duration
+                | PreludeType::Instant
+        );
+        if is_datetime_family {
             assert!(t.buff_type().is_prelude_datetime());
+        } else if !t.is_namespace_only() {
+            assert!(!t.buff_type().is_prelude_datetime());
         }
     }
 }
@@ -267,43 +252,50 @@ fn prelude_type_no_duplicates() {
     let names: Vec<&str> = PreludeType::ALL.iter().map(|t| t.name()).collect();
     let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
     assert_eq!(names.len(), unique.len(), "duplicate prelude type names");
-    // 5 datetime-family members shipped in T124b + 1 namespace module
-    // (Log) shipped in T124c + 1 runtime-value-with-methods type
-    // (Regex) shipped in T124d + 1 namespace-only module (Toml)
-    // shipped in T124e + 3 namespace-only utility modules (Math,
-    // Random, Strings) shipped in T124f + 2 namespace-only system
-    // modules (Args, Env) shipped in T124g + 4 namespace-only web
-    // modules (Base64, Hex, URLEncode, UUID) + 1 runtime-value-
-    // with-methods type (URL) shipped in T124h + 2 namespace-only
-    // data-format modules (Yaml, Csv) shipped in T124i + 1 runtime-
-    // value-with-methods type (Path) + 2 namespace-only modules
-    // (Dir, Tempfile) shipped in T124j + 2 namespace-only crypto
-    // modules (Hash, HMAC) shipped in T124k + 1 namespace-only
-    // system-introspection module (OS) + 1 runtime-value-with-
-    // methods type (Process) shipped in T124l + 3 namespace-only
-    // networking modules (TCP, UDP, WebSocket) shipped in T124m
-    // + 1 namespace-only module (Channel) shipped in T2 + 1
-    // forward-declaration-only namespace (Tensor) + 1 runtime-
-    // value-with-methods type (Image) shipped in T9 + 2
-    // namespace-only modules (Signal, Window) + 1 runtime-value-
-    // with-methods type (Spectrum) shipped in T11 + 1 runtime-
-    // value-with-methods type (DataFrame) shipped in T7
-    // = 36 total prelude types.
-    assert_eq!(PreludeType::ALL.len(), 37);
+    // The prelude-type registry grows with every stdlib/framework wave
+    // (T124b datetime family, T124c-T124m namespace modules, then the
+    // v1.13-v1.39 framework waves: Tensor/Image/Faker/Cache/I18n/
+    // Signal/Window/Spectrum/DataFrame/World/Entity/Audio/Web/Database/
+    // HttpClient/Config/Observe/Validator/Archive/Text/Email/SmtpClient/
+    // Document/Element/Crawler/Decimal/Http/Assert/File/Json/Platform/
+    // Reactive family/Xml/Geo/Audio/... ). The count is asserted so a
+    // future addition that forgets to register (or double-registers) a
+    // type is caught here. Update this number when you add a type.
+    assert_eq!(PreludeType::ALL.len(), 91);
 }
 
 #[test]
 fn prelude_assoc_fn_no_duplicates() {
-    let names: Vec<&str> = PreludeAssocFn::ALL.iter().map(|f| f.name()).collect();
-    let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
-    assert_eq!(names.len(), unique.len(), "duplicate assoc-fn names");
+    // Each VARIANT appears at most once in ALL. Same-named DISTINCT
+    // variants are an intentional design: e.g. `Get` (Args/Env/Config)
+    // and `HttpGet` (Http) both surface "get"; `Contains` (Strings) and
+    // `AssertContains` (Assert) both surface "contains". They are
+    // disambiguated by the (type, variant) pair — `assoc_fn_lookup`
+    // iterates all matching-name variants and returns the first whose
+    // pair validates. This test therefore guards against accidental
+    // DUPLICATE ENTRIES (the same variant listed twice), not against
+    // intentional same-named variants.
+    let all: Vec<PreludeAssocFn> = PreludeAssocFn::ALL.to_vec();
+    let unique: std::collections::HashSet<PreludeAssocFn> = all.iter().copied().collect();
+    assert_eq!(all.len(), unique.len(), "duplicate assoc-fn variant entries");
 }
 
 #[test]
 fn prelude_instance_fn_no_duplicates() {
-    let names: Vec<&str> = PreludeInstanceFn::ALL.iter().map(|f| f.name()).collect();
-    let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
-    assert_eq!(names.len(), unique.len(), "duplicate instance-fn names");
+    // Each VARIANT appears at most once in ALL. Same-named DISTINCT
+    // variants are intentional: e.g. `Get` (reactive Signal) and
+    // `RouteGet` (Web) both surface "get"; `Set` (reactive Signal) and
+    // `SetTtl` (Cache) both surface "set" (arity-dispatched — the
+    // `SetTtl` doc documents that codegen consults arg count to lower
+    // `cache.set(key, value, ttl)` to `SetTtl` vs `Set`); `Delete`
+    // (Cache) and `RouteDelete` (Web) both surface "delete". Codegen
+    // dispatches on the (receiver-Type, variant) pair directly. This
+    // test guards against accidental DUPLICATE ENTRIES (the same
+    // variant listed twice), not against intentional same-named
+    // variants.
+    let all: Vec<PreludeInstanceFn> = PreludeInstanceFn::ALL.to_vec();
+    let unique: std::collections::HashSet<PreludeInstanceFn> = all.iter().copied().collect();
+    assert_eq!(all.len(), unique.len(), "duplicate instance-fn variant entries");
 }
 
 #[test]
@@ -743,11 +735,17 @@ fn prelude_toml_namespace_only_predicate() {
         .iter()
         .filter(|t| t.is_namespace_only())
         .count();
-    // T124m: bumped from 18 to 21 (TCP + UDP + WebSocket
-    // namespace-only; Connection / Socket / WsConnection are
-    // NOT namespace-only themselves - they're runtime-value
-    // types constructed by the assoc fns).
-    assert_eq!(namespace_only_count, 21);
+    // The namespace-only set grows with every namespace-module wave:
+    // T124c Log, T124e Toml, T124f Math/Random/Strings, T124g Args/Env,
+    // T124h Base64/Hex/URLEncode/UUID, T124i Yaml/Json/Csv, T124j
+    // Dir/Tempfile, T124k Hash/HMAC, T124l OS, T124m TCP/UDP/WebSocket,
+    // then the v1.13-v1.39 framework waves (File/Http/Assert/Config/
+    // Observe/Archive/Text/Channel/Window/Simd/MsgPack/Protobuf/AES/
+    // Argon2/ECDH/RSA/RestartStrategy, ...). The count is asserted so a
+    // future namespace module that forgets `is_namespace_only() == true`
+    // (or a runtime-value type wrongly flagged namespace-only) is caught
+    // here. Update this number when you add a namespace module.
+    assert_eq!(namespace_only_count, 39);
 }
 
 // T124f: Math module - `Math.<fn>(x, ...)` assoc-fn lookups +
@@ -994,8 +992,10 @@ fn prelude_math_assoc_const_return_types() {
 
 #[test]
 fn prelude_assoc_const_all_and_no_duplicates() {
-    // 2 associated constants: PI + E.
-    assert_eq!(PreludeAssocConst::ALL.len(), 2);
+    // 4 associated constants: Math.PI + Math.E (T124f) + Platform.Discord
+    // + Platform.Telegram (T47, the chat Platform enum variants accessed
+    // as zero-arg `Platform.Discord` / `Platform.Telegram`).
+    assert_eq!(PreludeAssocConst::ALL.len(), 4);
     let names: Vec<&str> = PreludeAssocConst::ALL.iter().map(|c| c.name()).collect();
     let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
     assert_eq!(names.len(), unique.len(), "duplicate assoc-const names");

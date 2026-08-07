@@ -1043,11 +1043,13 @@ impl PreludeAssocFn {
         // permits `Type.from_*()`. Mirrors the DataFrame ctor pattern.
         PreludeAssocFn::FromPath,
         PreludeAssocFn::FromBytes,
-        // T37: Faker constructors (3 distinct names): new (shared with
-        // Channel.new), with_locale, with_seed. Faker-only beyond the
-        // shared `New` variant. Buff §7 ctor naming convention permits
-        // `Type.new()` and `Type.with_*()`.
-        PreludeAssocFn::New,
+        // T37: Faker constructors (2 Faker-only names): with_locale,
+        // with_seed. Reuses the shared `New` variant already listed
+        // above under Channel (T2) — `New` is a single shared variant
+        // dispatched on the (Faker, New) pair, so it must NOT be
+        // re-listed here (doing so created a duplicate ALL entry).
+        // Buff §7 ctor naming convention permits `Type.new()` +
+        // `Type.with_*()`.
         PreludeAssocFn::WithLocale,
         PreludeAssocFn::WithSeed,
         // T10: AudioBuffer constructor (1 distinct name): from_samples.

@@ -1088,9 +1088,11 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Fetch,
         PreludeInstanceFn::Crawl,
         PreludeInstanceFn::RobotsAllows,
-        // T50: Xml instance methods — Root / Find / ToString.
+        // T50: Xml instance methods — Root / Find / ToString. `Find`
+        // reuses the shared `Find` variant already listed above under
+        // Regex (T124d) — dispatched on the (Xml, Find) pair, so it is
+        // NOT re-listed here (doing so created a duplicate ALL entry).
         PreludeInstanceFn::Root,
-        PreludeInstanceFn::Find,
         PreludeInstanceFn::ToString,
         // T50: XmlElement instance methods. `Name` (shared with Faker /
         // Language), `Text` (shared with Document / Element), `Attr`

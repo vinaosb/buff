@@ -247,7 +247,7 @@ mod tests {
                 "/defs.buff",
                 "export struct Point { x: Int, y: Int }\n\
                  export enum Color { Red, Green, Blue }\n\
-                 export trait Greetable { fn name() -> String }\n",
+                 export trait Greetable { func name() -> String; }\n",
             ),
             (
                 "/main.buff",
