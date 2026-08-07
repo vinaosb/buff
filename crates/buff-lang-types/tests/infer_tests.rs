@@ -1627,6 +1627,96 @@ fn qualified_enum_variant_in_comparison_yields_bool() {
     );
 }
 
+/// BUG-14 regression: `status == Status.Pending` must type-check even when
+/// the two sides resolve to `Type::User` with the same `name` but DIFFERENT
+/// `args`. Before the fix, the equality check only allowed exact type match
+/// (`lhs_ty == rhs_ty`), numeric promotion, Unknown, or Option-like. Two
+/// `Type::User("Color", ...)` values with different `args` failed all four
+/// checks and cascaded a "cannot compare" type error. The `is_same_user_type`
+/// helper compares only the `name` field, allowing user-defined enum/struct
+/// equality regardless of resolved type arguments.
+#[test]
+fn same_named_user_types_with_different_args_are_comparable() {
+    let decls = vec![unit_enum_decl("Color", &["Red", "Green", "Blue"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `c` to Color WITH a type arg (differs from the empty-args variant
+    // the MethodCall arm resolves `Color.Red` to). This makes lhs_ty != rhs_ty
+    // via exact match, exercising the is_same_user_type path.
+    inf.bind(
+        "c",
+        Type::user("Color", vec![Type::Int {
+            width: IntWidth::W64,
+        }]),
+    );
+
+    // Build: c == Color.Red
+    //   lhs resolves to Type::User("Color", [Int])  (from the binding)
+    //   rhs resolves to Type::User("Color", [])     (from the enum variant)
+    // These differ in `args` so `==` fails, but `is_same_user_type` passes
+    // because the `name` field matches.
+    let e = binary(
+        BinaryOp::Eq,
+        ident("c"),
+        enum_variant_expr("Color", "Red"),
+    );
+    let ty = inf
+        .infer_expr(&e)
+        .expect("BUG-14: same-named user types must be comparable even with different args");
+    assert_eq!(
+        ty,
+        Type::Bool,
+        "Color == Color.Red should yield Bool even when args differ"
+    );
+}
+
+/// BUG-14: two identifiers bound to the same user type name (but different
+/// args) must be comparable via `!=` as well.
+#[test]
+fn same_named_user_types_comparable_with_neq() {
+    let decls = vec![unit_enum_decl("Status", &["Pending", "Done"])];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    // Bind `status` to Status with a type arg; `other` to Status with no args.
+    inf.bind(
+        "status",
+        Type::user("Status", vec![Type::Bool]),
+    );
+    inf.bind("other", Type::user("Status", vec![]));
+
+    // status != other — both are Type::User("Status", ...) with different args.
+    let e = binary(BinaryOp::Neq, ident("status"), ident("other"));
+    let ty = inf
+        .infer_expr(&e)
+        .expect("BUG-14: same-named user types must be comparable with !=");
+    assert_eq!(ty, Type::Bool);
+}
+
+/// Regression: two DIFFERENTLY-named user types must still error (the fix
+/// is not over-permissive). `Color != Status` should be a type error.
+#[test]
+fn differently_named_user_types_still_error_on_comparison() {
+    let decls = vec![
+        unit_enum_decl("Color", &["Red"]),
+        unit_enum_decl("Status", &["Pending"]),
+    ];
+
+    let mut inf = TypeInferencer::new();
+    inf.register_enum_decls(&decls);
+    inf.bind("c", Type::user("Color", vec![]));
+    inf.bind("s", Type::user("Status", vec![]));
+
+    // c == s — different names, must error.
+    let e = binary(BinaryOp::Eq, ident("c"), ident("s"));
+    let result = inf.infer_expr(&e);
+    assert!(
+        result.is_err(),
+        "BUG-14 regression: differently-named user types must still error"
+    );
+}
+
 /// Regression: even when `f` is bound to `Type::Unknown` (the CLI check
 /// pass's fallback for user-typed parameters), the comparison still
 /// succeeds because `Unknown` is permissive in `promote_binary`. This

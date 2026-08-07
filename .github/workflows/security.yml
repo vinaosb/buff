@@ -2,10 +2,10 @@ name: Security
 
 on:
   push:
-    branches: [main, v1x-frameworks]
+    branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main, v1x-frameworks]
+    branches: [main]
   schedule:
     - cron: '0 9 * * 1'  # Monday 9am UTC
 

@@ -566,6 +566,14 @@ impl Diagnostic {
     }
 }
 
+/// Strip a leading UTF-8 BOM if present so byte-offset slicing doesn't
+/// panic on the 3-byte BOM sequence (`\u{feff}`). Without this, a source
+/// file that starts with a BOM causes `source[1..]` to land inside the BOM
+/// (byte index 1 is not a char boundary), panicking the diagnostic renderer.
+fn strip_bom(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
+}
+
 /// Render the source line containing `span.start` plus a caret underline.
 ///
 /// Returns `None` when `span.start` lies past the end of `source` (so the
@@ -585,6 +593,7 @@ impl Diagnostic {
 /// and the caret count is the character width of the span clamped to the
 /// current line (minimum 1).
 fn render_span_in_source(span: &Span, source: &str) -> Option<String> {
+    let source = strip_bom(source);
     let start = span.start;
     let raw_end = span.end;
 
@@ -646,6 +655,7 @@ fn render_span_in_source_with_color(
     source: &str,
     severity: Severity,
 ) -> Option<String> {
+    let source = strip_bom(source);
     let start = span.start;
     let raw_end = span.end;
 
@@ -708,6 +718,7 @@ fn render_span_label_in_source(
     style: LabelStyle,
     label: &str,
 ) -> Option<String> {
+    let source = strip_bom(source);
     let start = span.start;
     let raw_end = span.end;
 
@@ -763,6 +774,7 @@ fn render_span_label_in_source_with_color(
     label: &str,
     severity: Severity,
 ) -> Option<String> {
+    let source = strip_bom(source);
     let start = span.start;
     let raw_end = span.end;
 
