@@ -588,11 +588,15 @@ impl WorkloadContext {
     ///     DispatchKind, WorkloadContext, threshold::decide_dynamic,
     /// };
     ///
-    /// // With bytes_per_element set, the cost model runs:
+    /// // With bytes_per_element set, the cost model runs and OVERRIDES the
+    /// // intensity-only heuristic. For 100_000 f32 elements, the PCIe
+    /// // transfer (~25µs) + GPU launch overhead (~100µs) exceed the CPU's
+    /// // compute time (~6.4µs) — so the cost model demotes to CpuParallel,
+    /// // even though the intensity-only heuristic would promote to GpuCompute.
     /// let ctx = WorkloadContext::new(100_000, true)
     ///     .with_bytes_per_element(4)    // f32
-    ///     .with_intensity(8.0);        // compute-bound
-    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::GpuCompute);
+    ///     .with_intensity(8.0);         // compute-bound by the heuristic
+    /// assert_eq!(decide_dynamic(&ctx), DispatchKind::CpuParallel);
     /// ```
     #[must_use]
     pub fn with_bytes_per_element(mut self, bytes_per_element: u64) -> Self {
@@ -759,14 +763,18 @@ pub struct CostEstimate {
 /// # Examples
 ///
 /// ```
-/// use buff_lang_runtime::{WorkloadContext, threshold::estimate_costs};
+/// use buff_lang_runtime::{DataLocation, WorkloadContext, threshold::estimate_costs};
 ///
-/// let ctx = WorkloadContext::new(1_000_000, true)
+/// // Data already resident on the GPU (T10 chained-op scenario) + a large
+/// // compute-bound workload: the GPU wins because there is zero PCIe
+/// // transfer cost and the GPU's ~30× higher FLOPS dominate.
+/// let ctx = WorkloadContext::new(2_000_000, true)
 ///     .with_bytes_per_element(4)
-///     .with_intensity(8.0);
+///     .with_intensity(8.0)
+///     .with_data_location(DataLocation::Gpu);
 /// let costs = estimate_costs(&ctx);
-/// // GPU with 1M elements + high intensity should be faster than CPU.
 /// assert!(costs.gpu_time < costs.cpu_time);
+/// assert_eq!(costs.transfer_time, 0.0, "no PCIe transfer when data is on the GPU");
 /// ```
 #[must_use]
 pub fn estimate_costs(ctx: &WorkloadContext) -> CostEstimate {
