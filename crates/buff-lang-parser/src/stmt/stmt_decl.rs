@@ -629,16 +629,33 @@ pub fn parse_type_params(stream: &mut TokenStream<'_>) -> Result<Vec<TypeParam>,
 
 /// Parse an `enum` declaration (T27 + T13 generics).
 ///
-/// See [`parse_enum_decl`] docs above for the full grammar.
+/// Supports two syntactic forms:
+///
+/// **Layout form** (primary — indentation-based, BUG-6 fix):
+///
+/// ```text
+/// enum Color:
+///     Red
+///     Green(Int)
+/// ```
+///
+/// **Brace form** (compact one-liners):
+///
+/// ```text
+/// enum Color { Red, Green(Int) }
+/// ```
+///
+/// The parser peeks at the token after the type-param list: `:` → layout
+/// form, `{` → brace form. Both produce the same [`EnumDecl`] AST.
 ///
 /// # Errors
 ///
 /// Returns [`ParseError`] if:
 /// - the token after `enum` is not an identifier,
-/// - the opening `{` is missing,
+/// - neither `:` nor `{` follows the name/generics,
 /// - a variant name is missing or not an identifier,
 /// - a variant payload type fails to parse via [`parse_type_ref`],
-/// - the closing `}` is missing.
+/// - the closing `}` is missing (brace form).
 pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseError> {
     let enum_tok = stream.expect(TokenKind::KwEnum)?;
     let start = enum_tok.span.start;
@@ -656,9 +673,76 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
     // Optional generic parameters: `<T, E>` (T13 — shared helper).
     let type_params = parse_type_params(stream)?;
 
-    // Opening `{` of the variant list.
-    stream.expect(TokenKind::LBrace)?;
     let mut variants: Vec<EnumVariant> = Vec::new();
+
+    // Layout-sensitive form (BUG-6 fix): `enum Name:` + indented variant lines.
+    //
+    //   enum Color:
+    //       Red
+    //       Green(Int)
+    //
+    // Mirrors the layout arm of `parse_struct_decl`: peek at the token after
+    // the type-param list — `:` → layout form, `{` (fall-through) → brace
+    // form. `peek_kind` skips layout tokens but `:` is not one, so the
+    // dispatch sees it directly.
+    if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+        stream.advance(); // consume `:`
+                          // Expect a Newline then an Indent (offside-rule tokens emitted by
+                          // `indent.rs`). Use RAW stream access because the regular TokenStream
+                          // skips layout tokens (Newline/Indent/Dedent).
+        if !matches!(stream.peek_raw_kind(), Some(TokenKind::Newline)) {
+            let span = stream
+                .peek_raw()
+                .map(|t| t.span)
+                .unwrap_or_else(|| stream.eof_span());
+            return Err(ParseError::new(Diagnostic::error(
+                "expected newline after `enum Name:`",
+                span,
+            )));
+        }
+        stream.advance_raw(); // consume Newline
+        if !matches!(stream.peek_raw_kind(), Some(TokenKind::Indent)) {
+            let span = stream
+                .peek_raw()
+                .map(|t| t.span)
+                .unwrap_or_else(|| stream.eof_span());
+            return Err(ParseError::new(Diagnostic::error(
+                "expected indented variant list after `enum Name:`",
+                span,
+            )));
+        }
+        stream.advance_raw(); // consume Indent
+                              // Parse variants until Dedent. Each variant is an identifier plus an
+                              // optional `( Type, Type, ... )` payload — same shape as the brace
+                              // form below, only the separator differs (newline vs comma).
+        loop {
+            variants.push(parse_enum_variant_payload(stream, source_id)?);
+            // Consume the trailing Newline (required between variants in
+            // layout-sensitive form — use RAW stream because the regular
+            // stream skips layout tokens).
+            if matches!(stream.peek_raw_kind(), Some(TokenKind::Newline)) {
+                stream.advance_raw();
+            }
+            // Check for Dedent (end of variant list) using RAW stream.
+            if matches!(stream.peek_raw_kind(), Some(TokenKind::Dedent)) {
+                stream.advance_raw(); // consume Dedent
+                break;
+            }
+            if stream.is_at_end() {
+                break;
+            }
+        }
+        let span_end = stream.peek().map(|t| t.span.start).unwrap_or_else(|| 0);
+        return Ok(EnumDecl {
+            name,
+            type_params,
+            variants,
+            span: Span::new(start, span_end, source_id),
+        });
+    }
+
+    // Brace-delimited form: `enum Name { Variant, ... }`.
+    stream.expect(TokenKind::LBrace)?;
     // Empty body: `enum Empty { }`.
     if matches!(stream.peek_kind(), Some(TokenKind::RBrace)) {
         let rb = stream.expect(TokenKind::RBrace)?;
@@ -670,74 +754,7 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
         });
     }
     loop {
-        // Variant name (mandatory identifier).
-        let vname_tok = stream.advance().ok_or_else(|| {
-            ParseError::new(Diagnostic::error(
-                "expected enum variant name, found end of input",
-                stream.eof_span(),
-            ))
-        })?;
-        let vname = extract_ident(vname_tok.clone())?;
-        let vstart = vname_tok.span.start;
-        // Optional payload `( Type, Type, ... )`.
-        let mut data: Option<Vec<TypeRef>> = None;
-        if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
-            stream.advance(); // consume `(`
-            let mut tys: Vec<TypeRef> = Vec::new();
-            // Empty payload `()` is allowed — treat as no payload (unit variant).
-            if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
-                loop {
-                    let ty = parse_type_ref(stream)?;
-                    tys.push(ty);
-                    match stream.peek_kind() {
-                        Some(TokenKind::Comma) => {
-                            stream.advance();
-                            // Allow trailing comma.
-                            if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
-                                break;
-                            }
-                        }
-                        Some(TokenKind::RParen) => break,
-                        Some(other) => {
-                            return Err(ParseError::new(Diagnostic::error(
-                                format!("expected `,` or `)` in variant payload, found `{other}`"),
-                                stream
-                                    .peek()
-                                    .map(|t| t.span)
-                                    .unwrap_or_else(|| stream.eof_span()),
-                            )));
-                        }
-                        None => {
-                            return Err(ParseError::new(Diagnostic::error(
-                                "unterminated variant payload (missing `)`)",
-                                stream.eof_span(),
-                            )));
-                        }
-                    }
-                }
-            }
-            let rparen = stream.expect(TokenKind::RParen)?;
-            // Only record the payload if it has at least one type — `()` is
-            // equivalent to no payload (unit variant) for codegen purposes.
-            if !tys.is_empty() {
-                data = Some(tys);
-            }
-            // Span end of the variant covers the closing `)`.
-            let vend = rparen.span.end;
-            variants.push(EnumVariant {
-                name: vname,
-                data,
-                span: Span::new(vstart, vend, source_id),
-            });
-        } else {
-            // Unit variant (no payload).
-            let vend = vname_tok.span.end;
-            variants.push(EnumVariant {
-                name: vname,
-                data,
-                span: Span::new(vstart, vend, source_id),
-            });
-        }
+        variants.push(parse_enum_variant_payload(stream, source_id)?);
         // Comma separator or end of list.
         match stream.peek_kind() {
             Some(TokenKind::Comma) => {
@@ -771,6 +788,86 @@ pub fn parse_enum_decl(stream: &mut TokenStream<'_>) -> Result<EnumDecl, ParseEr
         type_params,
         variants,
         span: Span::new(start, rb.span.end, source_id),
+    })
+}
+
+/// Parse a single enum variant: an identifier name plus an optional
+/// `( Type, Type, ... )` payload, returned as a fully-constructed
+/// [`EnumVariant`]. Shared by the brace-form and layout-form arms of
+/// [`parse_enum_decl`] so both shapes parse variants identically (BUG-6 fix
+/// — extracted to avoid divergence between the two forms).
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if the variant name is missing/not an identifier,
+/// or a payload type fails to parse via [`parse_type_ref`].
+fn parse_enum_variant_payload(
+    stream: &mut TokenStream<'_>,
+    source_id: buff_lang_error::SourceId,
+) -> Result<EnumVariant, ParseError> {
+    // Variant name (mandatory identifier).
+    let vname_tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected enum variant name, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    let vname = extract_ident(vname_tok.clone())?;
+    let vstart = vname_tok.span.start;
+    // Optional payload `( Type, Type, ... )`.
+    let mut data: Option<Vec<TypeRef>> = None;
+    let vend;
+    if matches!(stream.peek_kind(), Some(TokenKind::LParen)) {
+        stream.advance(); // consume `(`
+        let mut tys: Vec<TypeRef> = Vec::new();
+        // Empty payload `()` is allowed — treat as no payload (unit variant).
+        if !matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+            loop {
+                let ty = parse_type_ref(stream)?;
+                tys.push(ty);
+                match stream.peek_kind() {
+                    Some(TokenKind::Comma) => {
+                        stream.advance();
+                        // Allow trailing comma.
+                        if matches!(stream.peek_kind(), Some(TokenKind::RParen)) {
+                            break;
+                        }
+                    }
+                    Some(TokenKind::RParen) => break,
+                    Some(other) => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            format!("expected `,` or `)` in variant payload, found `{other}`"),
+                            stream
+                                .peek()
+                                .map(|t| t.span)
+                                .unwrap_or_else(|| stream.eof_span()),
+                        )));
+                    }
+                    None => {
+                        return Err(ParseError::new(Diagnostic::error(
+                            "unterminated variant payload (missing `)`)",
+                            stream.eof_span(),
+                        )));
+                    }
+                }
+            }
+        }
+        let rparen = stream.expect(TokenKind::RParen)?;
+        // Only record the payload if it has at least one type — `()` is
+        // equivalent to no payload (unit variant) for codegen purposes.
+        if !tys.is_empty() {
+            data = Some(tys);
+        }
+        // Span end of the variant covers the closing `)`.
+        vend = rparen.span.end;
+    } else {
+        // Unit variant (no payload).
+        vend = vname_tok.span.end;
+    }
+    Ok(EnumVariant {
+        name: vname,
+        data,
+        span: Span::new(vstart, vend, source_id),
     })
 }
 
