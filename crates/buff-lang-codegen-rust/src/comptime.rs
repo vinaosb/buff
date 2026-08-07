@@ -135,7 +135,19 @@ fn rust_expr_for(value: &ComptimeValue, span: BuffSpan) -> Result<SynExpr, Codeg
 }
 
 fn parse_simple_type(name: &str) -> SynType {
-    syn::parse_str(name).unwrap_or_else(|_| syn::parse_str("i64").expect("i64 is valid"))
+    // Parse the given type name; on failure fall back to `i64` (Buff's
+    // default integer type, always valid Rust). The final `unwrap_or_else`
+    // is purely defensive — it only fires if `i64` itself fails to parse
+    // (a broken syn build), in which case we return the unit type `()`
+    // rather than panicking in codegen.
+    syn::parse_str(name)
+        .or_else(|_| syn::parse_str("i64"))
+        .unwrap_or_else(|_| {
+            syn::Type::Tuple(syn::TypeTuple {
+                paren_token: Default::default(),
+                elems: Default::default(),
+            })
+        })
 }
 
 fn type_to_source(ty: &SynType) -> String {

@@ -196,9 +196,17 @@ impl<'a> TokenStream<'a> {
     /// (`Newline`/`Indent`/`Dedent`) are transparent — `peek_kind` already
     /// skips them — so the guarantee holds.
     pub fn advance_after_peek(&mut self) -> Token {
-        // The contract guarantees advance() returns Some; the expect
-        // documents the invariant (NOT a user-facing error path).
-        self.advance().expect("peek guaranteed a token")
+        // The contract guarantees advance() returns Some; on the impossible
+        // contract violation (caller forgot to peek) we return a synthetic
+        // EOF token instead of panicking — downstream parsing will surface a
+        // clean "unexpected end of input" error rather than crashing.
+        match self.advance() {
+            Some(tok) => tok,
+            None => Token {
+                kind: TokenKind::Eof,
+                span: self.eof_span(),
+            },
+        }
     }
 
     /// True when the next significant token is `kind` (by structural match).
