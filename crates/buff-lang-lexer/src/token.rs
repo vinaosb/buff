@@ -293,6 +293,20 @@ impl TokenKind {
             "extend" => Some(Self::KwExtend),
             "defer" => Some(Self::KwDefer),
             "impl" => Some(Self::KwImpl),
+            // BUG-4: word aliases for the symbolic logic operators. `and`,
+            // `or`, `not` map to the EXISTING operator tokens (AndAnd/OrOr/
+            // Not) so the Pratt parser and Rust codegen handle them with
+            // zero changes — they produce the identical AST and identical
+            // Rust output (`&&`/`||`/`!`). They are deliberately NOT in
+            // [`all_keywords`](Self::all_keywords) / [`is_keyword`](Self::is_keyword):
+            // they are operator aliases (Python/SQL-style), not reserved
+            // keyword token kinds. Precedence mirrors the symbolic forms and
+            // Python: `not` (unary, tightest) > `and` (binary) > `or` (binary,
+            // loosest). The lexer always emits the operator token for these
+            // words, so a user cannot use `and`/`or`/`not` as identifiers.
+            "and" => Some(Self::AndAnd),
+            "or" => Some(Self::OrOr),
+            "not" => Some(Self::Not),
             _ => None,
         }
     }

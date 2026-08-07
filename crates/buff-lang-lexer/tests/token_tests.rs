@@ -111,6 +111,103 @@ fn while_tokenizes_as_keyword_not_ident() {
     );
 }
 
+// BUG-4: `and`/`or`/`not` are word aliases for the symbolic operators
+// `&&`/`||`/`!`. The lexer must emit the SAME operator token kinds
+// (AndAnd/OrOr/Not) — NOT `Ident("and")` — so the existing Pratt parser and
+// codegen handle them with zero changes. They are deliberately NOT in
+// `all_keywords()` / `is_keyword()` because they are operator aliases, not
+// reserved keywords: a user cannot use `and` as a variable name (the lexer
+// always wins), but the token kind is an operator.
+fn lex_significant(src: &str) -> Vec<TokenKind> {
+    use buff_lang_error::SourceId;
+    let tokens = tokenize(src, SourceId(0)).expect("lexer should succeed");
+    tokens
+        .iter()
+        .filter(|t| !matches!(t.kind, TokenKind::Eof | TokenKind::Newline))
+        .map(|t| t.kind.clone())
+        .collect()
+}
+
+#[test]
+fn and_tokenizes_as_and_and_operator() {
+    let significant = lex_significant("and");
+    assert_eq!(
+        significant,
+        vec![TokenKind::AndAnd],
+        "expected `and` to lex as AndAnd (same as `&&`), got {significant:?}"
+    );
+}
+
+#[test]
+fn or_tokenizes_as_or_or_operator() {
+    let significant = lex_significant("or");
+    assert_eq!(
+        significant,
+        vec![TokenKind::OrOr],
+        "expected `or` to lex as OrOr (same as `||`), got {significant:?}"
+    );
+}
+
+#[test]
+fn not_tokenizes_as_not_operator() {
+    let significant = lex_significant("not");
+    assert_eq!(
+        significant,
+        vec![TokenKind::Not],
+        "expected `not` to lex as Not (same as `!`), got {significant:?}"
+    );
+}
+
+#[test]
+fn word_operators_are_not_keywords() {
+    // `and`/`or`/`not` are operator aliases, NOT keywords. They must NOT
+    // appear in `all_keywords()` (that list drives keyword token kinds only)
+    // and the resulting operator tokens must NOT satisfy `is_keyword()`.
+    for word in ["and", "or", "not"] {
+        assert!(
+            !TokenKind::all_keywords().contains(&word),
+            "`{word}` should NOT be in all_keywords() — it is an operator alias"
+        );
+        let kind = TokenKind::from_keyword(word)
+            .unwrap_or_else(|| panic!("from_keyword({word:?}) must return Some"));
+        assert!(
+            !kind.is_keyword(),
+            "{kind:?} (from `{word}`) must NOT be a keyword — it is an operator"
+        );
+    }
+}
+
+#[test]
+fn word_operators_in_expressions_tokenize_correctly() {
+    // `a and b` should produce [Ident("a"), AndAnd, Ident("b")] — the SAME
+    // token stream as `a && b`.
+    assert_eq!(
+        lex_significant("a and b"),
+        vec![
+            TokenKind::Ident("a".into()),
+            TokenKind::AndAnd,
+            TokenKind::Ident("b".into()),
+        ]
+    );
+    assert_eq!(
+        lex_significant("a && b"),
+        vec![
+            TokenKind::Ident("a".into()),
+            TokenKind::AndAnd,
+            TokenKind::Ident("b".into()),
+        ]
+    );
+    // `not a` should produce [Not, Ident("a")] — the same as `!a`.
+    assert_eq!(
+        lex_significant("not a"),
+        vec![TokenKind::Not, TokenKind::Ident("a".into())]
+    );
+    assert_eq!(
+        lex_significant("!a"),
+        vec![TokenKind::Not, TokenKind::Ident("a".into())]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Token construction
 // ---------------------------------------------------------------------------

@@ -284,9 +284,16 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 - Braces `{ }` reserved for data: struct literals, maps, lambdas, interpolation
 - Statically typed with aggressive inference — types rarely written
 
-**Reserved keywords (25):**
-`func let mut struct enum trait type if else for return break continue in match
-async spawn import export from as true false extern unsafe`
+**Reserved keywords (30):**
+`func let mut struct enum trait type if else for while return break continue in
+match async spawn import export from as true false extern unsafe guard extend
+defer impl`
+
+**Word operators (aliases):**
+`and` `or` `not` — Python/SQL-style aliases for `&&` `||` `!`. They parse to
+the identical AST and emit byte-identical Rust, so `a and b` and `a && b` are
+fully interchangeable. Precedence mirrors the symbolic forms (and Python):
+`not` (unary, tightest) > `and` (binary) > `or` (binary, loosest).
 
 **What's intentionally absent:**
 `class`, inheritance, `null`/`nil`, manual pointers (`*` `&`), visible lifetimes

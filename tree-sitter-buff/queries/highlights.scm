@@ -38,8 +38,9 @@
 ; Keywords (string-literal tokens — match by text)
 ; -----------------------------------------------------------------------------
 [
-  "func" "let" "enum" "trait" "if" "else" "for" "return"
+  "func" "let" "enum" "trait" "if" "else" "for" "while" "return"
   "match" "import" "export" "from" "spawn" "guard" "defer" "extend"
+  "struct" "type" "impl"
 ] @keyword
 
 ; break_statement / continue_statement are named nodes (single-token rules);
@@ -143,6 +144,8 @@
   "->" "=>" "=" "+=" "-=" "*=" "/=" "%="
   ".." "..="
   "|>" "?."
+  ; BUG-4: word-operator aliases for `&&`/`||`/!`.
+  "and" "or" "not"
 ] @operator
 
 ; -----------------------------------------------------------------------------

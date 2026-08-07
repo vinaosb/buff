@@ -5,7 +5,8 @@
  *  - 4-space indentation defines blocks (no braces for control flow).
  *  - Braces `{}` are reserved for data: struct literals, maps, closures,
  *    string interpolation, match arms, enum/trait/extend bodies.
- *  - 28 reserved keywords (see keyword list below).
+ *  - 30 reserved keywords (see grammar rules below) plus 3 word-operator
+ *    aliases `and`/`or`/`not` (BUG-4) that mirror `&&`/`||`/`!`.
  *
  * The external scanner (`src/scanner.c`) implements the offside rule:
  * it emits NEWLINE / INDENT / DEDENT tokens based on leading-whitespace
@@ -147,6 +148,7 @@ module.exports = grammar({
       $.let_declaration,
       $.if_statement,
       $.for_statement,
+      $.while_statement,
       $.match_statement,
       $.return_statement,
       $.break_statement,
@@ -201,6 +203,14 @@ module.exports = grammar({
         seq('let', field('pattern', $._pattern), '=', field('value', $._expression)),
         field('condition', $._expression),
       ),
+      field('body', $.block),
+    ),
+
+    // BUG-9: `while cond { body }` — conventional conditional loop. Mirrors
+    // the `for cond { body }` condition form (third arm above).
+    while_statement: $ => seq(
+      'while',
+      field('condition', $._expression),
       field('body', $.block),
     ),
 
@@ -424,6 +434,11 @@ module.exports = grammar({
         ['<', PREC.comparison], ['>', PREC.comparison], ['<=', PREC.comparison], ['>=', PREC.comparison],
         ['&&', PREC.logical_and],
         ['||', PREC.logical_or],
+        // BUG-4: word-operator aliases. `and`/`or` share the precedence of
+        // their symbolic twins (`&&`/`||`) so highlighting and parsing match
+        // the authoritative Rust parser in `crates/buff-lang-parser/`.
+        ['and', PREC.logical_and],
+        ['or', PREC.logical_or],
         ['&', PREC.bitwise_and],
         ['|', PREC.bitwise_or],
         ['^', PREC.bitwise_xor],
@@ -452,7 +467,9 @@ module.exports = grammar({
     )),
 
     unary_expression: $ => prec(PREC.unary, seq(
-      field('operator', choice('-', '!', '~')),
+      // BUG-4: `not` is a word alias for `!` (same precedence, tightest of
+      // the three word operators: `not` > `and` > `or`).
+      field('operator', choice('-', '!', '~', 'not')),
       field('argument', $._expression),
     )),
 
