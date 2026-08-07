@@ -529,7 +529,7 @@ mod tests {
         // Look up the mangled name for the SECOND impl.
         let second_decl = match &decls[1] {
             Decl::FuncDecl(f) => f,
-            _ => unreachable!(),
+            other => panic!("test fixture: expected FuncDecl, got {other:?}"),
         };
         let method = table.method_for_decl(second_decl).unwrap();
         assert_eq!(method.mangled_name, "matmul_float_float");

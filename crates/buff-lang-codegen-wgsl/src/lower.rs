@@ -164,13 +164,17 @@ fn lower_literal(lit: &Literal) -> Result<String, WgslError> {
             "false".to_string()
         }),
         Literal::Byte(b) => Ok(format!("{b}u")),
-        // filter_literal already rejected the rest; this is unreachable but
-        // kept exhaustive to survive future Literal additions.
+        // filter_literal already rejected the rest above; this arm only fires
+        // if a future Literal variant is added without a filter_literal match.
+        // We return a structured error rather than panicking so callers (and
+        // the runtime CPU-fallback path) see a recoverable signal.
         Literal::Double(_)
         | Literal::String(_)
         | Literal::Char(_)
         | Literal::Decimal(_)
-        | Literal::Regex(_) => unreachable!("filter_literal rejected non-WGSL literal"),
+        | Literal::Regex(_) => Err(WgslError::UnsupportedExpr {
+            detail: "literal kind not WGSL-native".to_string(),
+        }),
     }
 }
 

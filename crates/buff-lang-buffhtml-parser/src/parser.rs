@@ -163,7 +163,12 @@ impl Parser {
         let tok = self.advance();
         let (text, span) = match tok.kind {
             BuffHtmlTokenKind::Text(s) => (s, tok.span),
-            _ => unreachable!("parse_text_node called on non-text token"),
+            other => {
+                return Err(self.err(
+                    format!("internal: parse_text_node called on non-text token: {other:?}"),
+                    tok.span,
+                ));
+            }
         };
         Ok(RsxNode::Text(buff_lang_ast_rsx::RsxText::new(text, span)))
     }
@@ -172,7 +177,12 @@ impl Parser {
         let tok = self.advance();
         let (expr, span) = match tok.kind {
             BuffHtmlTokenKind::Interp(s) => (s, tok.span),
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!("internal: parse_interp called on non-interp token: {other:?}"),
+                    tok.span,
+                ));
+            }
         };
         Ok(RsxNode::Interp(RsxInterp::new(expr, span)))
     }
@@ -181,7 +191,14 @@ impl Parser {
         let tok = self.advance();
         let (text, span) = match tok.kind {
             BuffHtmlTokenKind::HtmlComment(s) => (s, tok.span),
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!(
+                        "internal: parse_html_comment called on non-html-comment token: {other:?}"
+                    ),
+                    tok.span,
+                ));
+            }
         };
         Ok(RsxNode::Comment(RsxComment::new(text, span)))
     }
@@ -190,7 +207,14 @@ impl Parser {
         let tok = self.advance();
         let (text, span) = match tok.kind {
             BuffHtmlTokenKind::BuffComment(s) => (s, tok.span),
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!(
+                        "internal: parse_buff_comment called on non-buff-comment token: {other:?}"
+                    ),
+                    tok.span,
+                ));
+            }
         };
         Ok(RsxNode::Comment(RsxComment::new(text, span)))
     }
@@ -200,7 +224,14 @@ impl Parser {
         let tok = self.advance();
         let (expr, span) = match tok.kind {
             BuffHtmlTokenKind::HtmlEscape(s) => (s, tok.span),
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!(
+                        "internal: parse_html_escape called on non-html-escape token: {other:?}"
+                    ),
+                    tok.span,
+                ));
+            }
         };
         Ok(RsxNode::RawHtml(buff_lang_ast_rsx::RsxRawHtml {
             expr,
@@ -222,7 +253,12 @@ impl Parser {
         let start_span = self.span_here();
         let fut_expr = match self.advance().kind {
             BuffHtmlTokenKind::AwaitOpen(f) => f,
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!("internal: parse_await called on non-await-open token: {other:?}"),
+                    start_span,
+                ));
+            }
         };
         let fut_span = start_span;
 
@@ -388,7 +424,14 @@ impl Parser {
         let start_span = self.span_here();
         let tag = match self.advance().kind {
             BuffHtmlTokenKind::OpenTagStart(n) => n,
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!(
+                        "internal: parse_element called on non-open-tag-start token: {other:?}"
+                    ),
+                    start_span,
+                ));
+            }
         };
         let is_component = is_component_tag(&tag);
         let attributes = self.parse_attributes()?;
@@ -641,7 +684,12 @@ impl Parser {
         let start_span = self.span_here();
         let first_cond = match self.advance().kind {
             BuffHtmlTokenKind::IfOpen(c) => c,
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!("internal: parse_if called on non-if-open token: {other:?}"),
+                    start_span,
+                ));
+            }
         };
         let first_cond_span = start_span;
         let mut branches: Vec<RsxIfBranch> = Vec::new();
@@ -714,7 +762,12 @@ impl Parser {
                 index,
                 key,
             } => (iterable, start_span, binding, index, key),
-            _ => unreachable!(),
+            other => {
+                return Err(self.err(
+                    format!("internal: parse_each called on non-each-open token: {other:?}"),
+                    start_span,
+                ));
+            }
         };
         let body =
             self.parse_children_until_terminators(&[Terminator::Else, Terminator::EachClose])?;

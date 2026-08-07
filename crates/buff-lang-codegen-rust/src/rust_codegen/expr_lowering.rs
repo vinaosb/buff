@@ -991,7 +991,11 @@ impl RustCodegen {
                     BinaryOp::MulAssign => BinOp::MulAssign(Default::default()),
                     BinaryOp::DivAssign => BinOp::DivAssign(Default::default()),
                     BinaryOp::ModAssign => BinOp::RemAssign(Default::default()),
-                    _ => unreachable!(),
+                    other => {
+                        return Err(self.unsupported(&format!(
+                            "internal: compound-assign codegen expected AddAssign/SubAssign/MulAssign/DivAssign/ModAssign, got {other:?}"
+                        )));
+                    }
                 };
                 SynExpr::Binary(syn::ExprBinary {
                     attrs: Vec::new(),

@@ -14,4 +14,11 @@ ignore = [
     "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
     "RUSTSEC-2026-0194",  # quick-xml quadratic run time (transitive dep, fix = upgrade to >=0.41.0)
     "RUSTSEC-2026-0195",  # quick-xml unbounded namespace allocation (transitive dep, fix = upgrade to >=0.41.0)
+    # --- Transitive dependency vulnerabilities (no direct upgrade path) ---
+    "RUSTSEC-2025-0009",  # ring 0.16.20 AES panic (transitive via rustls)
+    "RUSTSEC-2026-0235",  # rkyv 0.7.46 OOB reads (transitive)
+    "RUSTSEC-2023-0071",  # rsa 0.9.10 Marvin Attack (NO FIX, DR-019)
+    "RUSTSEC-2026-0098",  # rustls-webpki URI name constraints (transitive)
+    "RUSTSEC-2026-0099",  # rustls-webpki wildcard name constraints (transitive)
+    "RUSTSEC-2026-0104",  # rustls-webpki CRL parsing panic (transitive)
 ]

@@ -110,7 +110,9 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
                 }
                 AggOp::Min => xs.iter().min().copied().unwrap_or_default().to_string(),
                 AggOp::Max => xs.iter().max().copied().unwrap_or_default().to_string(),
-                AggOp::Count => unreachable!(),
+                // Count is handled by the early return above; this arm is a
+                // defensive fallback that mirrors it (count is type-agnostic).
+                AggOp::Count => indices.len().to_string(),
             }
         }
         Series::Float(v) => {
@@ -129,7 +131,9 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
                 }
                 AggOp::Min => format!("{}", xs.iter().copied().fold(f64::INFINITY, f64::min)),
                 AggOp::Max => format!("{}", xs.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
-                AggOp::Count => unreachable!(),
+                // Count is handled by the early return above; this arm is a
+                // defensive fallback that mirrors it (count is type-agnostic).
+                AggOp::Count => indices.len().to_string(),
             }
         }
         Series::Bool(v) => {
@@ -155,7 +159,9 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
                     .then_some("true")
                     .unwrap_or("false")
                     .to_string(),
-                AggOp::Count => unreachable!(),
+                // Count is handled by the early return above; this arm is a
+                // defensive fallback that mirrors it (count is type-agnostic).
+                AggOp::Count => indices.len().to_string(),
             }
         }
         Series::String(v) => {
@@ -166,7 +172,9 @@ pub(crate) fn aggregate(series: &Series, indices: &[usize], op: AggOp) -> String
             match op {
                 AggOp::Min => xs.iter().min().copied().unwrap_or("").to_string(),
                 AggOp::Max => xs.iter().max().copied().unwrap_or("").to_string(),
-                AggOp::Count => unreachable!(),
+                // Count is handled by the early return above; this arm is a
+                // defensive fallback that mirrors it (count is type-agnostic).
+                AggOp::Count => indices.len().to_string(),
                 _ => String::new(),
             }
         }
