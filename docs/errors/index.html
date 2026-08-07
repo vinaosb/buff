@@ -98,7 +98,7 @@
     </section>
 
     <section class="phase-section">
-        <h2 class="phase-heading">Parsing <span class="phase-range">E1101&ndash;E1109</span></h2>
+        <h2 class="phase-heading">Parsing <span class="phase-range">E1101&ndash;E1110</span></h2>
         <p class="phase-blurb">Errors from the recursive-descent + Pratt parser that turns tokens into an AST. Source crate: <code>buff-lang-parser</code>.</p>
         <ul class="code-list">
             <li><a class="code-row" href="E1101.html">
@@ -137,11 +137,15 @@
                 <span class="code-tag">E1109</span>
                 <span class="code-title">generics are not supported on `extern` functions</span>
             </a></li>
+            <li><a class="code-row" href="E1110.html">
+                <span class="code-tag">E1110</span>
+                <span class="code-title">malformed `comptime` block or parameter</span>
+            </a></li>
         </ul>
     </section>
 
     <section class="phase-section">
-        <h2 class="phase-heading">Type-checking <span class="phase-range">E1201&ndash;E1209</span></h2>
+        <h2 class="phase-heading">Type-checking <span class="phase-range">E1201&ndash;E1214</span></h2>
         <p class="phase-blurb">Errors from type inference, exhaustiveness, and module resolution. Source crate: <code>buff-lang-types</code>.</p>
         <ul class="code-list">
             <li><a class="code-row" href="E1201.html">
@@ -180,6 +184,26 @@
                 <span class="code-tag">E1209</span>
                 <span class="code-title">module / import resolution error</span>
             </a></li>
+            <li><a class="code-row" href="E1210.html">
+                <span class="code-tag">E1210</span>
+                <span class="code-title">comptime evaluation failed</span>
+            </a></li>
+            <li><a class="code-row" href="E1211.html">
+                <span class="code-tag">E1211</span>
+                <span class="code-title">I/O is not allowed at comptime</span>
+            </a></li>
+            <li><a class="code-row" href="E1212.html">
+                <span class="code-tag">E1212</span>
+                <span class="code-title">reflection beyond type info is not allowed at comptime</span>
+            </a></li>
+            <li><a class="code-row" href="E1213.html">
+                <span class="code-tag">E1213</span>
+                <span class="code-title">trait object references a name that is not a known trait</span>
+            </a></li>
+            <li><a class="code-row" href="E1214.html">
+                <span class="code-tag">E1214</span>
+                <span class="code-title">trait object lifetime annotation is not supported in this version</span>
+            </a></li>
         </ul>
     </section>
 
@@ -207,8 +231,8 @@
     </section>
 
     <section class="phase-section">
-        <h2 class="phase-heading">Runtime <span class="phase-range">E1401&ndash;E1410</span></h2>
-        <p class="phase-blurb">Errors surfaced by the heterogeneous compute runtime (GPU dispatch, channels, async). Source crate: <code>buff-lang-runtime</code>.</p>
+        <h2 class="phase-heading">Other <span class="phase-range">E1401&ndash;E1510</span></h2>
+        <p class="phase-blurb"></p>
         <ul class="code-list">
             <li><a class="code-row" href="E1401.html">
                 <span class="code-tag">E1401</span>
@@ -236,11 +260,11 @@
             </a></li>
             <li><a class="code-row" href="E1407.html">
                 <span class="code-tag">E1407</span>
-                <span class="code-title"><code>Channel.send</code> failed &mdash; all receivers dropped</span>
+                <span class="code-title">`Channel.send` failed — all receivers dropped</span>
             </a></li>
             <li><a class="code-row" href="E1408.html">
                 <span class="code-tag">E1408</span>
-                <span class="code-title"><code>Channel.receive</code> returned none &mdash; all senders dropped</span>
+                <span class="code-title">`Channel.receive` returned none — all senders dropped</span>
             </a></li>
             <li><a class="code-row" href="E1409.html">
                 <span class="code-tag">E1409</span>
@@ -250,13 +274,6 @@
                 <span class="code-tag">E1410</span>
                 <span class="code-title">runtime operation exceeded its deadline</span>
             </a></li>
-        </ul>
-    </section>
-
-    <section class="phase-section">
-        <h2 class="phase-heading">Warnings <span class="phase-range">E1501&ndash;E1510</span></h2>
-        <p class="phase-blurb">Lint warnings surfaced by <code>buff check</code> and codegen. These do NOT fail compilation; they advise the user of suspicious or dead code.</p>
-        <ul class="code-list">
             <li><a class="code-row" href="E1501.html">
                 <span class="code-tag">E1501</span>
                 <span class="code-title">use of a deprecated API</span>
@@ -283,7 +300,7 @@
             </a></li>
             <li><a class="code-row" href="E1507.html">
                 <span class="code-tag">E1507</span>
-                <span class="code-title"><code>let</code> binding shadows an outer binding</span>
+                <span class="code-title">`let` binding shadows an outer binding</span>
             </a></li>
             <li><a class="code-row" href="E1508.html">
                 <span class="code-tag">E1508</span>
@@ -291,11 +308,11 @@
             </a></li>
             <li><a class="code-row" href="E1509.html">
                 <span class="code-tag">E1509</span>
-                <span class="code-title"><code>if</code>/<code>else</code> branches produce identical values</span>
+                <span class="code-title">`if`/`else` branches produce identical values</span>
             </a></li>
             <li><a class="code-row" href="E1510.html">
                 <span class="code-tag">E1510</span>
-                <span class="code-title"><code>_</code> wildcard appears before the last explicit arm</span>
+                <span class="code-title">`_` wildcard appears before the last explicit arm</span>
             </a></li>
         </ul>
     </section>

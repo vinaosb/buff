@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -32,14 +32,15 @@
     </header>
 
     <section class="explanation">
-        <p>No GPU adapter is available on this host. <code>wgpu::Instance::request_adapter</code> returned <code>None</code> for every backend (Vulkan/Metal/DX12/WebGPU). The runtime treats this as a soft failure &mdash; every <code>@prefer(gpu)</code> hint falls back to CPU automatically.</p>
-        <p>This error surfaces only when the user EXPLICITLY required a GPU. Fix: install a GPU, or use the CPU path. This is NOT a bug &mdash; it is the runtime correctly reporting host capability.</p>
+        <p>No GPU adapter is available on this host. <code>wgpu::Instance::request_adapter</code> returned <code>None</code> for every backend (Vulkan/Metal/DX12/WebGPU). The runtime treats this as a soft failure — every <code>@prefer(gpu)</code> hint falls back to CPU automatically.</p>
+        <p>This error surfaces only when the user EXPLICITLY required a GPU (e.g. a library that refuses to run without one). Fix: install a GPU, or use the CPU path.</p>
+        <p>This is NOT a bug — it is the runtime correctly reporting host capability.</p>
 
     </section>
 
     <p class="meta">
         <strong>Severity:</strong> Error<br />
-        <strong>Phase:</strong> Runtime<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.

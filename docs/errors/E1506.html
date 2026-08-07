@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -32,14 +32,14 @@
     </header>
 
     <section class="explanation">
-        <p>A branch of an <code>if</code>, <code>match</code>, or <code>for</code> can never execute because its condition is statically known to be <code>false</code>. Common shapes: <code>if false</code>, <code>match x { 1 if false => &hellip; }</code>, or a <code>for</code> over an empty literal range.</p>
-        <p>Distinct from E1504 (syntactically unreachable). Fix: delete the branch, or adjust the condition so the analyzer can prove it might be <code>true</code>.</p>
+        <p>A branch of an <code>if</code>, <code>match</code>, or <code>for</code> can never execute because its condition is statically known to be <code>false</code>. Common shapes: <code>if false</code>, <code>match x { 1 if false =&gt; … }</code>, or a <code>for</code> over an empty literal range.</p>
+        <p>Distinct from E1504 (which is syntactically unreachable, after a terminator); E1506 fires on a structurally reachable branch that's logically unreachable. Fix: delete the branch, or — if the static analysis is wrong — adjust the condition so the analyzer can prove it might be <code>true</code>.</p>
 
     </section>
 
     <p class="meta">
-        <strong>Severity:</strong> Warning<br />
-        <strong>Phase:</strong> Warning<br />
+        <strong>Severity:</strong> Error<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -32,14 +32,14 @@
     </header>
 
     <section class="explanation">
-        <p>A runtime operation exceeded its deadline. Three sub-cases share this code: (1) <code>Channel.receive(timeout: Duration)</code> returned <code>Err</code> because no message arrived within the deadline; (2) a GPU dispatch&apos;s <code>map_async</code> + <code>device.poll(Wait)</code> exceeded the internal readback deadline; (3) cold-start <code>wait_ready(deadline)</code> expired before device init finished.</p>
-        <p>Fix: increase the deadline, or investigate why the operation is slow (GPU readback latency, channel starvation, slow driver init on first use).</p>
+        <p>A runtime operation exceeded its deadline. Three sub-cases share this code: (1) <code>Channel.receive(timeout: Duration)</code> returned <code>Err</code> because no message arrived within the deadline; (2) a GPU dispatch's <code>map_async</code> + <code>device.poll(Wait)</code> exceeded the internal readback deadline; (3) the cold-start <code>wait_ready(deadline)</code> deadline expired before the GPU device finished initializing.</p>
+        <p>Fix: increase the deadline (if the operation is expected to be slow), or investigate why the operation is slow (GPU readback latency, channel starvation, slow driver init on first use).</p>
 
     </section>
 
     <p class="meta">
         <strong>Severity:</strong> Error<br />
-        <strong>Phase:</strong> Runtime<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -32,14 +32,15 @@
     </header>
 
     <section class="explanation">
-        <p>WGSL shader source produced by <code>buff-lang-codegen-wgsl</code> was rejected by the wgpu pipeline compiler. The shader source parses at compile time but fails wgpu&apos;s stricter validation: unsupported extension, unsupported address space, or a type mismatch the WGSL spec catches.</p>
-        <p>The diagnostic includes the wgpu-side parse/validation error. Fix: this is almost always a <code>buff-lang-codegen-wgsl</code> bug &mdash; report it with the shader source. Workaround: remove <code>@prefer(gpu)</code>.</p>
+        <p>WGSL shader source produced by <code>buff-lang-codegen-wgsl</code> was rejected by the wgpu pipeline compiler. The shader source parses at compile time (the codegen crate's own tests cover that) but fails wgpu's stricter validation: unsupported extension, unsupported address space, type mismatch the WGSL spec catches and the codegen tests don't.</p>
+        <p>The diagnostic includes the wgpu-side parse/validation error. Fix: this is almost always a <code>buff-lang-codegen-wgsl</code> bug (the codegen produced invalid WGSL) — report it with the shader source from the error message.</p>
+        <p>Workaround: remove <code>@prefer(gpu)</code> so the runtime uses the CPU path.</p>
 
     </section>
 
     <p class="meta">
         <strong>Severity:</strong> Error<br />
-        <strong>Phase:</strong> Runtime<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.
