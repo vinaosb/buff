@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -32,14 +32,14 @@
     </header>
 
     <section class="explanation">
-        <p>Code appears after a <code>return</code>, <code>break</code>, or <code>continue</code> statement in the same block. Such code can never execute &mdash; the terminator unconditionally transfers control elsewhere.</p>
-        <p>Fix: delete the unreachable code, or &mdash; if the terminator itself is the bug &mdash; fix the terminator (e.g. a stray <code>return</code> in the middle of a function).</p>
+        <p>Code appears after a <code>return</code>, <code>break</code>, or <code>continue</code> statement in the same block. Such code can never execute — the terminator unconditionally transfers control elsewhere.</p>
+        <p>Fix: delete the unreachable code, or — if the terminator itself is the bug — fix the terminator (e.g. a stray <code>return</code> in the middle of a function).</p>
 
     </section>
 
     <p class="meta">
-        <strong>Severity:</strong> Warning<br />
-        <strong>Phase:</strong> Warning<br />
+        <strong>Severity:</strong> Error<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.

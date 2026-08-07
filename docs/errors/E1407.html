@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>E1407 &mdash; &lt;code&gt;Channel.send&lt;/code&gt; failed &mdash; all receivers dropped</title>
-    <meta name="description" content="E1407: &lt;code&gt;Channel.send&lt;/code&gt; failed &mdash; all receivers dropped &mdash; explanation, example, and fix." />
+    <title>E1407 &mdash; `Channel.send` failed — all receivers dropped</title>
+    <meta name="description" content="E1407: `Channel.send` failed — all receivers dropped &mdash; explanation, example, and fix." />
     <meta name="color-scheme" content="dark" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -28,18 +28,18 @@
 
     <header class="code-page-header">
         <span class="code-page-tag">E1407</span>
-        <h1 class="code-page-title">&lt;code&gt;Channel.send&lt;/code&gt; failed &mdash; all receivers dropped</h1>
+        <h1 class="code-page-title">`Channel.send` failed — all receivers dropped</h1>
     </header>
 
     <section class="explanation">
-        <p>A <code>Channel&lt;T&gt;.send(...)</code> call failed because all receivers were dropped &mdash; the channel is closed and further sends cannot succeed. T2&apos;s MPSC channel follows Rust&apos;s <code>tokio::sync::mpsc</code> semantics: a channel is closed when the last <code>Receiver</code> is dropped.</p>
-        <p>Fix: keep the receiving task alive for the lifetime of all senders, or restructure the program so the sender knows the receiver has exited.</p>
+        <p>A <code>Channel&lt;T&gt;.send(...)</code> call failed because all receivers were dropped — the channel is closed and further sends cannot succeed. T2's MPSC channel (<code>buff_lang_runtime::Channel</code>) follows Rust's <code>tokio::sync::mpsc</code> semantics: a channel is closed when the last <code>Receiver</code> is dropped.</p>
+        <p>Fix: keep the receiving task alive for the lifetime of all senders, or restructure the program so the sender knows the receiver has exited (e.g. via a separate shutdown signal).</p>
 
     </section>
 
     <p class="meta">
         <strong>Severity:</strong> Error<br />
-        <strong>Phase:</strong> Runtime<br />
+        <strong>Phase:</strong> Other<br />
         <strong>Stability:</strong> this code is stable across releases &mdash; it will never be renumbered or reused. See
         <a href="https://github.com/buff-lang/buff/blob/master/.sisyphus/plans/buff-conventions.md">&sect;19 of the conventions doc</a>
         for the full policy.

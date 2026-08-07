@@ -28,12 +28,12 @@
 
     <header class="code-page-header">
         <span class="code-page-tag">E1110</span>
-        <h1 class="code-page-title">malformed <code>comptime</code> block or parameter</h1>
+        <h1 class="code-page-title">malformed `comptime` block or parameter</h1>
     </header>
 
     <section class="explanation">
-        <p>A <code>comptime</code> block or parameter was malformed. <code>comptime</code> must be followed by a <code>{ ... }</code> block in statement position, or appear before a parameter name in a function signature (<code>fn f(comptime T: Type, x: T)</code>).</p>
-        <p>Bare <code>comptime</code> in expression position is not valid. Fix: wrap the comptime expression in a block, or move the <code>comptime</code> modifier to a valid position.</p>
+        <p>A <code>comptime</code> block or parameter was malformed. <code>comptime</code> must be followed by a <code>{ ... }</code> block in statement position, or appear before a parameter name in a function signature (<code>fn f(comptime T: Type, x: T)</code>). Bare <code>comptime</code> in expression position is not valid.</p>
+        <p>Fix: wrap the comptime expression in a block, or move the <code>comptime</code> modifier to a valid position.</p>
 
     </section>
 
