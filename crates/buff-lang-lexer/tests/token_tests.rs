@@ -15,10 +15,10 @@ fn all_keywords_present() {
     let expected: &[&str] = &[
         "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
         "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-        "true", "false", "extern", "unsafe", "guard", "extend", "defer",
+        "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
     ];
     assert_eq!(TokenKind::all_keywords(), expected);
-    assert_eq!(TokenKind::all_keywords().len(), 28);
+    assert_eq!(TokenKind::all_keywords().len(), 29);
 }
 
 #[test]
