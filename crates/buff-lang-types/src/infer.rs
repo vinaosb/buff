@@ -385,22 +385,15 @@ impl TypeInferencer {
                 if name.name == "None" {
                     return Ok(Type::option(Type::Unknown));
                 }
-                // P1.6: `not` is a future unary-logic operator (Python/SQL-
-                // style `not expr`). The parser currently lacks keyword
-                // recognition for it, so `return not type_is_gpu_eligible(t)`
-                // parses as TWO statements: `return not` (bare-ident) +
-                // `type_is_gpu_eligible(t)` (separate expr stmt). This is a
-                // known parser lang-gap tracked for a future wave. Until the
-                // parser supports `not` as a keyword, resolve the bare
-                // identifier to `Type::Unknown` so the self-host corpus's
-                // `type_must_run_on_cpu` (ty.buff:690) does not cascade a
-                // spurious "undefined variable: not" error. The resulting
-                // `return Unknown` is permissive at every downstream check
-                // (matching the promote.rs line-28 policy). Minimal and
-                // targeted — no other file in the corpus uses bare `not`.
-                if name.name == "not" {
-                    return Ok(Type::Unknown);
-                }
+                // NOTE: `not` is now a word alias for the `!` operator
+                // (BUG-4 — see `TokenKind::from_keyword` in buff-lang-lexer).
+                // The lexer emits `TokenKind::Not` for the word `not`, so the
+                // parser routes it through the unary-operator path and this
+                // `Expr::Ident` arm is never reached with `name.name == "not"`.
+                // The previous special-case workaround (returning
+                // `Type::Unknown` to silence a spurious "undefined variable:
+                // not" for the self-host corpus's `type_must_run_on_cpu`) is
+                // therefore dead code and was removed.
                 // BUG-14: bare enum variant identifiers resolve to their enum
                 // type. `status == Pending` (where `Pending` is a unit variant
                 // of a registered `enum Status { Pending, Done }`) must

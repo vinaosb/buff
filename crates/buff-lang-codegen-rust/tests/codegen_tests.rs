@@ -464,3 +464,62 @@ fn test_codegen_expr_function_shorthand() {
     // Re-parse to make sure it's valid Rust.
     syn::parse_str::<syn::File>(&src).expect("expr-function codegen must re-parse");
 }
+
+// ---------------------------------------------------------------------------
+// BUG-4: word operators `and`/`or`/`not` — full lex → parse → codegen
+// ---------------------------------------------------------------------------
+
+/// Run the full front-end pipeline (lex → parse) over a single `.buff`
+/// expression-statement function body, then lower to Rust via `generate_rust`.
+/// Mirrors how the CLI's `buff run` consumes a source file.
+fn codegen_from_source(src: &str) -> String {
+    use buff_lang_error::SourceId;
+    let tokens = buff_lang_lexer::tokenize(src, SourceId(0)).expect("lexer should succeed");
+    let decls = buff_lang_parser::parse(&tokens, SourceId(0)).expect("parser should succeed");
+    generate_rust(&decls).expect("codegen should succeed")
+}
+
+#[test]
+fn test_codegen_word_operators_end_to_end() {
+    // `a and b` must lower to the SAME Rust as `a && b` — i.e. the symbolic
+    // form, because the AST is identical (both produce BinaryOp::And).
+    let word_src = "func f(a: Bool, b: Bool) -> Bool:\n    return a and b";
+    let sym_src = "func f(a: Bool, b: Bool) -> Bool:\n    return a && b";
+    let word = codegen_from_source(word_src);
+    let sym = codegen_from_source(sym_src);
+    assert_eq!(
+        word, sym,
+        "`and` and `&&` must produce byte-identical Rust output\n--- word ---\n{word}\n--- sym ---\n{sym}"
+    );
+    assert!(word.contains("&&"), "expected `&&` in output, got:\n{word}");
+    syn::parse_str::<syn::File>(&word).expect("word-and codegen must re-parse as valid Rust");
+}
+
+#[test]
+fn test_codegen_word_or_and_not_end_to_end() {
+    // `a or b` → `||`, `not a` → `!`.
+    let or_src = "func f(a: Bool, b: Bool) -> Bool:\n    return a or b";
+    let or = codegen_from_source(or_src);
+    assert!(or.contains("||"), "expected `||` for `or`, got:\n{or}");
+    syn::parse_str::<syn::File>(&or).expect("word-or codegen must re-parse");
+
+    let not_src = "func f(a: Bool) -> Bool:\n    return not a";
+    let not_code = codegen_from_source(not_src);
+    assert!(
+        not_code.contains("!a") || not_code.contains("! a") || not_code.contains("!("),
+        "expected `!` for `not`, got:\n{not_code}"
+    );
+    syn::parse_str::<syn::File>(&not_code).expect("word-not codegen must re-parse");
+}
+
+#[test]
+fn test_codegen_symbolic_operators_unchanged() {
+    // Backward-compat regression: the existing symbolic operators must still
+    // codegen exactly as before (BUG-4 adds aliases, does not remove symbols).
+    let src = "func f(a: Bool, b: Bool, c: Bool) -> Bool:\n    return a && b || !c";
+    let out = codegen_from_source(src);
+    assert!(out.contains("&&"), "src = {out}");
+    assert!(out.contains("||"), "src = {out}");
+    assert!(out.contains("!"), "src = {out}");
+    syn::parse_str::<syn::File>(&out).expect("symbolic-operator codegen must re-parse");
+}

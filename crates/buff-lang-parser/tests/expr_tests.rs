@@ -535,6 +535,79 @@ fn test_or_lower_than_and() {
 }
 
 // ---------------------------------------------------------------------------
+// BUG-4: word operators `and`/`or`/`not` (aliases for `&&`/`||`/`!`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_word_and_parses_same_as_symbolic() {
+    // `a and b` must build the SAME AST as `a && b`.
+    let word = parse("a and b");
+    let symbolic = parse("a && b");
+    let expected = binop(BinaryOp::And, ident("a"), ident("b"));
+    assert_eq!(shape(&word), shape(&expected));
+    assert_eq!(shape(&word), shape(&symbolic));
+}
+
+#[test]
+fn test_word_or_parses_same_as_symbolic() {
+    // `a or b` must build the SAME AST as `a || b`.
+    let word = parse("a or b");
+    let symbolic = parse("a || b");
+    let expected = binop(BinaryOp::Or, ident("a"), ident("b"));
+    assert_eq!(shape(&word), shape(&expected));
+    assert_eq!(shape(&word), shape(&symbolic));
+}
+
+#[test]
+fn test_word_not_parses_as_unary() {
+    // `not a` must build the SAME AST as `!a`.
+    let word = parse("not a");
+    let symbolic = parse("!a");
+    let expected = unop(UnaryOp::Not, ident("a"));
+    assert_eq!(shape(&word), shape(&expected));
+    assert_eq!(shape(&word), shape(&symbolic));
+}
+
+#[test]
+fn test_word_operators_respect_precedence() {
+    // `a and b or c` ==>  Or(And(a, b), c)   — `and` binds tighter than `or`,
+    // mirroring `&&` > `||` (and Python's `and` > `or`).
+    let word = parse("a and b or c");
+    let symbolic = parse("a && b || c");
+    let expected = binop(
+        BinaryOp::Or,
+        binop(BinaryOp::And, ident("a"), ident("b")),
+        ident("c"),
+    );
+    assert_eq!(shape(&word), shape(&expected));
+    assert_eq!(shape(&word), shape(&symbolic));
+}
+
+#[test]
+fn test_word_not_binds_tighter_than_and() {
+    // `not a and b` ==>  And(Not(a), b)  — unary `not` is the tightest of the
+    // three, same as `!a && b`.
+    let word = parse("not a and b");
+    let symbolic = parse("!a && b");
+    let expected = binop(BinaryOp::And, unop(UnaryOp::Not, ident("a")), ident("b"));
+    assert_eq!(shape(&word), shape(&expected));
+    assert_eq!(shape(&word), shape(&symbolic));
+}
+
+#[test]
+fn test_mixed_word_and_symbolic_operators() {
+    // Word and symbolic operators mix freely in one expression.
+    // `a and b || not c` ==>  Or(And(a, b), Not(c))
+    let mixed = parse("a and b || not c");
+    let expected = binop(
+        BinaryOp::Or,
+        binop(BinaryOp::And, ident("a"), ident("b")),
+        unop(UnaryOp::Not, ident("c")),
+    );
+    assert_eq!(shape(&mixed), shape(&expected));
+}
+
+// ---------------------------------------------------------------------------
 // 4. Comparison operators
 // ---------------------------------------------------------------------------
 

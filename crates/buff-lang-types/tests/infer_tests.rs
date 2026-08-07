@@ -1922,18 +1922,38 @@ fn p16_logical_and_or_with_unknown_operands() {
     assert_eq!(t3, Type::Bool);
 }
 
-/// P1.6: a bare `not` identifier resolves to `Type::Unknown` instead of
-/// erroring "undefined variable: not". This is a targeted workaround for a
-/// parser lang-gap: the parser splits `return not type_is_gpu_eligible(t)` at
-/// the bare `not` (two statements) because `not` is not yet a Buff keyword.
-/// Without this, self-host/types/ty.buff:690 cascades a spurious error.
+/// BUG-4: `not` is now a word alias for the `!` operator. The lexer emits
+/// `TokenKind::Not` for the word `not`, so the parser routes it through the
+/// unary-operator path and NEVER produces `Expr::Ident("not")`. The previous
+/// workaround in `infer.rs` (returning `Type::Unknown` for a bare `not`
+/// identifier to paper over a parser lang-gap) is now dead code and was
+/// removed. This test verifies the new correct behavior:
+///
+/// 1. The unary `not` operator (`!x`) infers to `Bool` on a Bool operand —
+///    this is the path the parser now takes for the word `not`.
+/// 2. A MANUALLY-constructed `Expr::Ident("not")` (which the parser can no
+///    longer produce) correctly errors as "undefined variable", confirming
+///    the special-case workaround is gone and `not` is not silently treated
+///    as a value.
 #[test]
-fn p16_bare_not_identifier_resolves_to_unknown() {
+fn bug4_not_is_unary_operator_not_identifier() {
     let mut inf = TypeInferencer::new();
-    // Do NOT bind `not` in the environment — it must still resolve via the
-    // special-case in the Expr::Ident arm, not via env lookup.
+    inf.bind("flag", Type::Bool);
+
+    // `!flag` (and equivalently the word form `not flag`) → Bool.
+    let e = unary(UnaryOp::Not, ident("flag"));
     let ty = inf
-        .infer_expr(&ident("not"))
-        .expect("P1.6: bare `not` identifier must resolve to Unknown (parser lang-gap workaround)");
-    assert_eq!(ty, Type::Unknown, "bare `not` resolves to Unknown");
+        .infer_expr(&e)
+        .expect("BUG-4: unary `not`/`!` on a Bool operand must infer Bool");
+    assert_eq!(ty, Type::Bool, "`not flag` infers to Bool");
+
+    // A bare `Expr::Ident("not")` is no longer reachable from the parser
+    // (the lexer emits `TokenKind::Not`), so it should NOT resolve to a
+    // permissive `Type::Unknown` anymore — it is a plain undefined name.
+    let mut inf2 = TypeInferencer::new();
+    let result = inf2.infer_expr(&ident("not"));
+    assert!(
+        result.is_err(),
+        "BUG-4: bare `Expr::Ident(\"not\")` must error now that the workaround is removed"
+    );
 }
