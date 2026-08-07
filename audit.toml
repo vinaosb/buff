@@ -14,4 +14,24 @@ ignore = [
     "RUSTSEC-2025-0098",  # unic-ucd-version unmaintained
     "RUSTSEC-2026-0194",  # quick-xml quadratic run time (transitive dep, fix = upgrade to >=0.41.0)
     "RUSTSEC-2026-0195",  # quick-xml unbounded namespace allocation (transitive dep, fix = upgrade to >=0.41.0)
+    # --- Transitive dependency vulnerabilities (no direct upgrade path) ---
+    # ring 0.16.20 — pulled transitively by rustls/reqwest. The workspace pins
+    # ring 0.17.x directly, but an older 0.16.20 is pulled by a transitive dep.
+    # RUSTSEC-2025-0009: AES functions may panic with overflow checks.
+    "RUSTSEC-2025-0009",
+    # rkyv 0.7.46 — transitive dep (serialization). Fix requires upstream bump.
+    # RUSTSEC-2026-0235: OOB reads in archives with Rc/Arc.
+    "RUSTSEC-2026-0235",
+    # rsa 0.9.10 — direct workspace dep (rsa = "0.9"). NO FIX AVAILABLE.
+    # RUSTSEC-2023-0071: Marvin Attack (timing sidechannel key recovery).
+    # Upstream has not released a fix. Tracked in DR-019.
+    "RUSTSEC-2023-0071",
+    # rustls-webpki 0.101.7 / 0.102.8 — transitive via rustls/lettre.
+    # Fixed in 0.103.x but rustls hasn't bumped its webpki requirement yet.
+    # RUSTSEC-2026-0098: URI name constraints incorrectly accepted.
+    "RUSTSEC-2026-0098",
+    # RUSTSEC-2026-0099: Wildcard name constraints incorrectly accepted.
+    "RUSTSEC-2026-0099",
+    # RUSTSEC-2026-0104: Reachable panic in CRL parsing.
+    "RUSTSEC-2026-0104",
 ]

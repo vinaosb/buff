@@ -141,7 +141,14 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     }
                 };
                 let TokenKind::Ident(name) = method_tok.kind.clone() else {
-                    unreachable!("matched Ident above");
+                    // Defensive: the `matches!` above guarantees this is an
+                    // Ident, but we return a structured error instead of
+                    // panicking so a future TokenKind change can't crash the
+                    // parser.
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected method name after `.`, found `{}`", method_tok.kind),
+                        method_tok.span,
+                    )));
                 };
                 let method = Ident::new(name, method_tok.span);
                 // Method calls must be followed by an argument list `(...)`.
@@ -256,7 +263,17 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     }
                 };
                 let TokenKind::Ident(field_name) = name_tok.kind.clone() else {
-                    unreachable!("matched Ident above");
+                    // Defensive: the `matches!` above guarantees this is an
+                    // Ident, but we return a structured error instead of
+                    // panicking so a future TokenKind change can't crash the
+                    // parser.
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!(
+                            "expected field or method name after `?.`, found `{}`",
+                            name_tok.kind
+                        ),
+                        name_tok.span,
+                    )));
                 };
                 let field_ident = Ident::new(field_name, name_tok.span);
                 // Method-call form: `u?.m(args...)` — parse the arg list.
@@ -379,7 +396,15 @@ pub fn parse_one_call_arg(stream: &mut TokenStream<'_>) -> Result<Expr, ParseErr
         let name_span = name_tok.span;
         let name = match name_tok.kind {
             TokenKind::Ident(s) => Ident::new(s, name_span),
-            _ => unreachable!("peek guaranteed an Ident for named arg"),
+            // Defensive: the two-token peek above guarantees this is an Ident,
+            // but we return a structured error instead of panicking so a
+            // future TokenKind change can't crash the parser.
+            other => {
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected identifier for named argument, found `{other}`"),
+                    name_span,
+                )));
+            }
         };
         // Consume the `:` — its position is implied by `name_span.end` so we
         // don't need to keep the token; the value's span end is the

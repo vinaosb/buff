@@ -350,7 +350,13 @@ fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseErro
         if matches!(tok.kind, TokenKind::Ident(_)) {
             stream.advance();
             let TokenKind::Ident(name) = tok.kind.clone() else {
-                unreachable!("matched Ident above");
+                // Defensive: the `matches!` above guarantees this is an Ident,
+                // but we return a structured error instead of panicking so a
+                // future TokenKind change can't crash the parser.
+                return Err(ParseError::new(Diagnostic::error(
+                    format!("expected identifier in pattern, found `{}`", tok.kind),
+                    tok.span,
+                )));
             };
             let ident = Ident::new(name, tok.span);
             // Dot-qualified variant pattern: `EnumName.VariantName` or
@@ -615,7 +621,13 @@ pub fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
             }
         };
         let TokenKind::Ident(pname) = ptok.kind.clone() else {
-            unreachable!("matched Ident above");
+            // Defensive: the `matches!` above guarantees this is an Ident,
+            // but we return a structured error instead of panicking so a
+            // future TokenKind change can't crash the parser.
+            return Err(ParseError::new(Diagnostic::error(
+                format!("expected closure parameter name, found `{}`", ptok.kind),
+                ptok.span,
+            )));
         };
         params.push(Param {
             name: Ident::new(pname, ptok.span),
