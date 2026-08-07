@@ -530,3 +530,201 @@ fn enum_match_ast_node_constructors_are_public() {
         span,
     };
 }
+
+// ---------------------------------------------------------------------------
+// BUG-11: match layout form + colon-block arms + multi-statement bodies.
+//
+// Three new capabilities (all parser-only; the MatchArm AST already carries
+// `body: Block`):
+//
+//   BUG-11a — layout-sensitive `match x:` colon form (the brace form
+//             `match x { ... }` was the only one that worked).
+//   BUG-11b — colon-block arms (`pat:` + indented body) inside the layout
+//             form (the `=>` single-expression arm was the only one that
+//             worked).
+//   BUG-11c — multi-statement block bodies after `=>` in the brace form
+//             (`{ }` after `=>` was parsed as a lambda, not a block).
+//
+// Every existing brace-form test above is the backward-compatibility
+// regression suite.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bug_11a_layout_match_form_parses() {
+    // BUG-11a: `match x:` colon form with `=>` single-expression arms.
+    //
+    //   match x:
+    //       1 => "one"
+    //       2 => "two"
+    //       _ => "other"
+    let src = "match x:\n    1 => \"one\"\n    2 => \"two\"\n    _ => \"other\"";
+    let e = parse_expr(src);
+    match e {
+        Expr::MatchExpr {
+            scrutinee, arms, ..
+        } => {
+            match scrutinee.as_ref() {
+                Expr::Ident(id, _) => assert_eq!(id.name, "x", "scrutinee name"),
+                other => panic!("expected Ident scrutinee, got {other:?}"),
+            }
+            assert_eq!(arms.len(), 3, "three layout arms");
+            // First arm: literal pattern 1, body "one" (one-stmt block).
+            match &arms[0].pattern {
+                Pattern::Literal(Literal::Int(n), _) => assert_eq!(*n, 1, "first arm pattern"),
+                other => panic!("expected Literal pattern, got {other:?}"),
+            }
+            assert_eq!(arms[0].body.stmts.len(), 1, "first arm body is one stmt");
+            // Third arm: wildcard catch-all.
+            assert!(
+                matches!(arms[2].pattern, Pattern::Wildcard(_)),
+                "third arm is wildcard"
+            );
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11a_layout_match_form_with_guard_parses() {
+    // BUG-11a + guard: layout form arms may carry `if cond` guards.
+    let src = "match x:\n    1 if x > 0 => \"pos\"\n    _ => \"other\"";
+    let e = parse_expr(src);
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            assert!(arms[0].guard.is_some(), "first arm has a guard");
+            assert!(arms[1].guard.is_none(), "second arm has no guard");
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11b_colon_block_arm_parses() {
+    // BUG-11b: colon-block arm with an indented multi-statement body.
+    //
+    //   match x:
+    //       1:
+    //           print("got one")
+    //           return "one"
+    //       _:
+    //           return "other"
+    let src = "match x:\n    1:\n        print(\"got one\")\n        return \"one\"\n    _:\n        return \"other\"";
+    let e = parse_expr(src);
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 2, "two colon-block arms");
+            // First arm body: 2 statements (print call + return).
+            assert_eq!(
+                arms[0].body.stmts.len(),
+                2,
+                "first colon-block arm body has 2 stmts"
+            );
+            // Second arm body: 1 statement (return).
+            assert_eq!(
+                arms[1].body.stmts.len(),
+                1,
+                "second colon-block arm body has 1 stmt"
+            );
+            // Verify the first statement is a FuncCall (print).
+            assert!(
+                matches!(
+                    &arms[0].body.stmts[0],
+                    buff_lang_ast::Stmt::ExprStmt(Expr::FuncCall { .. }, _)
+                ),
+                "first stmt of arm 0 is print call"
+            );
+            // Verify the second statement is a Return.
+            assert!(
+                matches!(
+                    &arms[0].body.stmts[1],
+                    buff_lang_ast::Stmt::Return(Some(Expr::Literal(Literal::String(_), _)), _)
+                ),
+                "second stmt of arm 0 is return \"one\""
+            );
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11b_mixed_layout_arms_colon_and_arrow() {
+    // BUG-11b: a layout match may mix `=>` arms and `:` colon-block arms.
+    let src = "match x:\n    1 => \"one\"\n    _:\n        return \"other\"";
+    let e = parse_expr(src);
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            assert_eq!(arms[0].body.stmts.len(), 1, "first arm is single-expr");
+            assert_eq!(arms[1].body.stmts.len(), 1, "second arm is colon-block");
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11c_multistmt_block_in_brace_form_parses() {
+    // BUG-11c: `{ ... }` after `=>` is a multi-statement block, NOT a lambda.
+    //
+    //   match x {
+    //       1 => { print("one"); "one" },
+    //       _ => "other",
+    //   }
+    let src = "match x {\n    1 => { print(\"one\"); \"one\" },\n    _ => \"other\",\n}";
+    let e = parse_expr(src);
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            // First arm body is a block with 2 statements.
+            assert_eq!(
+                arms[0].body.stmts.len(),
+                2,
+                "multi-statement block body after =>"
+            );
+            // Verify it is NOT a Lambda (the pre-fix bug treated {} as closure).
+            assert!(
+                !matches!(
+                    &arms[0].body.stmts[0],
+                    buff_lang_ast::Stmt::ExprStmt(Expr::Lambda { .. }, _)
+                ),
+                "first arm body is a block, not a lambda"
+            );
+            // Second arm body is a single expression.
+            assert_eq!(arms[1].body.stmts.len(), 1);
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11c_brace_form_backward_compat_single_expr_arms() {
+    // Backward compatibility: the existing brace form with single-expression
+    // arms MUST still parse unchanged after the BUG-11 fixes.
+    let e = parse_expr("match c { Red => 1, Green => 2, Blue => 3 }");
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 3, "brace form backward compat");
+            for arm in &arms {
+                assert_eq!(arm.body.stmts.len(), 1, "each arm is single-expr");
+            }
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}
+
+#[test]
+fn bug_11c_brace_form_return_arm_still_works() {
+    // Backward compatibility: the self-host `return` arm pattern
+    // (`=> return expr`) must still work in the brace form.
+    let e = parse_expr("match x { 1 => return true, _ => false }");
+    match e {
+        Expr::MatchExpr { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            assert!(
+                matches!(&arms[0].body.stmts[0], buff_lang_ast::Stmt::Return(_, _)),
+                "first arm is a return"
+            );
+        }
+        other => panic!("expected MatchExpr, got {other:?}"),
+    }
+}

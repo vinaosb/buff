@@ -4,7 +4,7 @@
 //! pattern matcher), and parse_closure (lambda `{ |args| body }`).
 
 use buff_lang_ast::{Block, Expr, Ident, Literal, MatchArm, Pattern, Stmt};
-use buff_lang_error::{Diagnostic, ParseError, Span};
+use buff_lang_error::{Diagnostic, ErrorCode, ParseError, Span};
 use buff_lang_lexer::TokenKind;
 
 use super::parse_expression;
@@ -42,27 +42,49 @@ use crate::stream::TokenStream;
 // ---------------------------------------------------------------------------
 
 /// Parse a `match scrutinee { arm, arm, ... }` expression whose `match`
-/// keyword is the next significant token (T27).
+/// keyword is the next significant token (T27, extended BUG-11).
 ///
-/// Shape: `match EXPR { PAT => EXPR (, PAT => EXPR)* ,? }`. The scrutinee is
-/// a full expression (so `match foo.bar(x) { ... }` works). Each arm body is
-/// a single expression wrapped in a one-statement block. Trailing comma is
-/// allowed. Builds an [`Expr::MatchExpr`].
+/// # Shapes
+///
+/// **Brace form** (T27, original): `match EXPR { PAT => EXPR (, PAT => EXPR)* ,? }`.
+/// Arms are comma-separated inside `{ }`. Each arm body is `PAT => body` where
+/// `body` is a single expression (wrapped in a one-statement block), a
+/// multi-statement `{ }` block (BUG-11c), or a `return` (self-host pattern).
+///
+/// **Layout form** (BUG-11a): `match EXPR:\n  PAT => body\n  PAT => body\n`.
+/// Arms are newline-separated inside an indented block. Each arm body is
+/// either `PAT => body` (single expression, multi-statement `{ }` block, or
+/// `return`) or `PAT:` followed by an indented multi-statement block
+/// (BUG-11b).
+///
+/// The scrutinee is a full expression (so `match foo.bar(x) { ... }` works).
+/// Builds an [`Expr::MatchExpr`].
 ///
 /// # Errors
 ///
 /// Returns [`ParseError`] if:
 /// - the scrutinee fails to parse,
-/// - the opening `{` is missing,
+/// - the opening `{` (brace form) or `:` + newline + indent (layout form) is
+///   missing,
 /// - an arm pattern fails to parse,
-/// - the `=>` between pattern and body is missing,
-/// - the closing `}` is missing.
+/// - the `=>` between pattern and body is missing (when no `:` block follows),
+/// - the closing `}` (brace form) is missing.
 pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let kw = stream.expect(TokenKind::KwMatch)?;
     let start = kw.span.start;
     let source_id = stream.source_id();
     // Scrutinee: a full expression.
     let scrutinee = parse_expression(stream)?;
+
+    // BUG-11a: dispatch on the NEXT RAW token. `:` introduces the layout form
+    // (`match x:\n    ...`); anything else (typically `{`) is the brace form.
+    // Using `check_raw` is essential here: `peek_kind` would skip layout
+    // tokens and could misidentify the boundary.
+    if stream.check_raw(&TokenKind::Colon) {
+        return parse_match_layout(stream, scrutinee, start, source_id);
+    }
+
+    // ---- Brace form (T27, original) -------------------------------------
     // Opening `{`.
     stream.expect(TokenKind::LBrace)?;
     let mut arms: Vec<MatchArm> = Vec::new();
@@ -80,57 +102,19 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut arm_end;
     loop {
         let pat = parse_pattern(stream)?;
-        // T40: optional `if <cond>` pattern guard. After the pattern (and
-        // before the `=>`), a `if` keyword introduces a guard expression.
-        // The arm matches only when BOTH the pattern matches AND the guard
-        // evaluates to `true`. Buff's `if` is the reserved `KwIf` keyword, so
-        // there is no ambiguity with an identifier named `if`.
-        let guard = if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
-            stream.advance(); // consume `if`
-            let g = parse_expression(stream)?;
-            // Extend the arm's token-span start to include the guard so the
-            // span covers `Pattern if guard`.
-            Some(g)
-        } else {
-            None
-        };
+        // T40: optional `if <cond>` pattern guard.
+        let guard = parse_optional_guard(stream)?;
+        let arm_pat_span = pat.span();
         stream.expect(TokenKind::FatArrow)?;
-        // Allow `return` as a match arm body (self-host pattern:
-        // `TokenKind.KwFunc => return true,`). `return` is a statement,
-        // not an expression, so we handle it specially before falling
-        // through to the expression parser.
-        let arm_tok_span = pat.span();
-        let body = if matches!(stream.peek_kind(), Some(TokenKind::KwReturn)) {
-            let ret_tok = stream.advance_after_peek(); // peek_kind confirmed KwReturn
-            let ret_expr = if matches!(
-                stream.peek_kind(),
-                Some(TokenKind::Comma | TokenKind::RBrace)
-            ) {
-                None
-            } else {
-                Some(parse_expression(stream)?)
-            };
-            arm_end = ret_expr
-                .as_ref()
-                .map(|e| e.span().end)
-                .unwrap_or(ret_tok.span.end);
-            Block {
-                stmts: vec![Stmt::Return(ret_expr, ret_tok.span)],
-                span: Span::new(arm_tok_span.start, arm_end, source_id),
-            }
-        } else {
-            let body_expr = parse_expression(stream)?;
-            arm_end = body_expr.span().end;
-            Block {
-                stmts: vec![Stmt::ExprStmt(body_expr, arm_tok_span)],
-                span: Span::new(arm_tok_span.start, arm_end, source_id),
-            }
-        };
+        // BUG-11c: the body may be a multi-statement `{ }` block. The arm
+        // body helper dispatches on the next raw token.
+        let (body, body_end) = parse_match_arm_body(stream, arm_pat_span, source_id, false)?;
+        arm_end = body_end;
         arms.push(MatchArm {
             pattern: pat,
             guard,
             body,
-            span: Span::new(arm_tok_span.start, arm_end, source_id),
+            span: Span::new(arm_pat_span.start, arm_end, source_id),
         });
         match stream.peek_kind() {
             Some(TokenKind::Comma) => {
@@ -165,6 +149,207 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         arms,
         span,
     })
+}
+
+/// BUG-11a: parse the layout-sensitive form of a match expression.
+///
+/// Called after `match EXPR` has been parsed and `:` is the next raw token.
+/// Consumes the `:`, the mandatory `Newline`, the `Indent`, then loops parsing
+/// arms (newline-separated) until a `Dedent` or end-of-input. Arms may use
+/// either `PAT => body` or `PAT:` + indented block (BUG-11b).
+fn parse_match_layout(
+    stream: &mut TokenStream<'_>,
+    scrutinee: Expr,
+    start: usize,
+    source_id: buff_lang_error::SourceId,
+) -> Result<Expr, ParseError> {
+    // Consume the `:` (already verified by the caller via check_raw, but expect
+    // gives a clean error message on any surprise).
+    stream.expect(TokenKind::Colon)?;
+
+    // Expect a Newline immediately after the colon.
+    if !stream.check_raw(&TokenKind::Newline) {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "expected newline after `:` for layout match block",
+                stream.span_here(),
+            )
+            .with_code(ErrorCode::ExpectedLayoutNewline),
+        ));
+    }
+    stream.advance_raw(); // consume Newline
+
+    // Skip any stray blank lines between the `:` line and the first arm.
+    while stream.consume_newline() {}
+
+    // Expect an Indent to open the arm list.
+    if !stream.consume_indent() {
+        return Err(ParseError::new(
+            Diagnostic::error(
+                "expected indented match arms after `match ...:`",
+                stream.span_here(),
+            )
+            .with_code(ErrorCode::ExpectedIndentedBlock),
+        ));
+    }
+
+    let mut arms: Vec<MatchArm> = Vec::new();
+    loop {
+        // Skip blank lines / inter-arm separators.
+        while stream.consume_newline() {}
+
+        // End of the match block: a Dedent returns to the outer scope.
+        if stream.check_raw(&TokenKind::Dedent) {
+            break;
+        }
+        // Defensive: end-of-input without a Dedent (the lexer may collapse
+        // trailing dedents at EOF in some edge cases).
+        if stream.is_at_end() {
+            break;
+        }
+        // Defensive: skip stray Indent tokens that should not appear here but
+        // might from nested layout constructs.
+        if stream.check_raw(&TokenKind::Indent) {
+            stream.advance_raw();
+            continue;
+        }
+
+        // Parse one arm: pattern + optional guard + body.
+        let pat = parse_pattern(stream)?;
+        let guard = parse_optional_guard(stream)?;
+        let arm_pat_span = pat.span();
+
+        let (body, body_end) = if stream.check_raw(&TokenKind::Colon) {
+            // BUG-11b: `PAT:` introduces a colon-block arm with an indented
+            // multi-statement body. parse_block consumes the `:`, Newline,
+            // Indent, statements, and Dedent.
+            let blk = crate::stmt::parse_block(stream)?;
+            let end = blk.span.end;
+            (blk, end)
+        } else {
+            // `PAT => body` form.
+            stream.expect(TokenKind::FatArrow)?;
+            parse_match_arm_body(stream, arm_pat_span, source_id, true)?
+        };
+
+        arms.push(MatchArm {
+            pattern: pat,
+            guard,
+            body,
+            span: Span::new(arm_pat_span.start, body_end, source_id),
+        });
+    }
+
+    // Consume the closing Dedent if present (may be absent at EOF).
+    let _ = stream.consume_dedent();
+
+    let end = arms.last().map(|a| a.span.end).unwrap_or(start);
+    let span = Span::new(start, end, source_id);
+    Ok(Expr::MatchExpr {
+        scrutinee: Box::new(scrutinee),
+        arms,
+        span,
+    })
+}
+
+/// Parse an optional `if <cond>` pattern guard (T40). Called after the arm
+/// pattern has been parsed. Returns `Some(expr)` when a guard is present,
+/// `None` otherwise. The `if` keyword is consumed on the `Some` path.
+fn parse_optional_guard(stream: &mut TokenStream<'_>) -> Result<Option<Expr>, ParseError> {
+    if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
+        stream.advance(); // consume `if`
+        let g = parse_expression(stream)?;
+        Ok(Some(g))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Parse a match arm body — the part after `PAT =>` (or dispatched from the
+/// layout form). Returns `(body_block, end_offset)`.
+///
+/// Dispatch rules (BUG-11b + BUG-11c):
+///
+/// - **`return`**: bare `return` or `return expr` (self-host pattern). In the
+///   brace form the value is absent when the next significant token is `,` or
+///   `}`; in the layout form it is absent when the next *raw* token is a
+///   `Newline`/`Dedent` (end of line / end of block).
+/// - **`{`** (raw): a multi-statement block via `parse_block_braces`
+///   (BUG-11c). This is NOT a closure — `{` after `=>` in a match arm is a
+///   statement block.
+/// - **`:`** (raw, layout form only): an indented multi-statement block via
+///   `parse_block` (BUG-11b).
+/// - **otherwise**: a single expression wrapped in a one-statement block
+///   (backward-compatible with the original T27 behaviour).
+fn parse_match_arm_body(
+    stream: &mut TokenStream<'_>,
+    arm_pat_span: Span,
+    source_id: buff_lang_error::SourceId,
+    layout_form: bool,
+) -> Result<(Block, usize), ParseError> {
+    // Allow `return` as a match arm body (self-host pattern:
+    // `TokenKind.KwFunc => return true,`). `return` is a statement, not an
+    // expression, so we handle it specially before falling through to the
+    // expression parser.
+    if matches!(stream.peek_kind(), Some(TokenKind::KwReturn)) {
+        let ret_tok = stream.advance_after_peek(); // peek_kind confirmed KwReturn
+        let ret_expr = if layout_form {
+            // Layout form: bare `return` at end of line → no value. After
+            // consuming `return`, the next RAW token is a Newline (end of the
+            // arm line) or a Dedent (end of the match block) when there is no
+            // return value.
+            match stream.peek_raw_kind() {
+                Some(TokenKind::Newline) | Some(TokenKind::Dedent) | None => None,
+                _ => Some(parse_expression(stream)?),
+            }
+        } else {
+            // Brace form: bare `return` at end of arm → no value.
+            if matches!(
+                stream.peek_kind(),
+                Some(TokenKind::Comma | TokenKind::RBrace)
+            ) {
+                None
+            } else {
+                Some(parse_expression(stream)?)
+            }
+        };
+        let arm_end = ret_expr
+            .as_ref()
+            .map(|e| e.span().end)
+            .unwrap_or(ret_tok.span.end);
+        let block = Block {
+            stmts: vec![Stmt::Return(ret_expr, ret_tok.span)],
+            span: Span::new(arm_pat_span.start, arm_end, source_id),
+        };
+        return Ok((block, arm_end));
+    }
+
+    // BUG-11c: `{ ... }` after `=>` → multi-statement block (NOT a closure).
+    // `check_raw` is used (not `check`) so we see the `{` before any layout
+    // skipping; `{` is never a layout token so both checks agree, but raw is
+    // the canonical form for body-shape dispatch.
+    if stream.check_raw(&TokenKind::LBrace) {
+        let block = crate::stmt::parse_block_braces(stream)?;
+        let end = block.span.end;
+        return Ok((block, end));
+    }
+
+    // BUG-11b: `:` after `=>` in the layout form → indented block body.
+    if layout_form && stream.check_raw(&TokenKind::Colon) {
+        let block = crate::stmt::parse_block(stream)?;
+        let end = block.span.end;
+        return Ok((block, end));
+    }
+
+    // Default: single expression wrapped in a one-statement block (T27
+    // backward-compatible behaviour).
+    let body_expr = parse_expression(stream)?;
+    let arm_end = body_expr.span().end;
+    let block = Block {
+        stmts: vec![Stmt::ExprStmt(body_expr, arm_pat_span)],
+        span: Span::new(arm_pat_span.start, arm_end, source_id),
+    };
+    Ok((block, arm_end))
 }
 
 /// Parse a single pattern (T27, extended in T71 and T39).
