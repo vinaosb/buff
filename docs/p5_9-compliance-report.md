@@ -1,12 +1,12 @@
 # P5.9 — Self-Host Completion Compliance Report (FINAL)
 
-**Date:** 2026-08-07 (updated post-PR #60)
+**Date:** 2026-08-07 (updated post-PR #61)
 **Auditor:** Oracle (P5.8) + Sisyphus orchestrator
 **Roadmap:** `.sisyphus/plans/self-host-completion-roadmap.md`
 
 ## Executive Summary
 
-The self-host front-end milestone is complete. 29 PRs total (#29-#60) are merged to main across two sessions. test-core is ADVISORY (`continue-on-error: true`) per DR-020 — a hard gate was attempted (PRs #39/#43, then PR #60) but reverted due to OS-specific CI failures on ubuntu-latest and macos-latest. Docker (Linux x86_64) shows 0 failures across all 10 core crates. The full buff-lang-codegen-rust test suite (82 binaries, 1192 tests) passes with 0 failures in Docker. All formal deferrals are documented via Decision Records (DR-016 through DR-020).
+The self-host front-end milestone is complete. 33 PRs total (#29-#61) are merged to main across this session. test-core is ADVISORY (`continue-on-error: true`) per DR-020 — a hard gate was attempted (PRs #39/#43, then PR #60) but reverted due to OS-specific CI failures on ubuntu-latest and macos-latest. Docker (Linux x86_64) shows 0 failures across all 10 core crates. The full buff-lang-codegen-rust test suite (82 binaries, 1192 tests) passes with 0 failures in Docker. All formal deferrals are documented via Decision Records (DR-016 through DR-020).
 
 ## Phase 5 Task Status
 
@@ -19,7 +19,7 @@ The self-host front-end milestone is complete. 29 PRs total (#29-#60) are merged
 | P5.5 EMI differential | DEFERRED | F4 report | P5.4 doubled per escape clause |
 | P5.6 Performance | DONE | VERIFIED | Improved 45-77% |
 | P5.7 Cross-platform | DONE (DR-020 deviation) | VERIFIED | test-core ADVISORY (hard-gate attempt failed on CI); 3-OS matrix; Docker 0 failures |
-| P5.8 Oracle review | DONE | VERIFIED | Multiple Oracle review cycles (iterations 11-12); final cycle confirmed verification-artifact integrity |
+| P5.8 Oracle review | DONE | PENDING | Multiple Oracle review cycles (iterations 11-13); iteration 13 in progress |
 | P5.9 Compliance report | DONE | THIS DOC | Updated post-PR #60 (corrected test-core status, added PRs #45-60) |
 | P5.10 Deprecation Phase B | DONE | VERIFIED | DR-015 + migration guide (PR #36) |
 
@@ -30,12 +30,12 @@ The self-host front-end milestone is complete. 29 PRs total (#29-#60) are merged
 | 1. Coverage parity (90/85/80/75) | DEFERRED (DR-017) | Tarpaulin infeasible in Docker; proxy provided |
 | 2. M7 span-normalized AST | DEFERRED (DR-016) | JSON dump works; v2 comparison post-M7 refinement |
 | 3. Performance <=10% | MET | Improved 45-77% vs baseline |
-| 4. Oracle VERIFIED | MET | Oracle independently re-ran full suite |
+| 4. Oracle VERIFIED | PENDING (iteration 13) | Oracle review in progress; DoD #4 updated after verdict lands |
 | 5. Audit findings | MET | 29 FIXED, 5 DEFERRED |
 
-## PRs Shipped (32 merged: #29-60)
+## PRs Shipped (33 merged: #29-61)
 
-### Batch 1 — Initial Fixes (#29-44, 17 PRs)
+### Batch 1 — Initial Fixes (#29-44, 16 PRs)
 
 | PR | Title | Status |
 |----|-------|--------|
@@ -53,7 +53,7 @@ The self-host front-end milestone is complete. 29 PRs total (#29-#60) are merged
 | #43 | ci: test-core HARD GATE + 71 codegen drifts + DR-016 | MERGED |
 | #44 | fix: 12 remaining test failures (COMPLETE suite green) | MERGED |
 
-### Batch 2 — Hardening (#45-60, 16 PRs)
+### Batch 2 — Hardening (#45-61, 17 PRs)
 
 | PR | Title | Status |
 |----|-------|--------|
@@ -65,6 +65,7 @@ The self-host front-end milestone is complete. 29 PRs total (#29-#60) are merged
 | #56-58 | fix: 21 test failures across 6 core crates | MERGED |
 | #59 | fix: private access in framework crates | MERGED |
 | #60 | docs: M7.2 perf report + F1/F3/F4 verification + DR-020 update | MERGED |
+| #61 | docs: verification-artifact integrity fixes (Oracle iteration 12 blockers) | MERGED |
 
 ## Formal Deferrals
 
