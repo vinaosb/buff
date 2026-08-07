@@ -776,70 +776,141 @@ fn parse_pattern_atom(stream: &mut TokenStream<'_>) -> Result<Pattern, ParseErro
     )))
 }
 
-/// Parse a minimal closure `{ params => expr }` whose opening `{` is the next
-/// significant token (T23).
+/// Parse a closure whose opening `{` is the next significant token (T23,
+/// extended by BUG-13 for multi-statement bodies and zero-param form).
 ///
-/// Shape: `{ ident (, ident)* => expr }`. The body is a single expression
-/// (wrapped in an `ExprStmt` to form a one-statement block). Parameter types
-/// are inferred (a placeholder `TypeRef` is stored; codegen ignores it for
-/// closures). Full closures (typed params, multi-statement bodies, capture
-/// analysis) are T34 — this minimal form covers `.map` / `.filter` / `.reduce`.
+/// # Shapes
+///
+/// - **Single-expression body** (T23, backward compatible):
+///   `{ ident (, ident)* => expr }`
+/// - **Multi-statement body** (BUG-13): `{ params => stmt1; stmt2; final_expr }`
+///   — statements separated by `;` or newlines; the FINAL expression is the
+///   implicit return value (mirrors Rust closures). Preceding statements are
+///   side effects (`let`, expression statements, etc.).
+/// - **Zero-param form** (BUG-13): `{ => body }` — empty parameter list.
+///
+/// Parameter types are inferred (a placeholder `TypeRef` is stored; codegen
+/// ignores it for closures). Typed params + capture analysis are T34 — this
+/// form covers `.map` / `.filter` / `.reduce` and richer inline closures.
+///
+/// # Multi-statement body dispatch
+///
+/// After `=>`, the first body element is parsed with [`parse_expression`]
+/// (greedy Pratt — stops when the next significant token is not an infix/postfix
+/// continuation). If the next significant token is then `}`, the body is a
+/// single expression (fast path, byte-identical to the original T23 form).
+/// Otherwise the remaining statements are parsed in a loop via
+/// [`crate::stmt::parse_statement`], consuming optional `;` separators;
+/// [`TokenStream::peek_kind`] transparently skips `Newline`/`Indent`/`Dedent`
+/// layout tokens, so newline-separated statements work without special handling.
 pub fn parse_closure(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     use buff_lang_ast::common::{Block, Param};
     let lb = stream.expect(TokenKind::LBrace)?;
-    // Parse one or more comma-separated identifier parameters.
+    let source_id = stream.source_id();
+    // Parse zero or more comma-separated identifier parameters. BUG-13: when
+    // the next significant token is already `=>`, the param list is empty
+    // (zero-param closure `{ => body }`); skip the loop entirely.
     let mut params: Vec<Param> = Vec::new();
-    loop {
-        let ptok = match stream.advance() {
-            Some(t) if matches!(t.kind, TokenKind::Ident(_)) => t,
-            Some(other) => {
+    if !stream.check(&TokenKind::FatArrow) {
+        loop {
+            let ptok = match stream.advance() {
+                Some(t) if matches!(t.kind, TokenKind::Ident(_)) => t,
+                Some(other) => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        format!("expected closure parameter name, found `{}`", other.kind),
+                        other.span,
+                    )));
+                }
+                None => {
+                    return Err(ParseError::new(Diagnostic::error(
+                        "expected closure parameter name, found end of input",
+                        stream.eof_span(),
+                    )));
+                }
+            };
+            let TokenKind::Ident(pname) = ptok.kind.clone() else {
+                // Defensive: the `matches!` above guarantees this is an Ident,
+                // but we return a structured error instead of panicking so a
+                // future TokenKind change can't crash the parser.
                 return Err(ParseError::new(Diagnostic::error(
-                    format!("expected closure parameter name, found `{}`", other.kind),
-                    other.span,
+                    format!("expected closure parameter name, found `{}`", ptok.kind),
+                    ptok.span,
                 )));
-            }
-            None => {
-                return Err(ParseError::new(Diagnostic::error(
-                    "expected closure parameter name, found end of input",
-                    stream.eof_span(),
-                )));
-            }
-        };
-        let TokenKind::Ident(pname) = ptok.kind.clone() else {
-            // Defensive: the `matches!` above guarantees this is an Ident,
-            // but we return a structured error instead of panicking so a
-            // future TokenKind change can't crash the parser.
-            return Err(ParseError::new(Diagnostic::error(
-                format!("expected closure parameter name, found `{}`", ptok.kind),
-                ptok.span,
-            )));
-        };
-        params.push(Param {
-            name: Ident::new(pname, ptok.span),
-            // Placeholder type — closures infer their param types; codegen
-            // emits `|name|` (no annotation). T34 will add typed params.
-            ty: buff_lang_ast::TypeRef::Named {
-                name: Ident::new("_", ptok.span),
+            };
+            params.push(Param {
+                name: Ident::new(pname, ptok.span),
+                // Placeholder type — closures infer their param types; codegen
+                // emits `|name|` (no annotation). T34 will add typed params.
+                ty: buff_lang_ast::TypeRef::Named {
+                    name: Ident::new("_", ptok.span),
+                    span: ptok.span,
+                },
+                default_value: None,
+                is_comptime: false,
                 span: ptok.span,
-            },
-            default_value: None,
-            is_comptime: false,
-            span: ptok.span,
-        });
-        if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
-            stream.advance(); // consume ','
-            continue;
+            });
+            if matches!(stream.peek_kind(), Some(TokenKind::Comma)) {
+                stream.advance(); // consume ','
+                continue;
+            }
+            break;
         }
-        break;
     }
     let arrow = stream.expect(TokenKind::FatArrow)?;
-    let body_expr = parse_expression(stream)?;
+    // Parse the closure body. Two dispatch paths converge on the same Block:
+    //
+    // 1. **Statement-led body** (BUG-13): when the first body token is a
+    //    statement keyword (`let`, `return`, `for`, …) that
+    //    [`parse_expression`] cannot consume, every body element — including
+    //    the first — is parsed via [`crate::stmt::parse_statement`]. This lets
+    //    a `let` binding open the body: `{ req => let id = req; fetch(id) }`.
+    // 2. **Expression-led body** (T23 + BUG-13): the first body element is an
+    //    expression, parsed via [`parse_expression`] (the backward-compatible
+    //    single-expression form `{ x => expr }` when no further statement
+    //    follows). Subsequent statements, if any, use `parse_statement`.
+    //
+    // Both paths then loop to consume additional `;`/newline-separated
+    // statements until `}`. The single-expression form takes the fast path —
+    // the loop condition is false immediately and `stmts` stays at one element
+    // (byte-identical to the pre-BUG-13 T23 behaviour).
+    let body_starts_with_statement = matches!(
+        stream.peek_kind(),
+        Some(TokenKind::KwLet)
+            | Some(TokenKind::KwReturn)
+            | Some(TokenKind::KwBreak)
+            | Some(TokenKind::KwContinue)
+            | Some(TokenKind::KwFor)
+            | Some(TokenKind::KwGuard)
+            | Some(TokenKind::KwDefer)
+            | Some(TokenKind::At)
+    );
+    let mut stmts: Vec<buff_lang_ast::Stmt> = if body_starts_with_statement {
+        vec![crate::stmt::parse_statement(stream)?]
+    } else {
+        let body_expr = parse_expression(stream)?;
+        vec![buff_lang_ast::Stmt::ExprStmt(body_expr, arrow.span)]
+    };
+    // BUG-13: consume additional statements separated by `;` or newlines.
+    // [`TokenStream::peek_kind`] transparently skips `Newline`/`Indent`/
+    // `Dedent`, so layout-separated statements work without special handling.
+    while !matches!(stream.peek_kind(), Some(TokenKind::RBrace) | None) {
+        // Consume an optional `;` separator (newlines already skipped above).
+        if matches!(stream.peek_kind(), Some(TokenKind::Semicolon)) {
+            stream.advance();
+        }
+        if matches!(stream.peek_kind(), Some(TokenKind::RBrace) | None) {
+            // Trailing separator before `}` (e.g. `{ x => x; }`) — stop without
+            // adding another statement.
+            break;
+        }
+        stmts.push(crate::stmt::parse_statement(stream)?);
+    }
     let rb = stream.expect(TokenKind::RBrace)?;
     let body = Block {
-        stmts: vec![buff_lang_ast::Stmt::ExprStmt(body_expr, arrow.span)],
-        span: Span::new(lb.span.start, rb.span.end, stream.source_id()),
+        stmts,
+        span: Span::new(lb.span.start, rb.span.end, source_id),
     };
-    let span = Span::new(lb.span.start, rb.span.end, stream.source_id());
+    let span = Span::new(lb.span.start, rb.span.end, source_id);
     Ok(Expr::Lambda {
         params,
         body,
