@@ -63,11 +63,12 @@ files cited in the repo (called out per bug).
 - **Also breaks:** `examples/use-cases/error_recovery.buff` (uses `and` on lines 14/23, `not` on 120).
 - **Probe matrix (all `parse OK; type errors: 0`):** `&&` ✓, `||` ✓, `!x` ✓; `and`/`or`/`not` ✗.
 
-### BUG-5: diagnostic renderer PANICS on a UTF-8 BOM
+### BUG-5: diagnostic renderer PANICS on a UTF-8 BOM ✅ RESOLVED
 - **Severity:** HIGH (robustness — any BOM-prefixed `.buff` file crashes the error path)
 - **Evidence:** `thread 'main' panicked at crates/buff-lang-error/src/diagnostic.rs:622:15: end byte index 1 is not a char boundary; it is inside '\u{feff}'`
 - **Root cause:** `Diagnostic::render` slices `source[1..]` (or similar byte index) without skipping/ stripping a leading BOM, so byte index 1 lands inside the 3-byte BOM.
 - **Note:** triggered here by `Set-Content -Encoding UTF8` adding a BOM to a probe; real users hit this whenever an editor saves `.buff` as "UTF-8 with BOM".
+- **Status:** **RESOLVED.** `strip_bom()` added at `crates/buff-lang-error/src/diagnostic.rs:569-575`, called in all 4 render functions (lines 596, 658, 721, 777). BOM-prefixed source files no longer panic.
 
 ### BUG-6: layout-sensitive enum form is rejected (`enum Name:\n    Variant`)
 - **Severity:** HIGH (same family as BUG-3)
@@ -115,12 +116,13 @@ files cited in the repo (called out per bug).
 - **Also breaks:** `examples/data-science-workbench/server.buff` (multi-statement handler closures).
 - **Workaround used:** made every route-registration closure a single expression (`{ req => with_cors(handle_x(store, req)) }`) and moved per-route logging into the handler bodies.
 
-### BUG-12: a literal `{` inside a string is misread as interpolation-start
+### BUG-12: a literal `{` inside a string is misread as interpolation-start ✅ RESOLVED
 - **Severity:** MEDIUM
 - **Evidence:** `[parse] [Error] error[E1101]: expected `interp_end`, found `,`` — caret on the `{` of `print("... -> { status, tasks, requests }")`.
 - **Root cause:** the lexer enters interpolation mode on `{` inside a string even without the `$` prefix that the documented `${...}` form uses; a comma then fails `interp_end`. Any string documenting a JSON/struct shape (`{ a, b }`) breaks.
 - **Also breaks:** `examples/data-science-workbench/server.buff` (`print("  GET  /count      -> { count: N }")`).
 - **Workaround used:** rephrased the route-table print strings to avoid literal braces.
+- **Status:** **RESOLVED.** `\{` and `\}` escape sequences added at `crates/buff-lang-lexer/src/string_interp.rs:87-106` (advances past both bytes so the brace is never seen by the interpolation-start arm). Regression tests at `:507-571` explicitly tagged `BUG-12`. Users can now escape literal braces with `\{` / `\}`.
 
 ---
 
