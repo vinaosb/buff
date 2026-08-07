@@ -1646,9 +1646,12 @@ fn same_named_user_types_with_different_args_are_comparable() {
     // via exact match, exercising the is_same_user_type path.
     inf.bind(
         "c",
-        Type::user("Color", vec![Type::Int {
-            width: IntWidth::W64,
-        }]),
+        Type::user(
+            "Color",
+            vec![Type::Int {
+                width: IntWidth::W64,
+            }],
+        ),
     );
 
     // Build: c == Color.Red
@@ -1656,11 +1659,7 @@ fn same_named_user_types_with_different_args_are_comparable() {
     //   rhs resolves to Type::User("Color", [])     (from the enum variant)
     // These differ in `args` so `==` fails, but `is_same_user_type` passes
     // because the `name` field matches.
-    let e = binary(
-        BinaryOp::Eq,
-        ident("c"),
-        enum_variant_expr("Color", "Red"),
-    );
+    let e = binary(BinaryOp::Eq, ident("c"), enum_variant_expr("Color", "Red"));
     let ty = inf
         .infer_expr(&e)
         .expect("BUG-14: same-named user types must be comparable even with different args");
@@ -1680,10 +1679,7 @@ fn same_named_user_types_comparable_with_neq() {
     let mut inf = TypeInferencer::new();
     inf.register_enum_decls(&decls);
     // Bind `status` to Status with a type arg; `other` to Status with no args.
-    inf.bind(
-        "status",
-        Type::user("Status", vec![Type::Bool]),
-    );
+    inf.bind("status", Type::user("Status", vec![Type::Bool]));
     inf.bind("other", Type::user("Status", vec![]));
 
     // status != other — both are Type::User("Status", ...) with different args.
