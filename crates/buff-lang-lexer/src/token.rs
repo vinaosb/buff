@@ -70,9 +70,16 @@ pub enum TokenKind {
     // --- Identifiers and keywords ---
     Ident(String),
 
-    // 28 keywords
+    // 30 keywords
     KwFunc,
     KwLet,
+    /// `const NAME = expr` — syntactic sugar for an immutable `let` binding
+    /// (BUG-2). The parser lowers `const` to the SAME AST node as `let`
+    /// (`Stmt::LetDecl` with `mutable: false`); there is no separate
+    /// const AST node or codegen path. Unlike `let`, `const` rejects the
+    /// optional `mut` modifier — a `const` binding is immutable by
+    /// definition, so `const mut x = ...` is a parse error.
+    KwConst,
     KwMut,
     KwStruct,
     KwEnum,
@@ -259,6 +266,7 @@ impl TokenKind {
         match s {
             "func" => Some(Self::KwFunc),
             "let" => Some(Self::KwLet),
+            "const" => Some(Self::KwConst),
             "mut" => Some(Self::KwMut),
             "struct" => Some(Self::KwStruct),
             "enum" => Some(Self::KwEnum),
@@ -296,6 +304,7 @@ impl TokenKind {
             self,
             Self::KwFunc
                 | Self::KwLet
+                | Self::KwConst
                 | Self::KwMut
                 | Self::KwStruct
                 | Self::KwEnum
@@ -331,7 +340,7 @@ impl TokenKind {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
             "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-            "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+            "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl", "const",
         ]
     }
 }
@@ -362,6 +371,7 @@ impl fmt::Display for TokenKind {
             // Keywords
             Self::KwFunc => write!(f, "func"),
             Self::KwLet => write!(f, "let"),
+            Self::KwConst => write!(f, "const"),
             Self::KwMut => write!(f, "mut"),
             Self::KwStruct => write!(f, "struct"),
             Self::KwEnum => write!(f, "enum"),

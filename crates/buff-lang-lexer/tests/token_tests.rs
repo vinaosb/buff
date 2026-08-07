@@ -15,10 +15,10 @@ fn all_keywords_present() {
     let expected: &[&str] = &[
         "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
         "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as",
-        "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+        "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl", "const",
     ];
     assert_eq!(TokenKind::all_keywords(), expected);
-    assert_eq!(TokenKind::all_keywords().len(), 29);
+    assert_eq!(TokenKind::all_keywords().len(), 30);
 }
 
 #[test]
@@ -44,6 +44,7 @@ fn from_keyword_returns_none_for_non_keyword() {
 fn from_keyword_specific_mappings() {
     assert_eq!(TokenKind::from_keyword("func"), Some(TokenKind::KwFunc));
     assert_eq!(TokenKind::from_keyword("let"), Some(TokenKind::KwLet));
+    assert_eq!(TokenKind::from_keyword("const"), Some(TokenKind::KwConst));
     assert_eq!(TokenKind::from_keyword("mut"), Some(TokenKind::KwMut));
     assert_eq!(TokenKind::from_keyword("struct"), Some(TokenKind::KwStruct));
     assert_eq!(TokenKind::from_keyword("enum"), Some(TokenKind::KwEnum));
@@ -131,6 +132,7 @@ fn token_new_with_various_kinds() {
 fn display_keywords() {
     assert_eq!(TokenKind::KwFunc.to_string(), "func");
     assert_eq!(TokenKind::KwLet.to_string(), "let");
+    assert_eq!(TokenKind::KwConst.to_string(), "const");
     assert_eq!(TokenKind::KwReturn.to_string(), "return");
     assert_eq!(TokenKind::KwTrue.to_string(), "true");
     assert_eq!(TokenKind::KwFalse.to_string(), "false");

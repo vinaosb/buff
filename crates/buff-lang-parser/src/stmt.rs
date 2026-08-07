@@ -53,6 +53,7 @@ use crate::stream::TokenStream;
 /// | Token      | Result                                  |
 /// |------------|------------------------------------------|
 /// | `let`      | [`Stmt::LetDecl`]                        |
+/// | `const`    | [`Stmt::LetDecl`] (sugar for immutable `let`; BUG-2) |
 /// | `if`       | [`Stmt::ExprStmt`] wrapping [`Expr::IfExpr`] |
 /// | `return`   | [`Stmt::Return`]                         |
 /// | `break`    | [`Stmt::Break`]                          |
@@ -68,6 +69,12 @@ use crate::stream::TokenStream;
 pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     match stream.peek_kind() {
         Some(TokenKind::KwLet) => parse_let(stream),
+        // BUG-2: `const NAME = expr` is syntactic sugar for an immutable
+        // `let` binding. It parses to the IDENTICAL `Stmt::LetDecl` node
+        // (with `mutable: false`) — no new AST variant, no codegen change.
+        // `const` rejects `mut` (a const binding is immutable by
+        // definition); see `parse_const`.
+        Some(TokenKind::KwConst) => parse_const(stream),
         // T56: property wrappers (`@State`, `@Published`, `@Cached`) —
         // Swift-inspired attribute-driven codegen. The parser rewrites
         // the following `let` into a regular `let` that initialises a
@@ -685,12 +692,48 @@ fn build_reactive_computed_new(fn_name: &str, name_span: Span, let_span: Span) -
 }
 
 /// `let [mut] name[: Type] = expr`
+///
+/// Thin wrapper over [`parse_let_like`] for the `let` keyword. Accepts the
+/// optional `mut` modifier. Also reused by the `guard let` handlers
+/// ([`parse_guard`]) and the property-wrapper rewriter, which all expect a
+/// plain `let` binding.
 fn parse_let(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    parse_let_like(stream, TokenKind::KwLet, true)
+}
+
+/// `const name[: Type] = expr` — syntactic sugar for an immutable `let`
+/// binding (BUG-2).
+///
+/// Produces the SAME [`Stmt::LetDecl`] (or [`Stmt::LetPattern`] for
+/// destructuring) node as `let name = expr` with `mutable: false`. There
+/// is NO separate const AST node and NO const-specific codegen path —
+/// `const` is purely a keyword alias for immutable `let`. Unlike `let`,
+/// `const` rejects the optional `mut` modifier (`const mut x = ...` is a
+/// parse error): a `const` binding is immutable by definition, so the
+/// `allow_mut` flag passed to [`parse_let_like`] is `false` and a trailing
+/// `mut` token is left in the stream where it surfaces as a natural
+/// "expected identifier after `const`" error.
+fn parse_const(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    parse_let_like(stream, TokenKind::KwConst, false)
+}
+
+/// Shared body for `let` and `const` bindings.
+///
+/// `keyword` is the leading keyword token to consume (`KwLet` or
+/// `KwConst`); `allow_mut` controls whether the optional `mut` modifier is
+/// accepted (`let` allows it, `const` does not). Both forms lower to the
+/// identical [`Stmt::LetDecl`] / [`Stmt::LetPattern`] node — `const`
+/// differs from `let` only in the keyword spelled in source.
+fn parse_let_like(
+    stream: &mut TokenStream<'_>,
+    keyword: TokenKind,
+    allow_mut: bool,
+) -> Result<Stmt, ParseError> {
     let source_id = stream.source_id();
-    let let_tok = stream.expect(TokenKind::KwLet)?;
+    let let_tok = stream.expect(keyword)?;
     let start = let_tok.span.start;
 
-    let mutable = matches!(stream.peek_kind(), Some(TokenKind::KwMut));
+    let mutable = allow_mut && matches!(stream.peek_kind(), Some(TokenKind::KwMut));
     if mutable {
         stream.advance();
     }
