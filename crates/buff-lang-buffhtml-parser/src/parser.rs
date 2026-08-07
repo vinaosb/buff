@@ -255,9 +255,7 @@ impl Parser {
             BuffHtmlTokenKind::AwaitOpen(f) => f,
             other => {
                 return Err(self.err(
-                    format!(
-                        "internal: parse_await called on non-await-open token: {other:?}"
-                    ),
+                    format!("internal: parse_await called on non-await-open token: {other:?}"),
                     start_span,
                 ));
             }

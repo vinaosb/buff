@@ -146,7 +146,10 @@ pub fn parse_postfix(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
                     // panicking so a future TokenKind change can't crash the
                     // parser.
                     return Err(ParseError::new(Diagnostic::error(
-                        format!("expected method name after `.`, found `{}`", method_tok.kind),
+                        format!(
+                            "expected method name after `.`, found `{}`",
+                            method_tok.kind
+                        ),
                         method_tok.span,
                     )));
                 };
