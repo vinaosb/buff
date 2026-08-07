@@ -277,7 +277,11 @@ fn prelude_assoc_fn_no_duplicates() {
     // intentional same-named variants.
     let all: Vec<PreludeAssocFn> = PreludeAssocFn::ALL.to_vec();
     let unique: std::collections::HashSet<PreludeAssocFn> = all.iter().copied().collect();
-    assert_eq!(all.len(), unique.len(), "duplicate assoc-fn variant entries");
+    assert_eq!(
+        all.len(),
+        unique.len(),
+        "duplicate assoc-fn variant entries"
+    );
 }
 
 #[test]
@@ -295,7 +299,11 @@ fn prelude_instance_fn_no_duplicates() {
     // variants.
     let all: Vec<PreludeInstanceFn> = PreludeInstanceFn::ALL.to_vec();
     let unique: std::collections::HashSet<PreludeInstanceFn> = all.iter().copied().collect();
-    assert_eq!(all.len(), unique.len(), "duplicate instance-fn variant entries");
+    assert_eq!(
+        all.len(),
+        unique.len(),
+        "duplicate instance-fn variant entries"
+    );
 }
 
 #[test]
