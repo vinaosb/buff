@@ -6,6 +6,29 @@
 
 ---
 
+# Bug Resolution Status (Updated 2026-08-07)
+
+**10 of 14 bugs RESOLVED. 4 DEFERRED (canonical alternatives exist).**
+
+| Bug | Status | PR | Resolution |
+|-----|--------|-----|------------|
+| BUG-1 | DEFERRED | — | `from "path" import x` — canonical alternative `import x from "path"` works. |
+| BUG-2 | DEFERRED | — | `const` keyword — `let` is immutable by default. Compile-time const semantics deferred. |
+| BUG-3 | ✅ RESOLVED | #68 | Layout struct form was already working. Regression tests added. |
+| BUG-4 | ✅ RESOLVED | #72 | `and`/`or`/`not` word operators added as operator aliases in lexer. |
+| BUG-5 | ✅ RESOLVED | #65 | BOM panic fixed via `strip_bom()` in diagnostic.rs. |
+| BUG-6 | ✅ RESOLVED | #68 | Layout enum form added to `parse_enum_decl`. |
+| BUG-7 | DEFERRED | — | `func Type.method` — canonical alternative `extend Type { func }` works. |
+| BUG-8 | DEFERRED | — | `extend Type:` colon form — brace form `extend Type { }` works. |
+| BUG-9 | ✅ RESOLVED | #70 | `while` loop added end-to-end (lexer + parser + AST + codegen + analysis). |
+| BUG-10 | ✅ RESOLVED | #71 | Param type annotations made optional (inferred from context). |
+| BUG-11 | ✅ RESOLVED | #67 | Match layout form + colon-block arms + multi-statement bodies. |
+| BUG-12 | ✅ RESOLVED | #65 | Brace escape via `\{` handler in string_interp.rs. |
+| BUG-13 | ✅ RESOLVED | #69 | Multi-statement lambda bodies supported. |
+| BUG-14 | ✅ RESOLVED | #66 | Bare enum variants resolved via `enum_registry` in `Expr::Ident`. |
+
+---
+
 # T16 Full App: rest_api_server.buff — VERIFIED findings (2026-07-24)
 
 **File:** `examples/use-cases/apps/rest_api_server.buff` (554 lines)
