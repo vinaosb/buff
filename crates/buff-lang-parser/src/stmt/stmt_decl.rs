@@ -1198,8 +1198,8 @@ pub fn parse_import_decl(stream: &mut TokenStream<'_>) -> Result<ImportDecl, Par
 /// Parse an `export` declaration (T29).
 ///
 /// Supported shapes:
-/// - `export func ...` / `export enum ...` — wraps the inner decl in
-///   [`Decl::ExportDecl`].
+/// - `export func ...` / `export enum ...` / `export struct ...` /
+///   `export trait ...` — wraps the inner decl in [`Decl::ExportDecl`].
 /// - `export * from "..."` — wildcard re-export → [`Decl::ReexportDecl`].
 /// - `export { a, b } from "..."` — named re-export → [`Decl::ReexportDecl`].
 /// - `export { a, b }` (no `from`) — names a local symbol for export without
@@ -1249,6 +1249,30 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
             let span = e.span;
             Ok(Decl::ExportDecl(ExportDecl {
                 inner: Box::new(Decl::EnumDecl(e)),
+                span,
+            }))
+        }
+        // `export struct ...` → wrap StructDecl. Lets a module ship a
+        // public struct type for cross-file `import { Point } ...` use
+        // (the cross-file symbol table unwraps ExportDecl and records
+        // SymbolKind::Struct). Struct parsing landed in T0.5; the
+        // `export struct` arm closes the gap the cross-file tests
+        // exercise.
+        Some(TokenKind::KwStruct) => {
+            let s = parse_struct_decl(stream)?;
+            let span = s.span;
+            Ok(Decl::ExportDecl(ExportDecl {
+                inner: Box::new(Decl::StructDecl(s)),
+                span,
+            }))
+        }
+        // `export trait ...` → wrap TraitDecl. Same shape as
+        // `export struct` — lets a module ship a public trait.
+        Some(TokenKind::KwTrait) => {
+            let t = parse_trait_decl(stream)?;
+            let span = t.span;
+            Ok(Decl::ExportDecl(ExportDecl {
+                inner: Box::new(Decl::TraitDecl(t)),
                 span,
             }))
         }
@@ -1321,11 +1345,12 @@ pub fn parse_export_decl(stream: &mut TokenStream<'_>) -> Result<Decl, ParseErro
                 span: Span::new(start, end, source_id),
             }))
         }
-        // `export export`, `export import`, `export module`, `export trait`,
-        // `export struct` (until struct parsing lands) — not exportable yet.
+        // `export export`, `export import`, `export module` — nested/
+        // non-exportable forms. (`export struct` / `export trait` ARE
+        // supported — see the arms above.)
         Some(other) => Err(ParseError::new(Diagnostic::error(
             format!(
-                "only `func`, `enum`, `*`, or `{{` are allowed after `export`, found `{other}`"
+                "only `func`, `enum`, `struct`, `trait`, `*`, or `{{` are allowed after `export`, found `{other}`"
             ),
             stream
                 .peek()

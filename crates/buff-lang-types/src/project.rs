@@ -312,7 +312,10 @@ mod tests {
                 "/main.buff",
                 "import { nonexistent } from \"./math.buff\"\n\nfunc main() { return 0 }",
             ),
-            ("/math.buff", "export func add(a, b) { return a + b }\n"),
+            (
+                "/math.buff",
+                "export func add(a: Int, b: Int) { return a + b }\n",
+            ),
         ]);
         let err = parse_project_with_loader(&p("/main.buff"), &loader).expect_err("missing");
         assert!(

@@ -100,7 +100,22 @@ pub fn parse_statement(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError>
         Some(TokenKind::KwFor) => parse_for(stream),
         Some(TokenKind::KwGuard) => parse_guard(stream),
         Some(TokenKind::KwDefer) => parse_defer(stream),
-        Some(TokenKind::Ident(s)) if s == "comptime" => parse_comptime_block(stream),
+        // T53: `comptime` is NOT a reserved keyword. Route to the
+        // comptime-block parser ONLY when `comptime` is immediately
+        // followed by a block introducer (`{` for the brace form, `:`
+        // for the layout form). A bare `comptime` identifier in any
+        // other position (e.g. a variable named `comptime`, or
+        // `comptime` at end of input) falls through to the ordinary
+        // assignment-or-expr-statement path.
+        Some(TokenKind::Ident(s))
+            if s == "comptime"
+                && matches!(
+                    stream.peek_second_kind(),
+                    Some(TokenKind::LBrace) | Some(TokenKind::Colon)
+                ) =>
+        {
+            parse_comptime_block(stream)
+        }
         _ => parse_assignment_or_expr_stmt(stream),
     }
 }
