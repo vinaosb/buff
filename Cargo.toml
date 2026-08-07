@@ -847,7 +847,7 @@ buff-image = { path = "crates/buff-image" }
 # `BytesStart::attributes` API has been stable across 0.36-0.37). Pure-Rust,
 # no native deps. Mirrors the conservative-pin philosophy already in use
 # across the workspace (chrono 0.4, rand 0.8, image 0.25, axum 0.8).
-quick-xml = "0.37"
+quick-xml = "0.41"
 # T50: `buff-xml` workspace path dep â€” mirrors the buff-image / buff-cache
 # pattern so any future consumer (codegen-lowered `Xml.from_str(...)` /
 # `doc.find(...)` calls, IDE hover/completion) resolves to the same in-tree
