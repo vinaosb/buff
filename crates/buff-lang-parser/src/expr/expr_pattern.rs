@@ -101,7 +101,7 @@ pub fn parse_match(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
         // through to the expression parser.
         let arm_tok_span = pat.span();
         let body = if matches!(stream.peek_kind(), Some(TokenKind::KwReturn)) {
-            let ret_tok = stream.advance().unwrap(); // consume `return`
+            let ret_tok = stream.advance_after_peek(); // peek_kind confirmed KwReturn
             let ret_expr = if matches!(
                 stream.peek_kind(),
                 Some(TokenKind::Comma | TokenKind::RBrace)

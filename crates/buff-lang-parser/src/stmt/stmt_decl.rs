@@ -2185,13 +2185,16 @@ pub fn parse_extern_func_decl_with_abi(stream: &mut TokenStream<'_>) -> Result<D
     //    functions in v1.3 (let alone on externs), so this is a clear
     //    parse error per the T119 spec.
     if matches!(stream.peek_kind(), Some(TokenKind::Lt)) {
-        let lt_tok = stream.peek().expect("peek guaranteed Lt").span;
+        let lt_span = stream
+            .peek()
+            .map(|t| t.span)
+            .unwrap_or_else(|| stream.eof_span());
         return Err(ParseError::new(Diagnostic::error(
             "generics are not supported on `extern` functions in v1.3 \
              (the T119 spec rejects generic/trait-heavy Rust APIs; declare a separate \
              concrete wrapper per type you need, e.g. `extern \"C\" from \"serde_json\" \
              func parse_int(s: String) -> Int`)",
-            lt_tok,
+            lt_span,
         )));
     }
 
