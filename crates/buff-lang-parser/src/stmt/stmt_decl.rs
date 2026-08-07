@@ -379,21 +379,34 @@ pub fn parse_type_ref(stream: &mut TokenStream<'_>) -> Result<TypeRef, ParseErro
 /// Parse a function parameter list body (without the surrounding parens).
 ///
 /// Expects the cursor to be positioned just after `(`. Stops at the upcoming
-/// `)`. Parameters are comma-separated; each one is `name: Type`.
+/// `)`. Parameters are comma-separated; each one is `name: Type` OR a bare
+/// `name` (BUG-10 — type inferred from context/use, matching the README's
+/// "Statically typed with aggressive inference — types rarely written" claim).
+///
+/// # BUG-10 — inferred (unannotated) params
+///
+/// After the param NAME, the `: Type` annotation is OPTIONAL. When `:` is
+/// absent, the parameter carries a placeholder [`TypeRef::Named`] whose name
+/// is `"_"` (the conventional wildcard). Downstream maps `"_"` to `None` via
+/// [`typeref_to_type`], which the type inferencer treats as `Type::Unknown`
+/// (already handled permissively — e.g. binary-op checking falls through when
+/// either side is `Unknown`). This brings the parser in line with Buff's
+/// inference-first philosophy; full param-type inference at codegen is a
+/// follow-up (Rust requires explicit fn-signature param types, so the
+/// codegen must eventually infer + emit a concrete type).
 ///
 /// # T75 — bare `self` receiver
 ///
-/// As a SPECIAL CASE, the FIRST parameter may be a bare `self` (no
-/// `: Type` annotation) — the receiver syntax used by extension methods
-/// inside `extend TYPE { fn ... }` blocks. The synthesised type stored on
-/// the resulting [`Param`] is `TypeRef::Named { name: "Self" }` (a marker;
-/// the codegen uses the param NAME `self` to decide emission, not the
-/// stored type). After the first param, every subsequent param requires
-/// the `name: Type` shape as usual.
+/// As a SPECIAL CASE, a bare `self` (no `: Type` annotation) — the receiver
+/// syntax used by extension methods inside `extend TYPE { fn ... }` blocks —
+/// keeps its dedicated `TypeRef::Named { name: "Self" }` placeholder (NOT the
+/// generic `"_"`). This distinction matters because the codegen uses the
+/// param NAME `self` (plus the `Self` marker) to decide receiver emission.
 ///
 /// # Errors
 ///
-/// Returns [`ParseError`] if any parameter is malformed.
+/// Returns [`ParseError`] if any parameter name is missing or not an
+/// identifier. (The `: Type` annotation is optional as of BUG-10.)
 pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseError> {
     let source_id = stream.source_id();
     let mut params = Vec::new();
@@ -414,19 +427,35 @@ pub fn parse_params(stream: &mut TokenStream<'_>) -> Result<Vec<Param>, ParseErr
         })?;
         let start = name_tok.span.start;
         let name = extract_ident(name_tok)?;
-        // T75: bare `self` receiver — the first parameter of an extension
-        // method is `self` (no `: Type`). Synthesise a placeholder type so
-        // the resulting `Param` carries a valid TypeRef; the codegen emits
-        // a Rust receiver (`self` / `&self` / `&mut self`) based on the
-        // param NAME, not the stored type.
+        // The `: Type` annotation is OPTIONAL (BUG-10). Three cases:
+        //
+        // 1. T75: bare `self` receiver (no `: Type`) → `Self` placeholder.
+        //    The codegen emits a Rust receiver based on the param NAME, and
+        //    uses the `Self` marker to distinguish from a generic inferred
+        //    param. This arm MUST stay ahead of the generic inferred branch
+        //    so `self` does not collapse to `_`.
+        //
+        // 2. BUG-10: any other param without `: Type` → inferred placeholder
+        //    `TypeRef::Named { name: "_" }`. Downstream maps `_` to `None`
+        //    (→ `Type::Unknown`), which the inferencer handles permissively.
+        //
+        // 3. Existing: `: Type` present → parse the type annotation as before.
         let ty = if name.name == "self" && !matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
             TypeRef::Named {
                 name: Ident::new("Self", Span::new(start, name.span.end, source_id)),
                 span: Span::new(start, name.span.end, source_id),
             }
-        } else {
+        } else if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
             stream.expect(TokenKind::Colon)?;
             parse_type_ref(stream)?
+        } else {
+            // BUG-10: no `: Type` and not `self` → inferred placeholder.
+            // The `_` name is the conventional wildcard; it is NOT a real
+            // type and maps to `Type::Unknown` downstream.
+            TypeRef::Named {
+                name: Ident::new("_", Span::new(start, name.span.end, source_id)),
+                span: Span::new(start, name.span.end, source_id),
+            }
         };
         let mut end = type_end(&ty);
         // T106: optional default value `name: Type = expr`. After the type,
