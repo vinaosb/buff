@@ -165,7 +165,7 @@ impl ProfileKey {
 /// # Examples
 ///
 /// ```
-/// use buff_lang_runtime::threshold::bucket_intensity;
+/// use buff_lang_runtime::bucket_intensity;
 ///
 /// assert_eq!(bucket_intensity(None), 0);
 /// assert_eq!(bucket_intensity(Some(4.0)), 40);

@@ -81,9 +81,18 @@ impl Channel {
     /// Wraps `tokio::sync::mpsc::channel(buffer)`; the buffer size is
     /// the maximum number of in-flight messages the channel holds
     /// before `send` blocks (the canonical "bounded backpressure"
-    /// semantic). A buffer of 0 is allowed by tokio (it becomes a
-    /// "rendezvous" channel — send blocks until recv is ready); a
-    /// buffer of `n` lets up to `n` sends complete without a recv.
+    /// semantic). A buffer of `n` lets up to `n` sends complete without
+    /// a recv.
+    ///
+    /// A `buffer` of `0` is coerced to `1`. Historically tokio treated
+    /// `channel(0)` as a "rendezvous" channel (send blocks until recv is
+    /// ready), but current tokio (1.40+) **panics** on `channel(0)` with
+    /// `"mpsc bounded channel requires buffer > 0"`. To preserve this
+    /// factory's "never panics" contract (see `# Panics` below), a `0` is
+    /// silently clamped to the minimum legal bound of `1`. Callers that
+    /// pass `0` therefore get a 1-slot bounded channel — the closest
+    /// practical approximation of rendezvous semantics that current tokio
+    /// supports without panicking.
     ///
     /// # Type parameter
     ///
@@ -98,10 +107,19 @@ impl Channel {
     /// # Panics
     ///
     /// NEVER. `tokio::sync::mpsc::channel` is infallible (returns a
-    /// tuple directly, no `Result`).
+    /// tuple directly, no `Result`). A `buffer` of `0` is coerced to `1`
+    /// before the call so the upstream "requires buffer > 0" panic
+    /// (tokio 1.40+) cannot fire — see the construction notes above.
     #[allow(clippy::new_ret_no_self)] // Factory by design: returns (Sender, Receiver), not Channel.
     #[must_use]
     pub fn new<T: Send + 'static>(buffer: usize) -> (Sender<T>, Receiver<T>) {
+        // Coerce 0 → 1: tokio 1.40+ panics on `mpsc::channel(0)` with
+        // "mpsc bounded channel requires buffer > 0". Clamping to 1
+        // preserves the documented "never panics" contract; a 1-slot
+        // bounded channel is the closest non-panicking approximation of
+        // the historical rendezvous semantic. max(1, buffer) is the
+        // cheapest correct guard.
+        let buffer = buffer.max(1);
         let (tx, rx) = tokio::sync::mpsc::channel(buffer);
         (Sender(tx), Receiver(rx))
     }

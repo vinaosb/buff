@@ -145,7 +145,7 @@ fn test_span_preservation_with_span_builder() {
 fn test_span_preservation_bridge_uses_set_span() {
     // T50: When a span is attached via with_span(), the From bridge
     // should produce a diagnostic carrying that span (not Span::dummy).
-    use buff_lang_error::{Diagnostic, Span};
+    use buff_lang_error::Span;
     let span = Span::new(5, 15, buff_lang_error::SourceId(0));
     let rt_err = RuntimeError::NotImplemented {
         feature: "test".into(),

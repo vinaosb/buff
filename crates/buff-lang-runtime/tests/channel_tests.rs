@@ -257,9 +257,11 @@ fn channel_double_close_does_not_panic() {
 
 #[test]
 fn channel_rendezvous_buffer_zero_syncs_send_with_recv() {
-    // A buffer-0 channel is a rendezvous: send blocks until recv is
-    // ready. We verify both sides meet (the send completes when the
-    // recv pulls the value).
+    // A buffer-0 request is coerced to a 1-slot bounded channel (tokio
+    // 1.40+ panics on `mpsc::channel(0)`; Channel::new clamps to 1). We
+    // verify send + recv still sync: the send completes when the recv
+    // pulls the value. We use tokio::join! to run send and recv
+    // concurrently so neither side blocks indefinitely.
     let (sender, mut receiver): (Sender<String>, Receiver<String>) = Channel::new(0);
     block_on(async {
         // Spawn a task that sends; without a concurrent recv, this

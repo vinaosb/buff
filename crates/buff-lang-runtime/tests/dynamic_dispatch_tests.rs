@@ -301,8 +301,18 @@ fn dynamic_dispatch_intensity_at_exact_threshold_is_high() {
 
 #[test]
 fn dynamic_dispatch_intensity_just_below_threshold_is_low() {
-    // One ULP below the threshold → low (memory-bound).
-    let just_below = GPU_ARITHMETIC_INTENSITY_THRESHOLD - f64::EPSILON;
+    // The largest f64 strictly less than the threshold → low (memory-bound).
+    //
+    // NB: `threshold - f64::EPSILON` is NOT "one ULP below" — EPSILON is
+    // the ULP at 1.0, but at 4.0 the ULP is 4× larger, so
+    // `4.0 - f64::EPSILON` rounds back to exactly `4.0` and is treated as
+    // "high". `f64::next_down` (stable since 1.85) gives the true largest
+    // representable f64 strictly below the threshold.
+    let just_below = GPU_ARITHMETIC_INTENSITY_THRESHOLD.next_down();
+    assert_ne!(
+        just_below, GPU_ARITHMETIC_INTENSITY_THRESHOLD,
+        "sanity: next_down must be strictly less than the threshold"
+    );
     let ctx = WorkloadContext::new(100_000, true).with_intensity(just_below);
     assert_eq!(
         decide_dynamic(&ctx),
