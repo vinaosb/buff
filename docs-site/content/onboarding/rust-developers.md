@@ -490,9 +490,9 @@ match value {
 
 Differences:
 
-- **Braces required** for the body (Buff's `match` doesn't use
-  offside-rule for arms — it uses `{ ... }`).
-- **Comma separators** between arms, like Rust.
+- **Two forms** for the body: the brace form `{ ... }` shown above, or the
+  layout form `match value:` with indented arms (like other Buff blocks).
+- **Comma separators** between arms in the brace form.
 - **Patterns** support the same set: literals, `Some(x)`, `Ok(v)`,
   ranges, `_`, struct patterns.
 - **Guards** with `if`: `Some(x) if x > 0 => ...`.

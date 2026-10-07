@@ -105,8 +105,8 @@ internalize it.
 | `elif` | `else if` | Two words. |
 | `for x in xs:` | `for x in xs:` | Same. |
 | `for i in range(10):` | `for i in 0..10:` | Range syntax. Inclusive: `0..=10`. |
-| `while x < 10:` | (use `for` over an iterator, or recursion) | Buff has no `while`. |
-| `match x:` | `match x { ... }` | Rust-style, braces required. |
+| `while x < 10:` | `while x < 10:` | Same. |
+| `match x:` | `match x:` or `match x { ... }` | Layout form (indented arms) or Rust-style brace form. |
 | `match` cases | `case Pat:` | `Pat => body,` |
 | `break` / `continue` | `break` / `continue` | Same. |
 | `try: ... except E as e:` | `match f() { Ok(v) => ..., Err(e) => ... }` | No `try`/`except`; use `Result<T, E>`. |

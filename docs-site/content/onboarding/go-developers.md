@@ -134,7 +134,7 @@ some `buff-*` crates manually.
 | `for cond { }` | (no equivalent) | Use `for x in iter` or recursion. |
 | `for { }` (infinite) | (no equivalent) | Use recursion. |
 | `for range ch { }` | `for x in ch:` | Channel iteration. |
-| `switch x { case A: }` | `match x { Pat => ... }` | Renamed; braces required. |
+| `switch x { case A: }` | `match x { Pat => ... }` | Renamed; brace or layout (`match x:`) form. |
 | `switch { case cond: }` | `if cond: ...` | Switch-without-value → if chain. |
 | `break`, `continue` | `break`, `continue` | Same. |
 | `goto LABEL` | (no equivalent) | No goto. |
