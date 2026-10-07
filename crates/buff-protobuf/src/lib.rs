@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn serialize_float() {
-        let bytes = serialize(&json!(3.14)).expect("serialize float");
+        let bytes = serialize(&json!(std::f64::consts::PI)).expect("serialize float");
         assert!(!bytes.is_empty());
     }
 
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn deserialize_float_roundtrip() {
-        for f in [0.0, 1.5, -2.25, 3.14159] {
+        for f in [0.0, 1.5, -2.25, std::f64::consts::PI] {
             let bytes = serialize(&json!(f)).expect("serialize");
             let back = deserialize(&bytes).expect("deserialize");
             assert_eq!(back.as_f64(), Some(f));
@@ -509,7 +509,7 @@ mod tests {
             json!(0),
             json!(42),
             json!(-1),
-            json!(3.14),
+            json!(std::f64::consts::PI),
             json!("hello world"),
             json!([1, 2, 3]),
             json!({"a": 1, "b": [2, 3]}),

@@ -5,7 +5,7 @@
 //! new snapshots.
 
 use buff_game::{
-    Asset, AudioBuffer, DrawCommand, Game, GameConfig, Input, Key, Renderer, SimpleScene, Texture,
+    AudioBuffer, DrawCommand, Game, GameConfig, Input, Key, Renderer, SimpleScene, Texture,
     Transform,
 };
 

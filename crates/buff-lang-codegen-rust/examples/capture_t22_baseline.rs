@@ -73,16 +73,13 @@ fn main() {
     eprintln!("output:       {}", output_path.display());
 
     let mut fixtures: BTreeMap<String, FixtureMeasurement> = BTreeMap::new();
-    let mut binary_sizes_bytes: BTreeMap<String, u64> = BTreeMap::new();
+    let binary_sizes_bytes: BTreeMap<String, u64> = BTreeMap::new();
     let mut dispatch_decisions: BTreeMap<String, u64> = BTreeMap::new();
 
     for name in FIXTURE_NAMES {
         let path = fixtures_dir.join(format!("{name}.buff"));
         eprintln!("- measuring {name} ...");
         let m = measure_fixture(&path, name);
-        if let Some(_) = m.binary_size_bytes {
-            // (none on this host — back-end unavailable)
-        }
         *dispatch_decisions.entry("gpu".to_string()).or_insert(0) += m.prefer_gpu_count;
         *dispatch_decisions.entry("npu".to_string()).or_insert(0) += m.prefer_npu_count;
         fixtures.insert(name.to_string(), m);
@@ -333,7 +330,7 @@ fn iso8601_now() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let days = (secs / 86400) as i64;
-    let sec_of_day = (secs % 86400) as u64;
+    let sec_of_day = secs % 86400;
     let (y, m, d) = civil_from_days(days);
     let hh = sec_of_day / 3600;
     let mm = (sec_of_day % 3600) / 60;

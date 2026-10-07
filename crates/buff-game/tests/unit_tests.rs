@@ -6,8 +6,8 @@
 //! and transform math all compose correctly.
 
 use buff_game::{
-    Asset, AssetRef, DrawCommand, Game, GameConfig, GameError, Input, Key, Renderer, Scene,
-    SimpleScene, Texture, Transform, World,
+    Asset, AssetRef, DrawCommand, Game, GameConfig, GameError, Key, Scene, SimpleScene, Texture,
+    Transform,
 };
 use std::sync::{Arc, Mutex};
 

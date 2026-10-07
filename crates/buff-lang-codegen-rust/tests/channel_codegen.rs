@@ -208,44 +208,6 @@ fn channel_codegen_new_with_ident_arg_splices_through() {
 // 2. Sender.send - instance method, wraps runtime Sender::send.
 // ===========================================================================
 
-/// Build a Channel-using function body: `let (sender, receiver) =
-/// Channel.new(...)` then one extra expr_stmt the test slots in.
-/// Returns the stmts vec.
-fn channel_body_with_extra(extra: Expr) -> Vec<Stmt> {
-    vec![
-        let_stmt(
-            "(sender, receiver)", // destructured tuple — codegen handles this
-            ns_assoc_call("Channel", "new", vec![int_expr(8)]),
-        ),
-        expr_stmt(extra),
-    ]
-}
-
-/// Like `channel_body_with_extra` but binds only the sender (the
-/// receiver is implicitly _).
-fn sender_body_with_extra(extra: Expr) -> Vec<Stmt> {
-    vec![
-        let_stmt(
-            "sender",
-            // Channel.new returns a tuple; for the codegen test we just
-            // need the receiver (sender) to infer to Type::Sender. The
-            // simplest way: bind the whole tuple to `pair` then access
-            // `.0`. But we can't easily express that without a richer
-            // helper. Instead we rely on the test binding a fresh ident
-            // `sender` whose RHS is `Channel.new(8)` (a tuple) —
-            // codegen won't know it's a Sender; but the assertion
-            // checks the codegen LOWERING of `sender.send(value)` which
-            // only fires when the receiver infers to Type::Sender. So
-            // we need the let-binding's TYPE annotation to be Sender.
-            // Buff does not surface let-type-annotations easily in
-            // direct AST construction without a TypeRef. We attach the
-            // Sender type annotation here.
-            ns_assoc_call("Channel", "new", vec![int_expr(8)]),
-        ),
-        expr_stmt(extra),
-    ]
-}
-
 #[test]
 fn sender_codegen_send_uses_runtime_send_with_await_ok() {
     // sender.send(42) -> { sender.send(42).await.ok(); }

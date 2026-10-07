@@ -128,14 +128,14 @@ fn bias_grad(model: &Model, layer_index: usize) -> Vec<f32> {
 fn numerical_bias_grad(layer_index: usize, x: &Tensor, target: &Tensor) -> Vec<f32> {
     const EPS: f32 = 1e-3;
     let mut out = vec![0.0f32; OUT_DIM];
-    for k in 0..OUT_DIM {
+    for (k, o) in out.iter_mut().enumerate() {
         let l_plus = model_loss_value(&build_model_with_bias_shift(layer_index, k, EPS), x, target);
         let l_minus = model_loss_value(
             &build_model_with_bias_shift(layer_index, k, -EPS),
             x,
             target,
         );
-        out[k] = (l_plus - l_minus) / (2.0 * EPS);
+        *o = (l_plus - l_minus) / (2.0 * EPS);
     }
     out
 }

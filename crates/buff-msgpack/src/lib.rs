@@ -158,7 +158,7 @@ mod tests {
             json!(false),
             json!(42),
             json!(-1),
-            json!(3.14),
+            json!(std::f64::consts::PI),
             json!("hello world"),
             json!([1, 2, 3]),
             json!({"a": 1, "b": [2, 3]}),

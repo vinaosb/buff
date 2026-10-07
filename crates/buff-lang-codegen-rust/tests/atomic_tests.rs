@@ -152,15 +152,15 @@ fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> FuncDecl {
     }
 }
 
-fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, CodegenError> {
+fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, Box<CodegenError>> {
     let func = func_with_stmts("f", stmts);
-    generate_rust(&[Decl::FuncDecl(func)])
+    generate_rust(&[Decl::FuncDecl(func)]).map_err(Box::new)
 }
 
 /// Assert `result` is an Err whose diagnostic carries the
 /// `ParallelMutability` prefix and names `expected_var`. Centralised
 /// so non-promotable cases read as one-liners.
-fn assert_parallel_mutability(result: Result<String, CodegenError>, expected_var: &str) {
+fn assert_parallel_mutability(result: Result<String, Box<CodegenError>>, expected_var: &str) {
     let err = result.expect_err("expected ParallelMutability error, got Ok");
     assert!(
         err.diagnostic.message.contains("ParallelMutability"),

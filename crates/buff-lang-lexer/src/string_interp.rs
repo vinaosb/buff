@@ -392,26 +392,18 @@ mod tests {
                     in_interp = true;
                     current_spec = None;
                 }
-                TokenKind::InterpSpec(s) => {
-                    if in_interp {
-                        current_spec = Some(s.clone());
-                    }
+                TokenKind::InterpSpec(s) if in_interp => {
+                    current_spec = Some(s.clone());
                 }
-                TokenKind::InterpEnd => {
-                    if in_interp {
-                        specs.push(current_spec.take());
-                        in_interp = false;
-                    }
+                TokenKind::InterpEnd if in_interp => {
+                    specs.push(current_spec.take());
+                    in_interp = false;
                 }
                 _ => {}
             }
         }
 
-        cb.captured
-            .into_iter()
-            .zip(specs.into_iter())
-            .map(|(expr, spec)| (expr, spec))
-            .collect()
+        cb.captured.into_iter().zip(specs).collect()
     }
 
     #[test]

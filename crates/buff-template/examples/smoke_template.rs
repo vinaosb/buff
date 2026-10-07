@@ -56,10 +56,7 @@ fn main() {
     // placeholder without curly braces. The type plumbing is fully exercised.
     // The real Rust `Template::from_string("Hello $name!")` succeeds
     // (handlebars treats `$name` as literal text — no `{{}}` to substitute).
-    let t1 = match Template::from_string("Hello $name!") {
-        Ok(t) => t,
-        Err(_) => Template::default(),
-    };
+    let t1 = Template::from_string("Hello $name!").unwrap_or_default();
     println!("Hello $name!");
 
     // --- Template.from_path ---
@@ -67,16 +64,13 @@ fn main() {
     // source stand-in. The real Rust `from_path` reads the file from disk
     // (which does not exist in the test environment). Print the path to
     // match the .buff port's output.
-    let _t2 = match Template::from_path("templates/greeting.html") {
-        Ok(t) => t,
-        Err(_) => Template::default(),
-    };
+    let _t2 = Template::from_path("templates/greeting.html").unwrap_or_default();
     println!("templates/greeting.html");
 
     // --- Template.default ---
     let t3 = Template::default();
     // The .buff port's `template_default()` returns an empty source.
-    println!("{}", ""); // t3.source (empty)
+    println!(); // t3.source (empty)
 
     // --- Template.render (success path on t1) ---
     println!("--- render t1 ---");

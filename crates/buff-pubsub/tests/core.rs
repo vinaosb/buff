@@ -124,7 +124,7 @@ fn eventbus_publish_delivers_to_single_subscriber() {
     assert_eq!(delivered, 1);
 
     assert!(
-        wait_for(|| buf.lock().map(|g| g.len() >= 1).unwrap_or(false)),
+        wait_for(|| buf.lock().map(|g| !g.is_empty()).unwrap_or(false)),
         "event was not delivered within deadline"
     );
     assert_eq!(buf.lock().expect("lock").clone(), vec!["hello".to_string()]);
@@ -154,15 +154,15 @@ fn eventbus_publish_delivers_to_multiple_subscribers() {
 
     assert!(wait_for(|| buf_a
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
     assert!(wait_for(|| buf_b
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
     assert!(wait_for(|| buf_c
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
 
     assert_eq!(buf_a.lock().expect("a").clone(), vec!["ping".to_string()]);
@@ -254,7 +254,7 @@ fn eventbus_unsubscribe_does_not_affect_other_subscribers() {
 
     assert!(wait_for(|| buf_a
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
     std::thread::sleep(Duration::from_millis(20));
     assert!(buf_b.lock().expect("b empty").is_empty());
@@ -288,7 +288,7 @@ fn eventbus_clear_drops_all_subscriptions() {
         .expect("publish");
     assert!(wait_for(|| buf2
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
 }
 
@@ -354,7 +354,7 @@ fn panicking_handler_does_not_kill_worker_or_drop_subsequent_events() {
         .expect("publish 1");
     assert!(wait_for(|| buf
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
 
     // Second event: handler panics. Worker catches it and survives.
@@ -397,7 +397,7 @@ fn eventbus_clone_shares_inner_state() {
     assert_eq!(delivered, 1);
     assert!(wait_for(|| buf
         .lock()
-        .map(|g| g.len() >= 1)
+        .map(|g| !g.is_empty())
         .unwrap_or(false)));
 }
 
@@ -423,7 +423,7 @@ async fn subscribe_publish_works_under_tokio_runtime() {
     // Poll briefly for the spawn_blocking worker to drain.
     let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
-        if buf.lock().map(|g| g.len() >= 1).unwrap_or(false) {
+        if buf.lock().map(|g| !g.is_empty()).unwrap_or(false) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(2)).await;
