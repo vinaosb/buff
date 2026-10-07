@@ -33,7 +33,7 @@ fn describe_int(n: i64) {
         0 => println!("{}", 100),
         1 => println!("{}", 200),
         _ => println!("{}", 999),
-    }
+    };
 }
 fn half(n: i64) -> Result<i64, Error> {
     if n < 2 {
