@@ -216,11 +216,13 @@ fn suggestions_to_code_actions(
     position: Position,
 ) -> Vec<CodeActionOrCommand> {
     let byte = state.lines.byte_offset(&state.text, position);
-    let uri: lsp_types::Uri = format!("buff://source-{}", state.source_id.0)
-        .parse()
-        // lsp-types 0.97 `Uri` does not impl `Default`; parse a known-good
-        // constant fallback. "buff://unknown" is always a valid URI.
-        .unwrap_or_else(|_| "buff://unknown".parse().unwrap());
+    // lsp-types 0.97 `Uri` does not impl `Default`; a `buff://source-N`
+    // parse failure is unreachable for our synthesized URIs — return the
+    // empty response rather than unwrap.
+    let uri: lsp_types::Uri = match format!("buff://source-{}", state.source_id.0).parse() {
+        Ok(uri) => uri,
+        Err(_) => return Vec::new(),
+    };
 
     let mut out: Vec<CodeActionOrCommand> = Vec::new();
     for diag in &state.analysis.diagnostics {
@@ -954,19 +956,26 @@ pub fn semantic_tokens_full(
     // tokens overlap (e.g. `@test` → decorator `@` is at the same byte
     // as the start of `test` identifier).
     let mut data: Vec<SemanticToken> = Vec::with_capacity(abs.len());
-    let mut prev_line: u32 = 0;
-    let mut prev_char: u32 = 0;
+    // `None` until the first token is emitted — a (0, 0) initialized
+    // prev would drop the document's first token, which usually sits
+    // at (0, 0) (caught by t46: `func` keyword vanished).
+    let mut prev: Option<(u32, u32)> = None;
     for (line, char, length, ty_idx, mods) in abs {
-        if line == prev_line && char == prev_char {
+        if prev == Some((line, char)) {
             // Overlap — skip the later-emitted one (the earlier one
             // already claimed this cell). Keeps the stream well-formed.
             continue;
         }
-        let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 {
-            char - prev_char
-        } else {
-            char
+        let (delta_line, delta_start) = match prev {
+            Some((prev_line, prev_char)) => (
+                line - prev_line,
+                if line == prev_line {
+                    char - prev_char
+                } else {
+                    char
+                },
+            ),
+            None => (line, char),
         };
         data.push(SemanticToken {
             delta_line,
@@ -975,8 +984,7 @@ pub fn semantic_tokens_full(
             token_type: ty_idx,
             token_modifiers_bitset: mods,
         });
-        prev_line = line;
-        prev_char = char;
+        prev = Some((line, char));
     }
 
     Some(SemanticTokensResult::Tokens(SemanticTokens {

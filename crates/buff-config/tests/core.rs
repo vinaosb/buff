@@ -60,7 +60,10 @@ fn config_missing_key_returns_none() {
 #[test]
 fn config_load_toml_file() {
     let cfg = Config::new();
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.toml", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-loadtoml.toml",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, r#"key = "value""#).expect("write toml");
@@ -73,7 +76,10 @@ fn config_load_toml_file() {
 #[test]
 fn config_load_json_file() {
     let cfg = Config::new();
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.json", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-loadjson.json",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, r#"{{"key": "json_value"}}"#).expect("write json");
@@ -86,7 +92,10 @@ fn config_load_json_file() {
 #[test]
 fn config_load_yaml_file() {
     let cfg = Config::new();
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.yaml", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-loadyaml.yaml",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, "key: yaml_value").expect("write yaml");
@@ -99,7 +108,10 @@ fn config_load_yaml_file() {
 #[test]
 fn config_load_unsupported_format_returns_error() {
     let cfg = Config::new();
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.xyz", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-unsupported.xyz",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, "some content").expect("write");
@@ -127,7 +139,10 @@ fn config_load_args_parses_separate_key_value() {
 fn config_layered_precedence_file_overrides_default() {
     let cfg = Config::new();
     cfg.set_default("port", 8080);
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.toml", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-layered-file.toml",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, r#"port = 9090"#).expect("write toml");
@@ -141,7 +156,10 @@ fn config_layered_precedence_file_overrides_default() {
 fn config_layered_precedence_args_override_file() {
     let cfg = Config::new();
     cfg.set_default("port", 8080);
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.toml", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-layered-args.toml",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, r#"port = 9090"#).expect("write toml");
@@ -156,7 +174,10 @@ fn config_layered_precedence_args_override_file() {
 fn config_watch_fires_callback_on_file_change() {
     let cfg = Config::new();
     cfg.set_default("port", 8080);
-    let tmp = std::env::temp_dir().join(format!("buff_config_test-{}.toml", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "buff_config_test-{}-watch.toml",
+        std::process::id()
+    ));
     {
         let mut f = std::fs::File::create(&tmp).expect("create temp file");
         write!(f, r#"port = 8080"#).expect("write toml");

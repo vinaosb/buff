@@ -48,7 +48,7 @@ use buff_lang_error::Diagnostic;
 /// # Examples
 ///
 /// ```
-/// # use buff_lang_cli::naming_lint::is_snake_case;
+/// # use buff_lang_check::naming_lint::is_snake_case;
 /// assert!( is_snake_case("foo"));
 /// assert!( is_snake_case("foo_bar"));
 /// assert!( is_snake_case("item_count_42"));
@@ -83,7 +83,7 @@ pub fn is_snake_case(s: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// # use buff_lang_cli::naming_lint::is_pascal_case;
+/// # use buff_lang_check::naming_lint::is_pascal_case;
 /// assert!( is_pascal_case("Foo"));
 /// assert!( is_pascal_case("HttpRequest"));
 /// assert!( is_pascal_case("Color"));
@@ -102,7 +102,9 @@ pub fn is_pascal_case(s: &str) -> bool {
         return false;
     }
     let mut chars = s.chars();
-    let first = chars.next().expect("non-empty checked above");
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_ascii_uppercase() {
         return false;
     }
