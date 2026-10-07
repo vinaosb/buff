@@ -25,7 +25,7 @@ src/
 | Change byte↔position mapping | `position.rs::LineIndex` |
 | Add a new type of symbol to the index | `symbol.rs::SymbolIndex::add_*` + `analysis.rs::infer_decl` |
 | Modify how a Buff diagnostic maps to LSP | `handlers.rs::diagnostic_to_lsp` |
-| Re-route formatting through a different impl | `handlers.rs::formatting` (currently calls `buff_lang_cli::fmt::format_source`) |
+| Re-route formatting through a different impl | `handlers.rs::formatting` (currently calls `buff_lang_fmt::format_source`) |
 
 ## CONVENTIONS (this crate only)
 
@@ -33,7 +33,7 @@ src/
 - **Pure handlers, side-effecting server.** All `handlers::*` are pure functions on `&DocumentState`. The only I/O lives in `server.rs`. This split keeps the handlers trivially testable (drive `analyze::analyze` → `DocumentState::new` → call handler → assert on response — no subprocess, no threads).
 - **Full reparse only.** v1.2 reparses the entire file on every `didChange`. Incremental parsing is a v2.0 task (see plan T117 "Must NOT do"). The `TextDocumentSyncKind::FULL` declared in `server_capabilities` reflects this.
 - **UTF-16-aware positions.** LSP columns are UTF-16 code units per the spec. `position::LineIndex` is the authoritative converter — do NOT use `buff_lang_error::SourceMap::lookup` (it returns character-based columns and would misalign for astral characters).
-- **Reuse `buff fmt`, don't reimplement.** `handlers::formatting` calls `buff_lang_cli::fmt::format_source` so the LSP and `buff fmt` produce byte-identical output.
+- **Reuse `buff fmt`, don't reimplement.** `handlers::formatting` calls `buff_lang_fmt::format_source` so the LSP and `buff fmt` produce byte-identical output.
 - **Typecheck-only mode.** `analysis::analyze` runs `TypeInferencer` directly — NO Rust codegen. Distinct from the CLI's `buff check` (which surfaces codegen-time warnings). This is exactly the standalone typecheck the T117 spec asks for.
 - **Tests in `tests/`.** Unit tests live inline (`#[cfg(test)] mod tests`); integration / protocol-conformance tests live in `tests/` (drive the handlers + `LineIndex` directly, not via subprocess — mirrors how `buff-lang-cli` tests drive the pipeline).
 
@@ -45,7 +45,7 @@ src/
 - `url` (for `Url`)
 - `serde` / `serde_json` / `thiserror`
 - Buff compiler crates: `buff-lang-ast`, `buff-lang-lexer`, `buff-lang-parser`, `buff-lang-types`, `buff-lang-error`
-- `buff-lang-cli` (for `fmt::format_source` reuse — pulls in clap+tokio+toml as transitive deps; accepted trade-off per T117 "reuse, don't reimplement")
+- `buff-lang-fmt` (for `format_source` reuse — the T54 `buff fmt` logic, kept decoupled from the CLI binary)
 
 ## LAUNCH (for VSCode extension T118)
 

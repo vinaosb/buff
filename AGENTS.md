@@ -53,7 +53,7 @@ buff/
 ├── book/                                # T55 "The Buff Book" — mdBook guide (11 chapters: intro → real-world examples)
 ├── docs/                                # Generated error pages (docs/errors/E*.html) + component-model/extern-guide markdown
 ├── .sisyphus/                           # Project orchestration: boulder.json + plans/ (13 files) + decisions/ + evidence/ + notepads/
-├── .github/workflows/ci.yml             # 3-OS matrix: fmt --check + clippy --lib -D warnings + test (advisory) + buff-validation + docker-build
+├── .github/workflows/ci.yml             # fmt --check + clippy --all-targets -D warnings (CI_CRATES) + cargo-deny + golden harness + equivalence + docker-build; test-core/test-framework advisory (test-core on 3 OSes)
 ├── Cargo.toml                           # Pure workspace (no [package]); ~50 deps centralized in [workspace.dependencies] with T-numbered rationale
 └── rust-toolchain.toml                  # Pin: 1.95.0 + rustfmt + clippy
 ```
@@ -68,7 +68,7 @@ buff/
 | Add a TokenKind | `crates/buff-lang-lexer/src/token.rs` → `lexer.rs` → parser `stream.rs` | Also check `regex_context()` `/`-disambiguation |
 | Add a prelude/builtin fn (free) | `crates/buff-lang-types/src/prelude.rs` (PreludeFn + return_type) + codegen-rust `lower_prelude_call` | Implicit — no `import` needed |
 | Add a prelude type (DateTime/Regex/URL/etc) | `crates/buff-lang-types/src/prelude_types.rs` (PreludeType + PreludeAssocFn + PreludeInstanceFn) + codegen-rust `lower_prelude_type_assoc_fn` + `extern_crates` BTreeSet | THE 1919-line registry every T124 stdlib task extends |
-| Add a `buff check` lint | `crates/buff-lang-cli/src/naming_lint.rs` + `check.rs::check_source` | Standalone typecheck T55 shipped; no codegen needed |
+| Add a `buff check` lint | `crates/buff-lang-check/src/naming_lint.rs` + `buff-lang-check/src/lib.rs::check_source` | Standalone typecheck T55 shipped; no codegen needed |
 | Add an LSP capability | `crates/buff-lsp/src/handlers.rs` + `server.rs` capability registration | Pure handlers; only server.rs has I/O |
 | Add a registry endpoint | `crates/buff-registry/src/handlers.rs` + `lib.rs::app()` route arm | axum 0.8 `{name}` path syntax |
 | Add buff-ui component lifecycle hook | `crates/buff-lang-codegen-buffhtml/src/prop_check.rs` + `lib.rs` + `crates/buff-ui-dioxus/src/lib.rs` | T134 pre-checker + lowering + runtime API |
@@ -109,7 +109,7 @@ buff-lang-codegen-rust::generate_rust  (type inference INSIDE codegen; race/atom
     ▼                            ▼
 syn::File → prettyplease::unparse → String
     │
-    ▼  pipeline::compile_rust_to_exe   (rustc --edition 2021)
+    ▼  buff-lang-pipeline::compile_rust_to_exe   (rustc --edition 2021)
 native executable
     │
     ▼  (parallel: buff-ui-dioxus / Dioxus 0.7 for UI apps)
@@ -136,7 +136,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
 - **Tests in per-crate `tests/`** (not src). Inline `#[cfg(test)]` ok for unit smoke tests.
-- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy $CI_CRATES --lib -- -D warnings`; local builds should use `--all-targets` for thoroughness).
+- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy $CI_CRATES --all-targets -- -D warnings` over the CI_CRATES allow-list).
 - **Conservative pin philosophy**: pin to long-standing stable majors (rand 0.9, chrono 0.4, rustyline 15, dirs 5, zeromq 0.4). rand was migrated from 0.8→0.9 in T36 (v1.25 tech-debt batch) — 0.9 is now the stable surface. Documented inline in root Cargo.toml.
 - **Pure-Rust preference**: reqwest uses `rustls-tls` (NOT native-tls); zeromq (NOT zmq which links C libzmq); no diesel/libpq/S3 SDK in registry. Matches the "no C library, no Docker" hard rule from T126/T127 task specs.
 
@@ -160,9 +160,9 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 
 - **PT-BR example names**: `ola`, `calculadora` — keep the convention when adding Portuguese-language examples. English for feature demos (fibonacci, closures, etc).
 - **`.sisyphus/` orchestration**: plans track v0.1/v0.5/v1.0/v1.x task breakdown. `boulder.json` is active session state. Read `buff-conventions.md` for Buff-language rules. `evidence/` dir is gitignored.
-- **Dual bin+lib in THREE crates** (cli/lsp/registry): `main.rs` (thin dispatch) + `lib.rs` (real logic). Lets integration tests drive the pipeline without subprocess.
-- **`compile_to_rust` vs `compile_rust_to_exe`** split in `pipeline.rs`: callers can inspect intermediate Rust source before invoking rustc. `.buffhtml` adds `compile_buffhtml_to_rust` with a `SpanMap` side-table for reverse error mapping.
-- **Standalone typecheck SHIPPED**: `buff check` (T55) at `buff-lang-cli/src/check.rs::check_source()` runs lex → parse → TypeInferencer → naming_lint WITHOUT codegen. (Earlier docs said "post-v1.0 work" — OUTDATED.)
+- **Dual bin+lib in SIX crates** (buff-lang-cli, buff-lsp, buff-registry, buffup, bufflings, buff-mcp): `main.rs` (thin dispatch) + `lib.rs` (real logic). Lets integration tests drive the pipeline without subprocess.
+- **`compile_to_rust` vs `compile_rust_to_exe`** split in the `buff-lang-pipeline` crate: callers can inspect intermediate Rust source before invoking rustc. `.buffhtml` adds `compile_buffhtml_to_rust` with a `SpanMap` side-table for reverse error mapping. (The CLI crate re-exports the pipeline; it no longer has its own pipeline module.)
+- **Standalone typecheck SHIPPED**: `buff check` (T55) at `buff-lang-check/src/lib.rs::check_source()` runs lex → parse → TypeInferencer → naming_lint WITHOUT codegen. (Earlier docs said "post-v1.0 work" — OUTDATED.)
 - **Type-checking is ALSO INSIDE codegen** for `buff build`/`buff run` (TypeInferencer embedded in RustCodegen, consulted at each `let` binding; failures fall back to no annotation).
 - **Prelude**: free fns (`print`, etc.) AND prelude types (`DateTime`, `Regex`, `URL`, `Hash`, `TCP`, etc) are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs` + `prelude_types.rs` (1919-line extensible registry). Codegen-lowered to mature Rust crates (chrono/tracing/regex/toml/rand/base64/sha2/hmac/tokio-tungstenite/etc).
 - **Two parser entry points**: `parse()` fail-fast (production) + `parse_recovering()` accumulating (LSP/`buff check`). Both share `parse_one_decl()` dispatcher.
@@ -227,8 +227,8 @@ cd editors/vscode && npm run build
 ## NOTES
 
 - **Toolchain mismatch**: `rust-toolchain.toml` pins `1.95.0`, but `.github/workflows/ci.yml` uses `dtolnay/rust-toolchain@master` with `toolchain: 1.95.0`. CI MAY diverge from local on dtolnay action master bumps.
-- **CI clippy uses `--lib`** (CI line 61). Tests are `continue-on-error` (advisory, not gating). `buff-validation` emits warnings/notices but does not fail CI. The hard gates are: `fmt --check`, `clippy --lib -- -D warnings`, and Docker image build. CONTRIBUTING.md was updated in the T28 v1.24 audit; README.md "Building from source" still says `--all-targets` (cosmetic — local builds should use `--all-targets` for thoroughness, CI uses `--lib` for speed).
-- **CI runs on 3 OSes**: ubuntu-latest, windows-latest, macos-latest.
+- **CI hard gates** (post-W2 ci.yml): `cargo fmt --check --all`, `cargo clippy $CI_CRATES --all-targets -- -D warnings` (explicit allow-list incl. the `buff-lang-check`/`buff-lang-fmt`/`buff-lang-pipeline` extraction crates), `cargo-deny`, the golden-output harness (`buff-validation` fails on stdout mismatch), `equivalence-check`, and Docker image build; `cargo-audit` gates PRs via security.yml. `self-host-check` is count-only (reports pass/fail counts, never fails). Tests are `continue-on-error` (advisory). CONTRIBUTING.md documents this gate-for-gate.
+- **CI OS matrix**: only the advisory `test-core` job runs on 3 OSes (ubuntu/windows/macos); all other jobs run on ubuntu-latest.
 - **`crates-io/` is empty** — reserved for future crates.io publishing workflow.
 - **`buff.lock`** is gitignored — Buff's future lockfile (not yet generated).
 - **Hand-rolled lexer/parser**: chumsky 1.0.0-alpha.8 transitively required `stacker` → `cc-rs` → C shim that failed on Windows hosts missing `excpt.h` from the Windows SDK. Same family of issues pushed the lexer to hand-roll. Unused `logos`/`chumsky` deps were removed in cleanup commit 9af2f5c.
