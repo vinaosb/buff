@@ -80,6 +80,8 @@ enum TokenKind {
     KwIf,
     KwElse,
     KwFor,
+    // while cond: body — conditional loop (BUG-9).
+    KwWhile,
     KwReturn,
     KwBreak,
     KwContinue,
@@ -101,6 +103,8 @@ enum TokenKind {
     KwExtend,
     // defer EXPR deferred-execution statement (T100).
     KwDefer,
+    // impl Trait for Type { ... } trait-implementation block (T75b).
+    KwImpl,
 
     // --- Operators ---
     DotDot,
@@ -194,6 +198,8 @@ func from_keyword(s: String) -> Option<TokenKind>:
         return Option.Some(TokenKind.KwElse)
     if s == "for":
         return Option.Some(TokenKind.KwFor)
+    if s == "while":
+        return Option.Some(TokenKind.KwWhile)
     if s == "return":
         return Option.Some(TokenKind.KwReturn)
     if s == "break":
@@ -230,6 +236,8 @@ func from_keyword(s: String) -> Option<TokenKind>:
         return Option.Some(TokenKind.KwExtend)
     if s == "defer":
         return Option.Some(TokenKind.KwDefer)
+    if s == "impl":
+        return Option.Some(TokenKind.KwImpl)
     return None
 
 // Is this a reserved keyword token?
@@ -245,6 +253,7 @@ func is_keyword(kind: TokenKind) -> Bool:
         TokenKind.KwIf => return true,
         TokenKind.KwElse => return true,
         TokenKind.KwFor => return true,
+        TokenKind.KwWhile => return true,
         TokenKind.KwReturn => return true,
         TokenKind.KwBreak => return true,
         TokenKind.KwContinue => return true,
@@ -263,6 +272,7 @@ func is_keyword(kind: TokenKind) -> Bool:
         TokenKind.KwGuard => return true,
         TokenKind.KwExtend => return true,
         TokenKind.KwDefer => return true,
+        TokenKind.KwImpl => return true,
         _ => return false,
     }
 
@@ -270,9 +280,9 @@ func is_keyword(kind: TokenKind) -> Bool:
 func all_keywords() -> Vector<String>:
     return [
         "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else",
-        "for", "return", "break", "continue", "in", "match", "async", "spawn",
-        "import", "export", "from", "as", "true", "false", "extern", "unsafe",
-        "guard", "extend", "defer",
+        "for", "while", "return", "break", "continue", "in", "match", "async",
+        "spawn", "import", "export", "from", "as", "true", "false", "extern",
+        "unsafe", "guard", "extend", "defer", "impl",
     ]
 
 // Render a TokenKind as its diagnostic string (Rust fmt::Display equivalent).
@@ -311,6 +321,7 @@ func token_kind_to_string(kind: TokenKind) -> String:
         TokenKind.KwIf => return "if",
         TokenKind.KwElse => return "else",
         TokenKind.KwFor => return "for",
+        TokenKind.KwWhile => return "while",
         TokenKind.KwReturn => return "return",
         TokenKind.KwBreak => return "break",
         TokenKind.KwContinue => return "continue",
@@ -329,6 +340,7 @@ func token_kind_to_string(kind: TokenKind) -> String:
         TokenKind.KwGuard => return "guard",
         TokenKind.KwExtend => return "extend",
         TokenKind.KwDefer => return "defer",
+        TokenKind.KwImpl => return "impl",
         // Operators
         TokenKind.DotDot => return "..",
         TokenKind.DotDotEq => return "..=",
