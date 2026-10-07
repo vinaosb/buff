@@ -17,6 +17,7 @@ env:
     -p buff-lang-types -p buff-lang-codegen-rust -p buff-lang-codegen-wgsl
     -p buff-lang-codegen-buffhtml -p buff-lang-ast-rsx -p buff-lang-buffhtml-parser
     -p buff-lang-runtime -p buff-lang-debug-info -p buff-lang-cli -p buff-lang-ffi-guide
+    -p buff-lang-pipeline -p buff-lang-check -p buff-lang-fmt
     -p buff-eval -p buff-repl -p buff-jupyter -p buff-registry
     -p buff-playground-wasm -p buff-ui-dioxus -p buff-dap -p buff-cli
     -p buffup -p bufflings
@@ -80,8 +81,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: clippy
-      - name: Clippy (core + working framework crates, lib only)
-        run: cargo clippy ${{ env.CI_CRATES }} --lib -- -D warnings
+      - name: Clippy (core + working framework crates, all targets)
+        run: cargo clippy ${{ env.CI_CRATES }} --all-targets -- -D warnings
 
   # ── Test-core (ADVISORY, 3-OS matrix) ───────────────────────────────────────
   # P0.11: Core compiler crate tests.
