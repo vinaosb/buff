@@ -106,70 +106,9 @@ use buff_lang_types::{Type, TypeInferencer};
 use buff_lang_pipeline::rustc_invoke;
 
 // ---------------------------------------------------------------------------
-// T2: Fast-linker selection (mirrors buff_lang_cli::pipeline::LinkerChoice).
-// Kept inline to avoid pulling clap/tokio transitively into the eval crate.
-// ---------------------------------------------------------------------------
-
-/// Fast-linker selection for the eval crate's rustc invocation.
-///
-/// Mirrors `buff_lang_cli::pipeline::LinkerChoice` without depending on the
-/// CLI crate. See AGENTS.md: "Keep the two copies in sync manually."
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum EvalLinker {
-    /// Auto-detect: probe PATH for mold (Linux) → rust-lld → system default.
-    #[default]
-    Auto,
-    /// Use rustc's default system linker (no `-C link-arg=-fuse-ld` flag).
-    //
-    // Mirrors `LinkerChoice::System` in the CLI so the two stay in sync,
-    // but the eval surface currently only ever constructs `Auto`. Kept for
-    // API parity + the `resolve_eval_linker_flags` match arm; allow dead
-    // code until the eval linker-flag override is exposed.
-    #[allow(dead_code)]
-    System,
-}
-
-/// Resolve an [`EvalLinker`] to rustc `-C link-arg=-fuse-ld` flags.
-///
-/// Returns an empty vec for [`EvalLinker::System`] (let rustc pick its
-/// default). For [`EvalLinker::Auto`], probes PATH for mold (Linux) →
-/// rust-lld → lld → system default (silent fallback).
-fn resolve_eval_linker_flags(linker: EvalLinker) -> Vec<&'static str> {
-    match linker {
-        EvalLinker::Auto => {
-            // mold is Linux-only in practice.
-            if cfg!(target_os = "linux") && on_path("mold") {
-                vec!["-C", "link-arg=-fuse-ld=mold"]
-            } else if on_path("rust-lld") || on_path("lld") {
-                vec!["-C", "link-arg=-fuse-ld=lld"]
-            } else {
-                Vec::new()
-            }
-        }
-        EvalLinker::System => Vec::new(),
-    }
-}
-
-/// Returns `true` when `name` (an executable basename) is found on `PATH`.
-/// Delegates to the shared [`rustc_invoke::on_path`] (T35).
-fn on_path(name: &str) -> bool {
-    rustc_invoke::on_path(name)
-}
-
-// ---------------------------------------------------------------------------
 // T4: Cranelift dev backend (mirrors buff_lang_cli::pipeline::BackendChoice).
 // Kept inline to avoid pulling clap/tokio transitively into the eval crate.
 // ---------------------------------------------------------------------------
-
-/// Returns `true` when `sccache` is installed and on `PATH` (T9).
-///
-/// Mirrors `buff_lang_cli::compile_speed::sccache_available` without
-/// depending on the CLI crate. sccache wraps rustc invocations to cache
-/// compiled artefacts across projects. Opt-in via `BUFF_EVAL_SCCACHE=1`
-/// env var (no CLI surface in eval).
-fn sccache_available() -> bool {
-    on_path("sccache")
-}
 
 /// Probe whether the Cranelift codegen backend is available (T4).
 ///
@@ -631,7 +570,7 @@ fn run_full_program(source: &str) -> EvalResult {
     let dir = temp_dir_for_eval();
     let stem = unique_stem();
     let rust_path = dir.join(format!("{stem}.rs"));
-    let exe_path = dir.join(with_exe_extension(&PathBuf::from(stem)));
+    let exe_path = dir.join(buff_lang_pipeline::with_exe_extension(&PathBuf::from(stem)));
 
     // Write the .rs file. If this fails, surface as a diagnostic.
     if let Err(e) = std::fs::write(&rust_path, &rust_source) {
@@ -659,11 +598,17 @@ fn run_full_program(source: &str) -> EvalResult {
     // --installed` and passes `--target <triple>` to rustc.
     let mut rustc_cmd = Command::new("rustc");
     // T9: sccache wrapper — opt-in via BUFF_EVAL_SCCACHE=1 env var.
-    if std::env::var("BUFF_EVAL_SCCACHE").as_deref() == Ok("1") && sccache_available() {
+    // PATH probe delegated to the pipeline crate (single source of
+    // truth — the local copy was removed in the T22 dedup).
+    if std::env::var("BUFF_EVAL_SCCACHE").as_deref() == Ok("1")
+        && buff_lang_pipeline::compile_speed::sccache_available()
+    {
         rustc_cmd.env("RUSTC_WRAPPER", "sccache");
     }
     // T35: delegate common flag configuration to the shared helper.
-    let linker_flags = resolve_eval_linker_flags(EvalLinker::Auto);
+    // T2: fast-linker flags come from the pipeline crate (single source
+    // of truth — the local copy was removed in the T22 dedup).
+    let linker_flags = buff_lang_pipeline::linker_args(&buff_lang_pipeline::LinkerChoice::Auto);
     let target = eval_target();
     if let Some(ref triple) = target {
         if !eval_target_is_installed(triple) {
@@ -778,23 +723,6 @@ fn unique_stem() -> String {
     let n = STEM_COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     format!("eval-{pid}-{n}")
-}
-
-/// Apply the platform's executable extension to `path` (`.exe` on
-/// Windows, no-op on Unix). Mirrors `buff_lang_cli::pipeline::
-/// with_exe_extension` without taking a dep on the CLI crate (which
-/// would pull in `clap` / `tokio` etc. for a single helper).
-fn with_exe_extension(path: &std::path::Path) -> PathBuf {
-    let ext = std::env::consts::EXE_EXTENSION;
-    if ext.is_empty() {
-        return path.to_path_buf();
-    }
-    if path.extension().is_some_and(|e| e == ext) {
-        return path.to_path_buf();
-    }
-    let mut p = path.to_path_buf();
-    p.set_extension(ext);
-    p
 }
 
 // ---------------------------------------------------------------------------
@@ -922,7 +850,7 @@ mod tests {
     fn with_exe_extension_unix_passthrough_or_windows_appends() {
         let p = PathBuf::from("eval-1");
         let ext = std::env::consts::EXE_EXTENSION;
-        let with_ext = with_exe_extension(&p);
+        let with_ext = buff_lang_pipeline::with_exe_extension(&p);
         if ext.is_empty() {
             assert_eq!(with_ext, p);
         } else {

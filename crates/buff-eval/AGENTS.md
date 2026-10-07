@@ -10,11 +10,11 @@ Layers beneath `buff-repl` (T125a) and `buff-jupyter` (T129) so they resolve to 
 
 ```
 src/
-└── lib.rs            # 748 lines — Evaluator, EvalResult, SnippetKind, classify,
-                     #   run_full_program, with_exe_extension (copy-pasted from CLI)
+└── lib.rs            # Evaluator, EvalResult, SnippetKind, classify,
+                      #   run_full_program (rustc invoke via buff-lang-pipeline)
 tests/
 └── eval_tests.rs     # Acceptance scenarios: expression eval, state accumulation,
-                     #   type introspection, stdout capture, error handling
+                      #   type introspection, stdout capture, error handling
 ```
 
 ## PUBLIC API
@@ -40,7 +40,7 @@ tests/
 
 ## CONVENTIONS (this crate only)
 
-- **Pipeline is DUPLICATED inline** from `buff_lang_cli::pipeline`. `with_exe_extension` and the `rustc --edition 2021 -O` invocation are copy-pasted with identical logic. This avoids pulling `clap`/`tokio` transitively. Keep the two copies in sync manually.
+- **Single source of truth in `buff-lang-pipeline`.** `with_exe_extension`, the fast-linker detection (`linker_args(LinkerChoice::Auto)`), and the sccache probe (`compile_speed::sccache_available`) are IMPORTED from `buff_lang_pipeline` — the crate is clap/tokio-free, so the former inline mirrors were deleted (T22 dedup). Do NOT re-inline copies.
 - **No `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!`** in non-test code. Every fallible operation returns `EvalResult` with `diagnostic` set.
 - **Temp files** go to `<tmp>/buff-eval/` with unique stems (`eval-<pid>-<n>`). Best-effort cleanup after capture.
 - **Snippet classification** (`classify`): tries `parse_expression` first (bare expr), then `parse` (top-level decl or full program), then falls back to `BodyStmt`. Bare `print(...)` calls are detected so they aren't double-wrapped.

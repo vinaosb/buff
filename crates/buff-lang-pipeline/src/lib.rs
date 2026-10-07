@@ -342,6 +342,25 @@ pub fn resolve_linker(choice: LinkerChoice) -> Result<compile_speed::FastLinker>
     }
 }
 
+/// The rustc `-C link-arg=-fuse-ld=<name>` args for a [`LinkerChoice`],
+/// resolved against the host `PATH`.
+///
+/// Single source of truth for in-process consumers (buff-eval/REPL/
+/// Jupyter) that build their own rustc `Command`: detection delegates to
+/// [`resolve_linker`] → [`compile_speed::FastLinker::rustc_flags`], so
+/// `Auto` probes mold (Linux) → rust-lld → lld exactly once, and
+/// `System` yields an empty vec.
+///
+/// An explicit [`LinkerChoice::Mold`]/[`LinkerChoice::Lld`] whose binary
+/// is absent degrades to an empty vec (system linker) instead of erroring
+/// — buff-eval's only choices are Auto/System, which never error.
+pub fn linker_args(choice: &LinkerChoice) -> Vec<&'static str> {
+    match resolve_linker(*choice) {
+        Ok(linker) => linker.rustc_flags(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Output of the [`compile_to_rust`] phase: the generated Rust source plus the
 /// path it was written to.
 #[derive(Debug, Clone)]
@@ -1852,6 +1871,24 @@ fn extract_source_line(source_file: &SourceFile, line_no: usize) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn linker_args_auto_matches_old_eval_mirror() {
+        // Ported verbatim from buff-eval's `resolve_eval_linker_flags`
+        // (deleted in the T22 dedup): linux+mold → mold flags;
+        // rust-lld or bare lld → lld flags; otherwise system default.
+        let expected: Vec<&'static str> =
+            if cfg!(target_os = "linux") && compile_speed::on_path("mold") {
+                vec!["-C", "link-arg=-fuse-ld=mold"]
+            } else if compile_speed::on_path("rust-lld") || compile_speed::on_path("lld") {
+                vec!["-C", "link-arg=-fuse-ld=lld"]
+            } else {
+                Vec::new()
+            };
+        assert_eq!(linker_args(&LinkerChoice::Auto), expected);
+        // System never sets fuse-ld.
+        assert!(linker_args(&LinkerChoice::System).is_empty());
+    }
 
     #[test]
     fn with_exe_extension_unix_passthrough() {
