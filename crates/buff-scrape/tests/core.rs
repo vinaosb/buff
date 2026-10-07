@@ -8,7 +8,7 @@
 //! Crawler tests use `httpmock` for hermetic HTTP mocking (no real
 //! network — matches the buff-http-client test pattern).
 
-use buff_scrape::{Crawler, Document, Element, ScrapeError};
+use buff_scrape::{Crawler, Document, ScrapeError};
 
 const SAMPLE_HTML: &str = r#"<!DOCTYPE html>
 <html>
