@@ -92,32 +92,33 @@ files cited in the repo (called out per bug).
 - **Also breaks:** `examples/use-cases/error_recovery.buff`, `examples/data-science-workbench/server.buff` — both declare top-level `const`.
 - **Workaround used:** inlined the literals at their use sites.
 
-### BUG-3: layout-sensitive struct form is rejected (`struct Name:\n    field: T`)
+### BUG-3: layout-sensitive struct form was rejected (`struct Name:\n    field: T`) ✅ RESOLVED (PR #68)
 - **Severity:** HIGH
-- **Evidence:** `[parse] [Error] expected newline after `struct Name:` ` — caret on the first field, even with clean LF + 4-space indent (byte-verified). Reproduces in isolation.
-- **Root cause:** `parse_struct_decl` consumes `:` then expects `Newline` + `Indent` offside tokens; the lexer does not emit the `Newline` token between `struct Name:` and the first field line, so the parser errors. Only the brace form `struct Name { f: T, ... }` parses.
-- **Also breaks:** `examples/use-cases/error_recovery.buff` (`struct CircuitBreaker:`).
+- **Evidence (at report time):** `[parse] [Error] expected newline after `struct Name:` ` — caret on the first field, even with clean LF + 4-space indent (byte-verified). Reproduced in isolation.
+- **Root cause (at report time):** `parse_struct_decl` consumed `:` then expected `Newline` + `Indent` offside tokens; the lexer did not emit the `Newline` token between `struct Name:` and the first field line, so the parser errored. Only the brace form `struct Name { f: T, ... }` parsed.
 - **Workaround used:** brace form for all 3 structs.
+- **Status:** **RESOLVED (PR #68).** The layout struct form was already working when re-tested; regression tests added.
 
-### BUG-4: word operators `and` / `or` / `not` are rejected (only `&&` / `||` / `!`)
+### BUG-4: word operators `and` / `or` / `not` were rejected (only `&&` / `||` / `!`) ✅ RESOLVED (PR #72)
 - **Severity:** HIGH
-- **Evidence:** `[parse] [Error] expected `,`, `{`, or `else` in if-chain, found `ident(and)`` (and sym. for `or`/`not`).
-- **Root cause:** `and`/`or`/`not` are not reserved keywords → tokenised as identifiers. The only supported boolean operators are symbolic (`&&`, `||`, `!`).
-- **Also breaks:** `examples/use-cases/error_recovery.buff` (uses `and` on lines 14/23, `not` on 120).
-- **Probe matrix (all `parse OK; type errors: 0`):** `&&` ✓, `||` ✓, `!x` ✓; `and`/`or`/`not` ✗.
+- **Evidence (at report time):** `[parse] [Error] expected `,`, `{`, or `else` in if-chain, found `ident(and)`` (and sym. for `or`/`not`).
+- **Root cause (at report time):** `and`/`or`/`not` were not reserved keywords → tokenised as identifiers. The only supported boolean operators were symbolic (`&&`, `||`, `!`).
+- **Probe matrix (at report time, all `parse OK; type errors: 0`):** `&&` ✓, `||` ✓, `!x` ✓; `and`/`or`/`not` ✗.
+- **Status:** **RESOLVED (PR #72).** `and`/`or`/`not` added as operator aliases in the lexer; they parse to the identical AST as `&&`/`||`/`!`. See `examples/word_operators.buff` (golden CI example).
 
 ### BUG-5: diagnostic renderer PANICS on a UTF-8 BOM ✅ RESOLVED
 - **Severity:** HIGH (robustness — any BOM-prefixed `.buff` file crashes the error path)
 - **Evidence:** `thread 'main' panicked at crates/buff-lang-error/src/diagnostic.rs:622:15: end byte index 1 is not a char boundary; it is inside '\u{feff}'`
 - **Root cause:** `Diagnostic::render` slices `source[1..]` (or similar byte index) without skipping/ stripping a leading BOM, so byte index 1 lands inside the 3-byte BOM.
 - **Note:** triggered here by `Set-Content -Encoding UTF8` adding a BOM to a probe; real users hit this whenever an editor saves `.buff` as "UTF-8 with BOM".
-- **Status:** **RESOLVED.** `strip_bom()` added at `crates/buff-lang-error/src/diagnostic.rs:569-575`, called in all 4 render functions (lines 596, 658, 721, 777). BOM-prefixed source files no longer panic.
+- **Status:** **RESOLVED (PR #65).** `strip_bom()` added at `crates/buff-lang-error/src/diagnostic.rs:569-575`, called in all 4 render functions (lines 596, 658, 721, 777). BOM-prefixed source files no longer panic.
 
-### BUG-6: layout-sensitive enum form is rejected (`enum Name:\n    Variant`)
+### BUG-6: layout-sensitive enum form was rejected (`enum Name:\n    Variant`) ✅ RESOLVED (PR #68)
 - **Severity:** HIGH (same family as BUG-3)
-- **Evidence:** `[parse] [Error] error[E1101]: expected `{`, found `:` ` — caret on the colon after the enum name.
-- **Root cause:** `parse_enum_decl` requires the brace form; no layout-sensitive arm. Only `enum Name { V1, V2, ... }` parses.
+- **Evidence (at report time):** `[parse] [Error] error[E1101]: expected `{`, found `:` ` — caret on the colon after the enum name.
+- **Root cause (at report time):** `parse_enum_decl` required the brace form; no layout-sensitive arm existed. Only `enum Name { V1, V2, ... }` parsed.
 - **Workaround used:** brace form for `TaskStatus`.
+- **Status:** **RESOLVED (PR #68).** Layout enum form added to `parse_enum_decl` (`enum Name:` + indented variants).
 
 ### BUG-7: `func TypeName.method(self, ...)` dotted method syntax is rejected
 - **Severity:** HIGH
@@ -132,32 +133,33 @@ files cited in the repo (called out per bug).
 - **Root cause:** `parse_extend_decl` hard-requires `{` after the target; its method loop peeks for `TokenKind::KwFunc | KwAsync | KwExtern` (i.e. the `func` keyword), so `fn`-prefixed methods are invisible (and `fn` is not even a reserved keyword → parsed as an identifier, leaving the method list empty).
 - **Note:** the error message "extend block must contain at least one `fn` declaration" is misleading — it should say `func`.
 
-### BUG-9: no `while` loop (not a reserved keyword → confusing error)
+### BUG-9: no `while` loop (`while` was not a reserved keyword → confusing error) ✅ RESOLVED (PR #70)
 - **Severity:** HIGH
-- **Evidence:** `[parse] [Error] expected an expression, found `:` ` — caret on the colon of `while i < count:`.
-- **Root cause:** `while` is not a reserved keyword, so it tokenises as an identifier; the parser then tries to parse `while i < count` as an expression and chokes on the `:`. Buff only has `for` loops (`for x in iter:`, `for i in 0..n:`).
+- **Evidence (at report time):** `[parse] [Error] expected an expression, found `:` ` — caret on the colon of `while i < count:`.
+- **Root cause (at report time):** `while` was not a reserved keyword, so it tokenised as an identifier; the parser then tried to parse `while i < count` as an expression and choked on the `:`. Buff only had `for` loops (`for x in iter:`, `for i in 0..n:`).
 - **Workaround used:** converted all 5 indexed loops to `for i in 0..bound:`.
+- **Status:** **RESOLVED (PR #70).** `while` added end-to-end (lexer + parser + AST + codegen + analysis). See `examples/while_loop.buff` (golden CI example).
 
-### BUG-10: function parameters MUST have type annotations
-- **Severity:** MEDIUM (contradicts README "types rarely written")
-- **Evidence:** `[parse] [Error] error[E1101]: expected `:`, found `)` ` for `func handle_root(store) -> Response:`.
-- **Root cause:** `parse_params` requires `name: Type` for every parameter; there is no inferred-param-type form.
-- **Also breaks:** `examples/use-cases/error_recovery.buff` and `examples/data-science-workbench/server.buff`, which omit param types throughout (`func query_float(path, key):`, `func handle_root(req)`).
+### BUG-10: function parameters were required to have type annotations ✅ RESOLVED (PR #71)
+- **Severity:** MEDIUM (contradicted README "types rarely written")
+- **Evidence (at report time):** `[parse] [Error] error[E1101]: expected `:`, found `)` ` for `func handle_root(store) -> Response:`.
+- **Root cause (at report time):** `parse_params` required `name: Type` for every parameter; there was no inferred-param-type form.
 - **Workaround used:** annotated every handler/helper param (`store: TaskStore`, `req: Request`, JSON-derived params as `: JSON`).
+- **Status:** **RESOLVED (PR #71).** Param type annotations made optional (inferred from context).
 
-### BUG-11: `match` only supports the brace form with single-expression arms
+### BUG-11: `match` only supported the brace form with single-expression arms ✅ RESOLVED (PR #67)
 - **Severity:** HIGH
-- **Evidence:** `[parse] [Error] error[E1101]: expected `{`, found `:` ` for `match body:`; and `expected closure parameter name, found `let`` / `expected `=>`, found `:` `` for block-arm variants.
-- **Root cause:** (a) the layout-sensitive `match x:` colon form is not supported — only `match x { ... }`; (b) every arm must be `pattern => expr` — colon-block arms (`pat:`) are rejected; (c) a `{ }` block after `=>` is parsed as a **lambda** (`{ params => body }`), not a statement block, so multi-statement arm bodies are impossible. README confirms braces are reserved for "struct literals, maps, lambdas, interpolation".
-- **Also breaks:** `examples/use-cases/error_recovery.buff` (colon-block `match` throughout) and `examples/data-science-workbench/server.buff`.
+- **Evidence (at report time):** `[parse] [Error] error[E1101]: expected `{`, found `:` ` for `match body:`; and `expected closure parameter name, found `let`` / `expected `=>`, found `:` `` for block-arm variants.
+- **Root cause (at report time):** (a) the layout-sensitive `match x:` colon form was not supported — only `match x { ... }`; (b) every arm had to be `pattern => expr` — colon-block arms (`pat:`) were rejected; (c) a `{ }` block after `=>` was parsed as a **lambda** (`{ params => body }`), not a statement block, so multi-statement arm bodies were impossible. README reserves braces for "struct literals, maps, lambdas, interpolation".
 - **Workaround used:** converted every multi-arm match to brace form with single-expression arms, extracting multi-statement bodies into helper functions (e.g. `create_task_from_value`, `apply_done_override`).
+- **Status:** **RESOLVED (PR #67).** Layout `match x:` form + colon-block arms + multi-statement arm bodies. See `examples/match_layout.buff` (golden CI example).
 
-### BUG-13: lambda/closure bodies must be a single expression
+### BUG-13: lambda/closure bodies had to be a single expression ✅ RESOLVED (PRs #69, #74)
 - **Severity:** MEDIUM
-- **Evidence:** `[parse] [Error] expected `}`, found `let`` — caret on the second statement inside `{ req => log_request(...); let r = ...; ... }`.
-- **Root cause:** the lambda body grammar allows exactly one expression after `params =>`; newline-separated statements are rejected (consistent with BUG-11c — `{ }` is data/lambda territory).
-- **Also breaks:** `examples/data-science-workbench/server.buff` (multi-statement handler closures).
+- **Evidence (at report time):** `[parse] [Error] expected `}`, found `let`` — caret on the second statement inside `{ req => log_request(...); let r = ...; ... }`.
+- **Root cause (at report time):** the lambda body grammar allowed exactly one expression after `params =>`; newline-separated statements were rejected (consistent with BUG-11c — `{ }` is data/lambda territory).
 - **Workaround used:** made every route-registration closure a single expression (`{ req => with_cors(handle_x(store, req)) }`) and moved per-route logging into the handler bodies.
+- **Status:** **RESOLVED (PRs #69 and #74).** Multi-statement lambda bodies supported (parser + codegen tail fix). See `examples/multistmt_lambda.buff` (golden CI example).
 
 ### BUG-12: a literal `{` inside a string is misread as interpolation-start ✅ RESOLVED
 - **Severity:** MEDIUM
@@ -165,7 +167,7 @@ files cited in the repo (called out per bug).
 - **Root cause:** the lexer enters interpolation mode on `{` inside a string even without the `$` prefix that the documented `${...}` form uses; a comma then fails `interp_end`. Any string documenting a JSON/struct shape (`{ a, b }`) breaks.
 - **Also breaks:** `examples/data-science-workbench/server.buff` (`print("  GET  /count      -> { count: N }")`).
 - **Workaround used:** rephrased the route-table print strings to avoid literal braces.
-- **Status:** **RESOLVED.** `\{` and `\}` escape sequences added at `crates/buff-lang-lexer/src/string_interp.rs:87-106` (advances past both bytes so the brace is never seen by the interpolation-start arm). Regression tests at `:507-571` explicitly tagged `BUG-12`. Users can now escape literal braces with `\{` / `\}`.
+- **Status:** **RESOLVED (PR #65).** `\{` and `\}` escape sequences added at `crates/buff-lang-lexer/src/string_interp.rs:87-106` (advances past both bytes so the brace is never seen by the interpolation-start arm). Regression tests at `:507-571` explicitly tagged `BUG-12`. Users can now escape literal braces with `\{` / `\}`.
 
 ---
 
@@ -176,7 +178,7 @@ per-error renderer could not be built on this host (MSVC blocker), so errors
 were isolated by minimised probes through `buffcheck`. One root cause is
 confirmed; the rest are characterised below.
 
-### BUG-14: equality on a user-defined enum value is a type error (CONFIRMED)
+### BUG-14: equality on a user-defined enum value was a type error ✅ RESOLVED (PR #66)
 - **Severity:** MEDIUM
 - **Evidence (isolated probe, `parse OK; type errors: 3`):**
   ```
@@ -191,8 +193,9 @@ confirmed; the rest are characterised below.
       return "cancelled"
   ```
   Three `==` comparisons → exactly 3 type errors (1 each). The `TypeInferencer`
-  does not equip user-defined enum types with an equality operator.
+  did not equip user-defined enum types with an equality operator.
 - **Impact on this file:** accounts for 3 of the 12 type errors.
+- **Status:** **RESOLVED (PR #66).** Bare enum variants resolved via `enum_registry` in `Expr::Ident`.
 
 ### Remaining 9 type errors (characterised, not individually rendered)
 The detailed driver could not be linked (MSVC blocker, see Build Environment

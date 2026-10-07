@@ -248,6 +248,10 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/minimal_console.buff`](./examples/minimal_console.buff) | Smallest-possible binary (`buff build --minimal`) | ✅ v1.19 (T60) |
 | [`examples/minimal_http.buff`](./examples/minimal_http.buff) | Async fn → tokio feature-gating under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
+| [`examples/while_loop.buff`](./examples/while_loop.buff) | `while cond:` loop with mutable accumulators (BUG-9 fix) | ✅ v1.26 (runs) |
+| [`examples/word_operators.buff`](./examples/word_operators.buff) | `and` / `or` / `not` word operators as `&&` / `||` / `!` aliases (BUG-4 fix) | ✅ v1.26 (runs) |
+| [`examples/match_layout.buff`](./examples/match_layout.buff) | Layout `match x:` with colon-block arms + multi-statement bodies (BUG-11 fix) | ✅ v1.26 (runs) |
+| [`examples/multistmt_lambda.buff`](./examples/multistmt_lambda.buff) | Multi-statement lambda bodies (BUG-13 fix) | ✅ v1.26 (runs) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
 | [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (codegen-deferred³) |
