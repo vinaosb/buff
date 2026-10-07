@@ -275,6 +275,10 @@ jobs:
           done
           echo "::notice::Self-host bootstrap: $PASS/$TOTAL files pass buff check"
           echo "Total: $TOTAL, Pass: $PASS, Fail: $FAIL"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::$FAIL self-host files failed"
+            exit 1
+          fi
 
   # ── Behavioral equivalence harness (HARD GATE) ──────────────────────────────
   # P0.1: Compares the stdout of 10 .buff self-host ports against their Rust
