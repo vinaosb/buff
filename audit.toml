@@ -47,4 +47,10 @@ ignore = [
     "RUSTSEC-2025-0075",  # unic-char-range unmaintained
     "RUSTSEC-2025-0080",  # unic-common unmaintained
     "RUSTSEC-2026-0221",  # event-listener
+    # h2 0.3.27 — NO 0.3.x PATCH EXISTS. The 0.3 line is only reachable via
+    # the legacy hyper-0.14 chain (ethers 2 -> reqwest 0.11 -> buff-web3,
+    # oauth2 4, httpmock 0.7). The fixed line is h2 >= 0.4.16, and the
+    # workspace's 0.4 instance was bumped to 0.4.20 in this commit. Removal
+    # requires the ethers 2 -> 3+ / oauth2 4 -> 5 upgrades (tracked tech debt).
+    "RUSTSEC-2026-0258",  # h2 memory exhaustion / stream handling
 ]
