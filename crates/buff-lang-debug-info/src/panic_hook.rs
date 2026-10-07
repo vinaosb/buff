@@ -31,6 +31,7 @@
 //! backtrace is additionally printed AFTER the Buff trace so advanced
 //! users can drill into Rust internals when debugging interop issues.
 
+use std::backtrace::Backtrace;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -190,12 +191,7 @@ pub struct BuffTraceFrame {
 /// trace via the panic handler's escape-hatch branch).
 ///
 /// The current implementation walks a fresh [`Backtrace::capture`]
-/// snapshot — EXCEPT on Windows, where the capture is SKIPPED (BUG-15):
-/// capturing a backtrace inside the panic hook recurses/overflows on
-/// Windows hosts, so no frames are collected and the panic handler
-/// falls back to the location-only line. The `RUST_BACKTRACE=1`
-/// escape hatch still surfaces the raw Rust trace. A future
-/// enhancement could accept a pre-captured backtrace
+/// snapshot. A future enhancement could accept a pre-captured backtrace
 /// for `buff backtrace`-style offline use.
 pub fn remap_panic_backtrace(map: Option<&SourceMap>) -> BuffTrace {
     let Some(map) = map else {
@@ -204,15 +200,8 @@ pub fn remap_panic_backtrace(map: Option<&SourceMap>) -> BuffTrace {
     if map.is_empty() {
         return BuffTrace::default();
     }
-    // BUG-15: `Backtrace::capture()` on the panic path recurses/overflows
-    // on Windows hosts, so the capture is skipped there — the empty trace
-    // string yields no frames and the panic handler emits only the
-    // location line printed before this call. The unix path is
-    // byte-identical to the pre-guard behavior.
-    #[cfg(not(windows))]
-    let trace_str = std::backtrace::Backtrace::capture().to_string();
-    #[cfg(windows)]
-    let trace_str = String::new();
+    let backtrace = Backtrace::capture();
+    let trace_str = backtrace.to_string();
     let buff_file_display = map
         .buff_file
         .as_ref()
