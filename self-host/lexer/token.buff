@@ -16,6 +16,13 @@
 //   f64          -> Double
 //   u8           -> Byte
 //   char         -> Char
+//
+// FREEZE (W5/T30): self-host corpus reflects v1.39 keyword/grammar
+// surface; frozen pending v1.40 self-host milestone (DR-014). 52/58
+// CI-glob files pass `buff check` as of this freeze; the 6 remaining
+// failures are catalogued in
+// .sisyphus/evidence/task-29-corpus-diagnosis.txt (4 blocked by a
+// parser dedent bug, 2 by semantic naming choices).
 
 // --- Source span (mirrors buff_lang_error::Span + SourceId) ---
 //
