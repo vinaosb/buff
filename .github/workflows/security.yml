@@ -26,7 +26,8 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
-        run: cargo audit --ignore RUSTSEC-2026-0258
+        # Ignore list lives in audit.toml (single source of truth — W5/T31).
+        run: cargo audit
         continue-on-error: false
       - name: Upload audit report
         if: always()
