@@ -51,6 +51,7 @@ ignore = [
     # the legacy hyper-0.14 chain (ethers 2 -> reqwest 0.11 -> buff-web3,
     # oauth2 4, httpmock 0.7). The fixed line is h2 >= 0.4.16, and the
     # workspace's 0.4 instance was bumped to 0.4.20 in this commit. Removal
-    # requires the ethers 2 -> 3+ / oauth2 4 -> 5 upgrades (tracked tech debt).
+    # requires the ethers 2 -> 3+ / oauth2 4 -> 5 upgrades — tracked as
+    # accepted debt: .sisyphus/decisions/accepted-debt-ethers-oauth2.md
     "RUSTSEC-2026-0258",  # h2 memory exhaustion / stream handling
 ]
