@@ -1,0 +1,19 @@
+// v1.26 example — while loop (BUG-9 fix).
+// Run: `buff run examples/while_loop.buff`
+//
+// Demonstrates the `while cond:` layout form with mutable accumulators.
+// Buff only had `for` loops before; `while` became a reserved keyword in
+// the v1.26 backlog fix wave and lowers directly to Rust's `while`.
+
+func main():
+    let mut i = 0
+    let mut total = 0
+    while i < 5:
+        total = total + i
+        i = i + 1
+    print(total)
+
+    let mut n = 3
+    while n > 0:
+        print(n)
+        n = n - 1

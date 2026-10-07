@@ -1,0 +1,19 @@
+// v1.26 example — and/or/not word operators (BUG-4 fix).
+// Run: `buff run examples/word_operators.buff`
+//
+// Python-style boolean operators alongside the symbolic forms:
+//   and == &&, or == ||, not == !
+// Precedence: not > and > or (matching both Python and ! > && > ||).
+//
+// Boolean arguments are named per the language rules (§11).
+
+func classify(active: Bool, expired: Bool, premium: Bool) -> String:
+    if active and not expired or premium:
+        return "welcome"
+    return "denied"
+
+func main():
+    print(classify(active: true, expired: false, premium: false))
+    print(classify(active: true, expired: true, premium: false))
+    print(classify(active: true, expired: true, premium: true))
+    print(classify(active: false, expired: false, premium: false))
