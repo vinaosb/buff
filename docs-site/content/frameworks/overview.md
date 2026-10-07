@@ -28,7 +28,7 @@ contributing to Buff means working in one of these.
 | `buff-lang-codegen-wgsl` | AST → WGSL GPU shaders (the one `format!()` exception) |
 | `buff-lang-codegen-buffhtml` | RSX template AST → `rsx!{}` TokenStream + SpanMap |
 | `buff-lang-runtime` | Heterogeneous compute host: rayon + wgpu + tokio |
-| `buff-lang-cli` | The `buff` CLI binary + library (21 subcommands) |
+| `buff-lang-cli` | The `buff` CLI binary + library (37 subcommands) |
 | `buff-lang-ffi-guide` | Documentation: 6 hard rules for `extern` wrapper crates |
 | `buff-lang-debug-info` | Debug info generation for the DAP proxy |
 

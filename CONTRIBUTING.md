@@ -31,25 +31,33 @@ If that prints the greeting, your environment is set up correctly.
 
 ## Project Structure
 
-Buff is a **69-crate** Rust workspace (`members = ["crates/*"]` glob — see
-the root `Cargo.toml`). The **core compiler pipeline** is a focused set of 14
+Buff is a **73-crate** Rust workspace (`members = ["crates/*"]` glob — see
+the root `Cargo.toml`). The **core compiler pipeline** is a focused set of 17
 crates, each with a single responsibility:
 
 | Crate | Purpose |
 |---|---|
 | `buff-lang-error` | Spans, diagnostics, source maps (leaf crate, depended on by all) |
 | `buff-lang-ast` | Pure AST data nodes (decl, expr, stmt, ty, op, ir) |
+| `buff-lang-ast-rsx` | Pure-data AST for `.buffhtml` SFC templates |
 | `buff-lang-lexer` | Hand-rolled byte-scanner with offside-rule indent tracking |
 | `buff-lang-parser` | Hand-rolled recursive-descent + Pratt parser |
+| `buff-lang-buffhtml-parser` | Hand-rolled 3-mode lexer + parser for `.buffhtml` |
 | `buff-lang-types` | Type inference, prelude functions, range analysis |
+| `buff-lang-check` | Standalone typecheck engine (`buff check`) |
+| `buff-lang-fmt` | Buff source formatter (`buff fmt`) |
+| `buff-lang-pipeline` | Shared compile pipeline (lex → parse → codegen → rustc) |
 | `buff-lang-codegen-rust` | AST to `syn::File` to Rust source via `prettyplease` |
 | `buff-lang-codegen-wgsl` | AST to WGSL compute shaders |
+| `buff-lang-codegen-buffhtml` | RSX template AST to `rsx!{}` TokenStream + SpanMap |
 | `buff-lang-runtime` | Rayon + wgpu + tokio host runtime |
 | `buff-lang-cli` | Binary and library: pipeline orchestration |
+| `buff-lang-debug-info` | Buff-span stack traces via source maps |
+| `buff-lang-ffi-guide` | Documentation: 6 hard rules for `extern` wrapper crates |
 
-In addition to the core compiler, the workspace hosts 11 **tooling**
+In addition to the core compiler, the workspace hosts 12 **tooling**
 crates (LSP, REPL, Jupyter, registry, playground-wasm, ui-dioxus, buffup,
-bufflings, buff-dap, buff-cli) and 44 **framework** crates shipped across
+bufflings, buff-dap, buff-cli, buff-mcp) and 44 **framework** crates shipped across
 v1.13–v1.23 (`buff-{dataframe, tensor, image, audio, dsp, ecs, science,
 pipeline, ml, game, web, db, reactive, observe, …}`). See the root
 `AGENTS.md` and `README.md` for the full per-crate breakdown.

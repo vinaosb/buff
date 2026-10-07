@@ -6,26 +6,26 @@
 
 ## OVERVIEW
 
-Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM (and `.buffhtml` SFC → Dioxus 0.7 component → wasm32-unknown-unknown). Implemented as a **70-crate** Rust workspace (`members = ["crates/*"]` glob): the **core compiler** (14 `buff-lang-*` crates), the **tooling** crates (12: LSP/eval/REPL/Jupyter/registry/playground-wasm/ui-dioxus/buffup/bufflings/buff-dap/buff-cli/buff-mcp), and the **framework** crates shipped across v1.13–v1.23 (44: `buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, web, db, template, reactive, observe, …}`). Hides borrow-checker pain from users; compiler emits only "easy" Rust. v1.0–v1.12 shipped (production compiler + Try/Use Buff + stdlib + REPL + registry + Jupyter + UI/RSX + education + distribution). v1.13–v1.24 shipped (Buff SDK 2.0 foundations + framework-crate waves 2–11 + v1.24 audit/polish). v1.25–v1.38 shipped (launch readiness: compile speed + CPU/GPU MOAT + self-hosting + stdlib + diagnostics + perf control + DX tools + code hygiene). Next: v1.26 real use cases + launch infra (see `.sisyphus/plans/v1.26-real-use-cases-launch.md`).
+Buff — high-level language that transpiles `.buff` → Rust → native via rustc/LLVM (and `.buffhtml` SFC → Dioxus 0.7 component → wasm32-unknown-unknown). Implemented as a **73-crate** Rust workspace (`members = ["crates/*"]` glob): the **core compiler** (17 `buff-lang-*` crates), the **tooling** crates (12: LSP/eval/REPL/Jupyter/registry/playground-wasm/ui-dioxus/buffup/bufflings/buff-dap/buff-cli/buff-mcp), and the **framework** crates shipped across v1.13–v1.23 (44: `buff-{dataframe, tensor, image, audio, dsp, ecs, science, pipeline, ml, game, web, db, template, reactive, observe, …}`). Hides borrow-checker pain from users; compiler emits only "easy" Rust. v1.0–v1.12 shipped (production compiler + Try/Use Buff + stdlib + REPL + registry + Jupyter + UI/RSX + education + distribution). v1.13–v1.24 shipped (Buff SDK 2.0 foundations + framework-crate waves 2–11 + v1.24 audit/polish). v1.25–v1.38 shipped (launch readiness: compile speed + CPU/GPU MOAT + self-hosting + stdlib + diagnostics + perf control + DX tools + code hygiene). Next: v1.26 real use cases + launch infra (see `.sisyphus/plans/v1.26-real-use-cases-launch.md`).
 
 ## STRUCTURE
 
 ```
 buff/
-├── crates/                              # 70 workspace members via `members = ["crates/*"]` glob
+├── crates/                              # 73 workspace members via `members = ["crates/*"]` glob
 │   ├── buff-lang-error/                 # LEAF: Span + Diagnostic + SourceMap + ErrorCode (depended on by all)
 │   ├── buff-lang-ast/                   # Pure AST data nodes (decl/expr/stmt/ty/op/ir/lossless) + T57 byte-exact roundtrip
 │   ├── buff-lang-lexer/                 # Hand-rolled byte-scanner + offside-rule indent tracker
 │   ├── buff-lang-parser/                # Hand-rolled recursive-descent + Pratt (NOT chumsky)
 │   ├── buff-lang-types/                 # Type inference + 12-module analysis suite + prelude + prelude_types (T124b 1919-line stdlib registry)
-│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is ~10.5k lines (largest file in the workspace)
+│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is ~10.6k lines (largest file in the workspace)
 │   ├── buff-lang-codegen-wgsl/          # AST → WGSL GPU shaders (T44; the ONE format!() exception to no-raw-string-codegen rule)
 │   ├── buff-lang-codegen-buffhtml/      # RSX template AST → rsx!{} TokenStream (T133-T135; post-format SpanMap side-table)
 │   ├── buff-lang-ast-rsx/               # Pure-data AST for .buffhtml SFC (T133; sibling to buff-lang-ast, separate blast radius)
 │   ├── buff-lang-buffhtml-parser/       # Hand-rolled 3-mode lexer + recursive-descent for .buffhtml (T133)
 │   ├── buff-lang-runtime/               # Heterogeneous compute host: rayon + wgpu + tokio (~170KB, 11 src files)
 │   ├── buff-lang-debug-info/            # Buff-span stack traces via SourceMap + panic hook (T1)
-│   ├── buff-lang-cli/                   # Binary + library: pipeline orchestration (23 subcommands, ui_dev/, coverage/)
+│   ├── buff-lang-cli/                   # Binary + library: pipeline orchestration (37 subcommands, ui_dev/, coverage/)
 │   ├── buff-lsp/                        # LSP server v1.2 (lsp-server 0.10 + lsp-types 0.97; stdio; full-reparse)
 │   ├── buff-eval/                       # T125-prep thin eval engine (REPL + Jupyter consumer)
 │   ├── buff-repl/                       # T125a REPL (rustyline 15; wraps buff-eval)
@@ -62,7 +62,7 @@ buff/
 
 | Task | Location | Notes |
 |---|---|---|
-| Add a CLI subcommand | `crates/buff-lang-cli/src/cli.rs` (Command enum) + `commands/<name>.rs` + `main.rs` dispatch arm | 23 subcommands today; new variant + new commands/ file + new main.rs match arm |
+| Add a CLI subcommand | `crates/buff-lang-cli/src/cli.rs` (Command enum) + `commands/<name>.rs` + `main.rs` dispatch arm | 37 subcommands today; new variant + new commands/ file + new main.rs match arm |
 | Add a new AST node | `crates/buff-lang-ast/src/{decl,expr,stmt,ty}.rs` | Ripple: parser + types + codegen-rust (+ codegen-wgsl if GPU-relevant) |
 | Add a new RSX/`.buffhtml` node | `crates/buff-lang-ast-rsx/src/lib.rs` | Ripple: buffhtml-parser + codegen-buffhtml |
 | Add a TokenKind | `crates/buff-lang-lexer/src/token.rs` → `lexer.rs` → parser `stream.rs` | Also check `regex_context()` `/`-disambiguation |
@@ -131,7 +131,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 ## CONVENTIONS
 
 - **Workspace dependency resolution**: every crate uses `dep.workspace = true`. NEVER pin a version in a crate `Cargo.toml` — add to root `[workspace.dependencies]` first (heavily documented with T-numbered rationale).
-- **Edition 2021, license `MIT OR Apache-2.0`**. Three version tiers: `1.2.0` (14 core compiler crates), `1.0.0` (11 tooling crates: eval/repl/jupyter/registry/lsp/playground-wasm/ui-dioxus/ast-rsx/buffhtml-parser/codegen-buffhtml/buff-cli) + 44 framework crates. `buff-dataframe` is pinned at `2.0.0` (API-bumped during its MVP).
+- **Edition 2021, license `MIT OR Apache-2.0`**. Three version tiers: `1.2.0` (17 core compiler crates), `1.0.0` (11 tooling crates: eval/repl/jupyter/registry/lsp/playground-wasm/ui-dioxus/ast-rsx/buffhtml-parser/codegen-buffhtml/buff-cli) + 44 framework crates. `buff-dataframe` is pinned at `2.0.0` (API-bumped during its MVP).
 - **Rust crate naming**: `buff-lang-<thing>` (compiler crates, hyphen) → `buff_lang_<thing>` (underscore) → import `buff_lang_<thing>::...`. Tooling crates use `buff-<thing>` (no `lang` infix) → `buff_<thing>`.
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
@@ -185,7 +185,7 @@ cargo run -p buff-lang-cli -- run examples/fibonacci.buff    # → 55
 # Run a .buffhtml UI app (T133+)
 cargo run -p buff-lang-cli -- ui dev examples/<name>.buffhtml
 
-# Scaffold a new project (23 subcommands total)
+# Scaffold a new project (37 subcommands total)
 cargo run -p buff-lang-cli -- new my_app
 cargo run -p buff-lang-cli -- run my_app/src/main.buff
 

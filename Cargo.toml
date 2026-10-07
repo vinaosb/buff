@@ -2,7 +2,7 @@
 resolver = "2"
 members = ["crates/*"]
 
-# T33: Version-tier consistency across all 69 workspace crates.
+# T33: Version-tier consistency across all 73 workspace crates.
 #
 # Three tiers:
 #   1.2.0 — Core compiler crates (buff-lang-error, buff-lang-ast,
