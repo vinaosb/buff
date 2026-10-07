@@ -231,8 +231,20 @@ pub fn classify_rustc_error(rustc_header: &str) -> Option<buff_lang_error::Error
         return Some(ErrorCode::AssignTypeMismatch);
     }
     // "cannot multiply", "cannot add", "cannot subtract", ... — rustc emits
-    // these for operator/type incompatibilities.
-    if h.starts_with("cannot ") && h.contains(" types") {
+    // these for operator/type incompatibilities (E0369). Real headers have
+    // the operand form "cannot multiply `i64` by `String`" (or "... to ..."
+    // for Add), so match the operator verbs explicitly; the older
+    // " types" substring heuristic is kept for generic phrasings.
+    const OP_VERBS: [&str; 7] = [
+        "cannot multiply",
+        "cannot add",
+        "cannot subtract",
+        "cannot divide",
+        "cannot remainder",
+        "cannot bitwise",
+        "cannot shift",
+    ];
+    if starts_with("cannot ") && (h.contains(" types") || OP_VERBS.iter().any(|v| starts_with(v))) {
         return Some(ErrorCode::BinaryOpTypeMismatch);
     }
     if starts_with("expected bool") || h.contains("boolean condition") {

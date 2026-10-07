@@ -494,6 +494,24 @@ impl RustCodegen {
         // the block evaluates to the expression's value, not `()`.
         // Only applied BEFORE .env/tracing/defer injections so those
         // injected statements keep their semicolons.
+        // Tail-expression optimization: if this function has a non-void
+        // return type, the LAST statement (if it's an ExprStmt) should be
+        // the block's tail expression — strip the trailing semicolon so
+        // the block evaluates to the expression's value, not `()`.
+        // Only applied BEFORE .env/tracing/defer injections so those
+        // injected statements keep their semicolons.
+        //
+        // NOTE on `return <expr>` tails: this strip DOES clear the semi
+        // on a trailing `Stmt::Return` too, but prettyplease's
+        // `Stmt::Expr(expr, None)` arm calls `add_semi(expr)`, which
+        // force-re-adds `;` for `Expr::Return` (also Assign/Break/
+        // Continue/Yield). So a `return match {...}` tail prints as
+        // `return match {...};` — still valid Rust (the `return`
+        // diverges, so the statement-vs-tail distinction is semantically
+        // irrelevant here). Verified empirically: corpus output
+        // containing these tails compiles clean under
+        // `rustc --edition 2021`. No pipeline-level textual fixup is
+        // needed for this case.
         if f.return_type.is_some() {
             if let Some(SynStmt::Expr(_, ref mut semi)) = block.stmts.last_mut() {
                 *semi = None;

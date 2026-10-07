@@ -423,18 +423,20 @@ mod tests {
 
     #[test]
     fn parse_file_reports_lex_failure() {
-        // A source with a tab character is rejected by the Buff lexer
-        // (AGENTS.md: "Tabs — Buff lexer rejects them").
+        // A backtick is not part of Buff syntax — the lexer's fall-through
+        // rejects it as an unexpected char. (The original premise — tabs
+        // fail lexing — went stale when the P1.1 continuation-line change
+        // made delimiter-interior content lexable regardless of tabs.)
         let db = BuffDatabase::new();
         let file = SourceFile::new(
             &db,
-            PathBuf::from("tab.buff"),
-            "func bad() {\n\tprint(\"tab\")\n}\n".to_string(),
+            PathBuf::from("bad.buff"),
+            "func bad() {\n`print(\"x\")`\n}\n".to_string(),
         );
         let outcome = parse_file(&db, file);
         assert!(
             matches!(outcome, ParseOutcome::LexFailed | ParseOutcome::ParseFailed),
-            "expected lex/parse failure for tab source, got {outcome:?}"
+            "expected lex/parse failure for backtick source, got {outcome:?}"
         );
     }
 

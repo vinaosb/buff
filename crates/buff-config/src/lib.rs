@@ -55,6 +55,26 @@ use figment::providers::{Env, Format, Json, Serialized, Toml, Yaml};
 use figment::Figment;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+/// Coerce a CLI-arg string into the figment `Value` its text denotes:
+/// `true`/`false` → bool, integer text → i64, float text → f64, else
+/// verbatim String. Without this, `--port=7070` stores a String and
+/// `get_int("port")` extraction fails once args win the precedence race.
+fn coerce_arg_value(val: &str) -> figment::value::Value {
+    if val == "true" {
+        return figment::value::Value::from(true);
+    }
+    if val == "false" {
+        return figment::value::Value::from(false);
+    }
+    if let Ok(i) = val.parse::<i64>() {
+        return figment::value::Value::from(i);
+    }
+    if let Ok(f) = val.parse::<f64>() {
+        return figment::value::Value::from(f);
+    }
+    figment::value::Value::from(val.to_string())
+}
+
 /// A layered configuration store.
 ///
 /// Constructed via [`Config::new`]. Supports layered providers:
@@ -181,22 +201,24 @@ impl Config {
             while let Some(arg) = iter.next() {
                 if let Some(stripped) = arg.strip_prefix("--") {
                     if let Some((key, val)) = stripped.split_once('=') {
-                        map.insert(
-                            key.to_string(),
-                            figment::value::Value::from(val.to_string()),
-                        );
+                        map.insert(key.to_string(), coerce_arg_value(val));
                     } else if let Some(next) = iter.peek() {
                         if !next.starts_with("--") {
-                            let val = iter.next().unwrap();
-                            map.insert(
-                                stripped.to_string(),
-                                figment::value::Value::from(val.to_string()),
-                            );
+                            // Peek above guarantees Some; the if-let keeps
+                            // the no-unwrap invariant (skip = unreachable).
+                            if let Some(val) = iter.next() {
+                                map.insert(stripped.to_string(), coerce_arg_value(val));
+                            }
                         }
                     }
                 }
             }
-            let provider = Serialized::default("args", map).key("args");
+            // Unkeyed provider (`defaults` → Default profile): the dict
+            // merges at the config ROOT so `get("host")` sees
+            // `--host=...` values. (The keyed form nests them under
+            // `args` and breaks top-level lookup — the README + tests'
+            // documented contract.)
+            let provider = Serialized::defaults(map);
             *figment = std::mem::take(figment).merge(provider);
         }
     }

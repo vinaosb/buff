@@ -176,7 +176,10 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("project name cannot be empty".to_string());
     }
-    let first = name.chars().next().expect("checked non-empty above");
+    let Some(first) = name.chars().next() else {
+        // Unreachable (is_empty rejected above); mirrors the guard's intent.
+        return Err("project name cannot be empty".to_string());
+    };
     if !first.is_ascii_alphabetic() && first != '_' {
         return Err(format!(
             "project name must start with a letter or underscore: `{name}`"
@@ -713,6 +716,11 @@ pub fn files_for_template(template: TemplateKind, name: &str) -> Vec<ScaffoldFil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_project_name_rejects_empty() {
+        assert!(validate_project_name("").is_err());
+    }
 
     #[test]
     fn render_template_replaces_single_occurrence() {

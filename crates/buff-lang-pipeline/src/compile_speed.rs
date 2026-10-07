@@ -56,7 +56,7 @@ pub const CACHE_SUBDIR: &str = "buff-cache";
 /// # Example
 ///
 /// ```
-/// use buff_lang_cli::compile_speed::source_cache_key;
+/// use buff_lang_pipeline::compile_speed::source_cache_key;
 /// let k = source_cache_key("func main(): print(1)");
 /// assert_eq!(k.len(), 16);
 /// assert!(k.chars().all(|c| c.is_ascii_hexdigit()));

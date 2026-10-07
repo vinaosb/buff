@@ -27,6 +27,13 @@ members = ["crates/*"]
 # semver-incompatible version.
 
 [workspace.dependencies]
+# Accepted transitive duplicate chains (cargo tree audit, debt-zero W4):
+# windows-sys ×5, hashbrown ×5, tungstenite ×4, darling ×3, spin ×3.
+# All are TRANSITIVE (no direct dep of any workspace crate pulls a second
+# major deliberately); unifying them means migrating parent crates, so the
+# cost far exceeds the benefit. ACCEPTED; revisit on major-version bumps
+# of their parent crates. Related accepted-debt record (h2 0.3 chain via
+# ethers-rs/oauth2): .sisyphus/decisions/accepted-debt-ethers-oauth2.md
 # `visit` feature added in T69 (@no-alloc lint): enables `syn::visit::Visit`,
 # the immutable AST walker the allocation-scanner uses to recurse into every
 # expression of a lowered function body. Additive (features only widen syn's
@@ -385,14 +392,12 @@ buff-repl = { path = "crates/buff-repl" }
 # per session for now).
 rustyline = "15"
 # T125c: `dirs` resolves the user's home directory for the REPL history
-# file (`~/.buff_history`). We pin to major 5 (released 2022) — the
-# long-standing surface most of the Rust ecosystem targets. dirs 6.0.0
-# (2025) ships the identical `home_dir() -> Option<PathBuf>` API but is
-# newer than necessary; pinning 5 mirrors the rand-0.8 / chrono-0.4
-# conservative-pin philosophy already in use. The single function we
-# consume is `dirs::home_dir()` — no other API surface is touched, so a
-# future bump to 6.x is a one-line version change with no code change.
-dirs = "5"
+# file (`~/.buff_history`). Bumped 5 → 6 in debt-zero W4 (dirs 6.0.0,
+# 2025, ships the identical `home_dir() -> Option<PathBuf>` API for the
+# single function we consume: `dirs::home_dir()` — no other API surface
+# is touched, so the bump is a one-line version change with no code
+# change, per the audit's prediction).
+dirs = "6"
 # T126: Minimal Buff package registry HTTP server (`crates/buff-registry`).
 # We pull three new top-level crates — `axum` (the web framework, already
 # the de-facto Rust ecosystem default since 0.5 and the natural successor
@@ -658,12 +663,11 @@ buffup = { path = "crates/buffup" }
 # per access (mirrors how Regex caches its pattern + SourceRegistry
 # for thread-safety). The wrapper types Document / Element /
 # Crawler are Send + Sync — the FFI guide R4 holds at the Buff-
-# visible boundary. Pinned to major 0.22 (the long-standing
-# surface since 2024 — the Html/Selector/ElementRef API has been
-# stable across 0.18-0.27). 0.22 is conservative on Rust 1.95;
-# 0.27 (released 2026-05) requires Rust 1.74+ which the pinned
-# 1.95.0 toolchain satisfies — bump to 0.27 is a no-op follow-up.
-scraper = "0.22"
+# visible boundary. Bumped 0.22 → 0.27 in debt-zero W4 (its own
+# comment predicted the no-op: the Html/Selector/ElementRef API has
+# been stable across 0.18-0.27, and 0.27 (released 2026-05) requires
+# Rust 1.74+ which the pinned 1.95.0 toolchain satisfies).
+scraper = "0.27"
 # T43: `buff-scrape` workspace path dep — mirrors the buff-image /
 # buff-http-client / buff-cache / buff-auth pattern so any future
 # consumer (codegen-lowered `Document.from_html(...)` /
