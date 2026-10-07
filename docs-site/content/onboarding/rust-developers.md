@@ -105,7 +105,7 @@ below shows where Buff differs from Rust.
 | `let x = 5;` | `let x = 5` | Semicolons are optional / mostly absent. |
 | `let mut x = 5;` | `let mut x = 5` | Same. |
 | `let x: i32 = 5;` | `let x: Int = 5` | Annotation optional. |
-| `const MAX: u32 = 100;` | `const MAX = 100` | Module-level constant. |
+| `const MAX: u32 = 100;` | `let MAX = 100` or `@comptime` | Buff has no `const` yet (tracked as BUG-2); use `let`/`@comptime` per current syntax. |
 | `static X: AtomicUsize = ...` | (no equivalent) | Use `@State` or runtime cell. |
 | `x.clone()` | (implicit) | The compiler inserts clones. |
 | `x as f64` | `x.float()` | Method-style cast. |
@@ -615,12 +615,11 @@ func factorial(n: Int) -> Int:
     if n <= 1:
         return 1
     return n * factorial(n - 1)
-
-const TABLE = @comptime [factorial(i) for i in 0..10]
 ```
 
-The compiler evaluates `factorial` at compile time when arguments are
-constant, and embeds the result in the binary. See
+Buff has no `const` yet (tracked as BUG-2); use `let`/`@comptime` per
+current syntax. The compiler evaluates `factorial` at compile time when
+arguments are constant, and embeds the result in the binary. See
 [`examples/comptime_fib.buff`](https://github.com/buff-lang/buff/blob/master/examples/comptime_fib.buff)
 and [`examples/comptime_lookup_table.buff`](https://github.com/buff-lang/buff/blob/master/examples/comptime_lookup_table.buff).
 

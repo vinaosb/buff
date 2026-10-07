@@ -61,9 +61,10 @@ func factorial(n: Int) -> Int:
     if n <= 1:
         return 1
     return n * factorial(n - 1)
-
-const TABLE = @comptime [factorial(i) for i in 0..10]
 ```
+
+Buff has no `const` yet (tracked as BUG-2); use `let`/`@comptime` per
+current syntax.
 
 These are advisory. The compiler may ignore them if it can't prove
 soundness (comptime functions must terminate, must not allocate, must not
