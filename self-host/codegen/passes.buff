@@ -6,7 +6,7 @@
 // (T77) and propagate constants (T78). They are pure functions: they take
 // `&[Decl]` and return `Vec<Decl>`, never mutating the input. The passes are
 // applied via the caller chaining them before `generate_rust` so the default
-// path is unchanged (backwards compatibility — existing callers and snapshot
+// path is unchanged (backwards compatibility â€” existing callers and snapshot
 // tests are unaffected).
 //
 // # Conservatism
@@ -60,40 +60,38 @@ struct Literal:
 struct Attribute:
     opaque_handle: Int
 
-struct BTreeSet_String:
+struct BTreeSetString:
     opaque_handle: Int
 
 struct BTreeMap_String_Literal:
     opaque_handle: Int
 
-extern "Rust" {
-    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
-    fn decl_as_export_decl(decl: Decl) -> Option<ExportDecl>
-    fn decl_as_extend_block(decl: Decl) -> Option<ExtendBlock>
-    fn decl_as_trait_decl(decl: Decl) -> Option<TraitDecl>
-    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
-    fn unwrap_export_decl(opt: Option<ExportDecl>) -> ExportDecl
-    fn unwrap_extend_block(opt: Option<ExtendBlock>) -> ExtendBlock
-    fn unwrap_trait_decl(opt: Option<TraitDecl>) -> TraitDecl
-    fn func_decl_name(f: FuncDecl) -> String
-    fn func_decl_body(f: FuncDecl) -> Block
-    fn func_decl_attributes(f: FuncDecl) -> Vector<Attribute>
-    fn func_decl_is_extern(f: FuncDecl) -> Bool
-    fn attribute_name(a: Attribute) -> String
-    fn export_decl_inner(e: ExportDecl) -> Decl
-    fn extend_block_methods(e: ExtendBlock) -> Vector<FuncDecl>
-    fn trait_decl_defaults(t: TraitDecl) -> Vector<FuncDecl>
-    fn block_stmts(b: Block) -> Vector<Stmt>
-    fn btreetap_string_new() -> BTreeSet_String
-    fn btreetap_string_insert(set: BTreeSet_String, s: String)
-    fn btreetap_string_contains(set: BTreeSet_String, s: String) -> Bool
-    fn btreetap_string_literal_new() -> BTreeMap_String_Literal
-    fn btreetap_string_literal_get(map: BTreeMap_String_Literal, k: String) -> Option<Literal>
-    fn btreetap_string_literal_insert(map: BTreeMap_String_Literal, k: String, v: Literal)
-}
+extern "C" func decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+extern "C" func decl_as_export_decl(decl: Decl) -> Option<ExportDecl>
+extern "C" func decl_as_extend_block(decl: Decl) -> Option<ExtendBlock>
+extern "C" func decl_as_trait_decl(decl: Decl) -> Option<TraitDecl>
+extern "C" func unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+extern "C" func unwrap_export_decl(opt: Option<ExportDecl>) -> ExportDecl
+extern "C" func unwrap_extend_block(opt: Option<ExtendBlock>) -> ExtendBlock
+extern "C" func unwrap_trait_decl(opt: Option<TraitDecl>) -> TraitDecl
+extern "C" func func_decl_name(f: FuncDecl) -> String
+extern "C" func func_decl_body(f: FuncDecl) -> Block
+extern "C" func func_decl_attributes(f: FuncDecl) -> Vector<Attribute>
+extern "C" func func_decl_is_extern(f: FuncDecl) -> Bool
+extern "C" func attribute_name(a: Attribute) -> String
+extern "C" func export_decl_inner(e: ExportDecl) -> Decl
+extern "C" func extend_block_methods(e: ExtendBlock) -> Vector<FuncDecl>
+extern "C" func trait_decl_defaults(t: TraitDecl) -> Vector<FuncDecl>
+extern "C" func block_stmts(b: Block) -> Vector<Stmt>
+extern "C" func btreetap_string_new() -> BTreeSetString
+extern "C" func btreetap_string_insert(set: BTreeSetString, s: String)
+extern "C" func btreetap_string_contains(set: BTreeSetString, s: String) -> Bool
+extern "C" func btreetap_string_literal_new() -> BTreeMap_String_Literal
+extern "C" func btreetap_string_literal_get(map: BTreeMap_String_Literal, k: String) -> Option<Literal>
+extern "C" func btreetap_string_literal_insert(map: BTreeMap_String_Literal, k: String, v: Literal)
 
 // =============================================================================
-// dead_code_elimination — T77: remove unused bindings + never-called fns
+// dead_code_elimination â€” T77: remove unused bindings + never-called fns
 // =============================================================================
 //
 // Remove dead code from a slice of declarations. See the module-level docs
@@ -108,16 +106,16 @@ func dead_code_elimination(decls: Vector<Decl>) -> Vector<Decl>:
         let decl = decls.get(i)
         let opt_func = func_decl_from(decl)
         if opt_func != Option.None:
-            let func = unwrap_func_decl(opt_func)
-            if is_dead_function(func, called_fns, exported_fns):
-                // Skip — dead function.
+            let fdecl = unwrap_func_decl(opt_func)
+            if is_dead_function(fdecl, called_fns, exported_fns):
+                // Skip â€” dead function.
                 i = i + 1
                 continue
         out.push(eliminate_dead_bindings_in_decl(decl))
         i = i + 1
     return out
 
-// is_dead_function — predicate: should this function be removed?
+// is_dead_function â€” predicate: should this function be removed?
 //
 // Returns false (keep) when ANY of:
 // - name == "main"
@@ -126,13 +124,13 @@ func dead_code_elimination(decls: Vector<Decl>) -> Vector<Decl>:
 // - name in called set
 // - is_extern
 
-func is_dead_function(func: FuncDecl, called: BTreeSet_String, exported: BTreeSet_String) -> Bool:
-    let name = func_decl_name(func)
+func is_dead_function(fd: FuncDecl, called: BTreeSetString, exported: BTreeSetString) -> Bool:
+    let name = func_decl_name(fd)
     if name == "main":
         return false
     if btreetap_string_contains(exported, name):
         return false
-    let attrs = func_decl_attributes(func)
+    let attrs = func_decl_attributes(fd)
     let mut i = 0
     for i < attrs.len():
         let aname = attribute_name(attrs.get(i))
@@ -141,11 +139,11 @@ func is_dead_function(func: FuncDecl, called: BTreeSet_String, exported: BTreeSe
         i = i + 1
     if btreetap_string_contains(called, name):
         return false
-    if func_decl_is_extern(func):
+    if func_decl_is_extern(fd):
         return false
     return true
 
-// func_decl_from — extract FuncDecl from a Decl (handles ExportDecl wrap).
+// func_decl_from â€” extract FuncDecl from a Decl (handles ExportDecl wrap).
 func func_decl_from(decl: Decl) -> Option<FuncDecl>:
     let opt_f = decl_as_func_decl(decl)
     if opt_f != Option.None:
@@ -156,8 +154,8 @@ func func_decl_from(decl: Decl) -> Option<FuncDecl>:
         return decl_as_func_decl(export_decl_inner(e))
     return Option.None
 
-// collect_exported_fn_names — names of fns inside `export` decls.
-func collect_exported_fn_names(decls: Vector<Decl>) -> BTreeSet_String:
+// collect_exported_fn_names â€” names of fns inside `export` decls.
+func collect_exported_fn_names(decls: Vector<Decl>) -> BTreeSetString:
     let set = btreetap_string_new()
     let mut i = 0
     for i < decls.len():
@@ -174,14 +172,14 @@ func collect_exported_fn_names(decls: Vector<Decl>) -> BTreeSet_String:
     return set
 
 // =============================================================================
-// collect_called_functions — union of all free-fn call sites in the program
+// collect_called_functions â€” union of all free-fn call sites in the program
 // =============================================================================
 //
 // Walk every FuncDecl body, every ExportDecl's inner FuncDecl body, every
 // ExtendBlock's method bodies, and every TraitDecl's default-method bodies.
 // At each Expr::FuncCall site, record the callee name.
 
-func collect_called_functions(decls: Vector<Decl>) -> BTreeSet_String:
+func collect_called_functions(decls: Vector<Decl>) -> BTreeSetString:
     let called = btreetap_string_new()
     let mut i = 0
     for i < decls.len():
@@ -220,45 +218,45 @@ func collect_called_functions(decls: Vector<Decl>) -> BTreeSet_String:
         i = i + 1
     return called
 
-func collect_called_in_block(called: BTreeSet_String, block: Block):
+func collect_called_in_block(called: BTreeSetString, block: Block):
     let stmts = block_stmts(block)
     let mut i = 0
     for i < stmts.len():
         collect_called_in_stmt(called, stmts.get(i))
         i = i + 1
 
-func collect_called_in_stmt(called: BTreeSet_String, stmt: Stmt):
+func collect_called_in_stmt(called: BTreeSetString, stmt: Stmt):
     // (match stmt:
-    //   LetDecl { value, .. } | LetPattern { value, .. } → collect_called_in_expr
-    //   Assignment { target, value, .. } → { collect_called_in_expr(target);
+    //   LetDecl { value, .. } | LetPattern { value, .. } â†’ collect_called_in_expr
+    //   Assignment { target, value, .. } â†’ { collect_called_in_expr(target);
     //                                         collect_called_in_expr(value) }
-    //   ExprStmt(e, _) → collect_called_in_expr(e)
-    //   Return(e, _) → walk_opt_expr(e)
-    //   ... etc — every arm delegates to collect_called_in_expr)
+    //   ExprStmt(e, _) â†’ collect_called_in_expr(e)
+    //   Return(e, _) â†’ walk_opt_expr(e)
+    //   ... etc â€” every arm delegates to collect_called_in_expr)
     collect_called_in_stmt_impl(called, stmt)
 
-func collect_called_in_expr(called: BTreeSet_String, expr: Expr):
+func collect_called_in_expr(called: BTreeSetString, expr: Expr):
     // (match expr:
-    //   FuncCall(name, args, ..) → { called.insert(name); walk_args(args) }
-    //   MethodCall(..) → walk_receiver_and_args
-    //   Lambda(..) → walk_body
-    //   ... etc — recursive walk)
+    //   FuncCall(name, args, ..) â†’ { called.insert(name); walk_args(args) }
+    //   MethodCall(..) â†’ walk_receiver_and_args
+    //   Lambda(..) â†’ walk_body
+    //   ... etc â€” recursive walk)
     collect_called_in_expr_impl(called, expr)
 
 // =============================================================================
-// eliminate_dead_bindings_in_decl — strip dead `let <pure-literal>` bindings
+// eliminate_dead_bindings_in_decl â€” strip dead `let <pure-literal>` bindings
 // =============================================================================
 //
 // Within a function body, removes `let` bindings whose value is a pure
 // literal (no fn/method calls) AND whose name is never referenced anywhere
 // in the function body. Conservative: any shadowing, any assignment, any
-// capture by a nested closure → keep the binding.
+// capture by a nested closure â†’ keep the binding.
 
 func eliminate_dead_bindings_in_decl(decl: Decl) -> Decl:
     return eliminate_dead_bindings_in_decl_impl(decl)
 
 // =============================================================================
-// constant_propagation — T78: replace names with literals where provably safe
+// constant_propagation â€” T78: replace names with literals where provably safe
 // =============================================================================
 //
 // Walk every function body, find every `let x = <literal>` where x is never
@@ -280,13 +278,11 @@ func constant_propagation_in_decl(decl: Decl) -> Decl:
 // Implementation shims (extern bindings to AST mutators)
 // =============================================================================
 //
-// The actual AST transformation is delegated to extern "Rust" bindings — the
-// Buff port preserves the algorithm shape (build name→literal map from
+// The actual AST transformation is delegated to extern "Rust" bindings â€” the
+// Buff port preserves the algorithm shape (build nameâ†’literal map from
 // never-assigned `let <name> = <literal>` bindings, then walk + replace uses).
 
-extern "Rust" {
-    fn collect_called_in_stmt_impl(called: BTreeSet_String, stmt: Stmt)
-    fn collect_called_in_expr_impl(called: BTreeSet_String, expr: Expr)
-    fn eliminate_dead_bindings_in_decl_impl(decl: Decl) -> Decl
-    fn constant_propagation_in_decl_impl(decl: Decl) -> Decl
-}
+extern "C" func collect_called_in_stmt_impl(called: BTreeSetString, stmt: Stmt)
+extern "C" func collect_called_in_expr_impl(called: BTreeSetString, expr: Expr)
+extern "C" func eliminate_dead_bindings_in_decl_impl(decl: Decl) -> Decl
+extern "C" func constant_propagation_in_decl_impl(decl: Decl) -> Decl

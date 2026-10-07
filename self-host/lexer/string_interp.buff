@@ -91,7 +91,7 @@ func scan_string(
             // Callback tokenization removed — self-host port stub
             match split.spec {
                 Option.Some(spec) => out.push(token_new(TokenKind.InterpSpec(spec), span_new(split.expr_end, closing, source_id))),
-                Option.None => (),
+                Option.None => Option.None,
             }
             out.push(token_new(TokenKind.InterpEnd, span_new(closing, closing + 1, source_id)))
             i = closing + 1
@@ -160,12 +160,7 @@ func find_matching_brace(bytes: Vector<Int>, start: Int, source_id: SourceId) ->
 // The `:` is NOT included in the spec text — ${x:.2} yields expr_end = colon,
 // spec = Some(".2"). Nested braces are tracked so `:` inside nested braces does
 // NOT count as a separator; string literals inside are skipped too.
-func split_interp_spec(
-        bytes: Vector<Int>,
-        start: Int,
-        closing: Int,
-        source_id: SourceId,
-    ) -> Result<InterpSplit, LexerError>:
+func split_interp_spec(bytes: Vector<Int>, start: Int, closing: Int, source_id: SourceId) -> Result<InterpSplit, LexerError>:
     let lbrace_byte = 123
     let rbrace_byte = 125
     let colon_byte = 58

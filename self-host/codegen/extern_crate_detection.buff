@@ -1,9 +1,9 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/extern_crate_detection.rs` (T18, Track C).
 //
-// T105a — extern-crate emit-on-demand detection (program_uses_* AST walkers,
+// T105a â€” extern-crate emit-on-demand detection (program_uses_* AST walkers,
 // part 1) (mechanically extracted from rust_codegen.rs).
 //
-// Verbatim move from the parent — no logic changes. Child module of
+// Verbatim move from the parent â€” no logic changes. Child module of
 // rust_codegen so it inherits the parent imports via `use super::*` (zero
 // per-module import lists). Functions are `pub(super)` so the parent reaches
 // them through the glob below.
@@ -27,7 +27,7 @@
 // # The chrono over-broad gotcha (T124f)
 //
 // An early version of the chrono walker flagged EVERY prelude-type Ident as
-// a chrono-trigger — over-registering chrono for programs that used any
+// a chrono-trigger â€” over-registering chrono for programs that used any
 // prelude type. The fix is the NARROW walker rule: each walker recognises
 // ONLY the specific bare-Ident receiver name (or specific NAMESPACE.METHOD
 // combination), NOT every prelude-type Ident, NOT every method-name match.
@@ -55,20 +55,18 @@ struct Expr:
 struct Ident:
     opaque_handle: Int
 
-extern "Rust" {
-    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
-    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
-    fn func_decl_body(f: FuncDecl) -> Block
-    fn block_stmts(b: Block) -> Vector<Stmt>
-    fn expr_is_method_call(e: Expr) -> Bool
-    fn expr_method_call_receiver(e: Expr) -> Expr
-    fn expr_method_call_method_name(e: Expr) -> String
-    fn expr_is_ident(e: Expr) -> Bool
-    fn expr_ident_name(e: Expr) -> String
-}
+extern "C" func decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+extern "C" func unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+extern "C" func func_decl_body(f: FuncDecl) -> Block
+extern "C" func block_stmts(b: Block) -> Vector<Stmt>
+extern "C" func expr_is_method_call(e: Expr) -> Bool
+extern "C" func expr_method_call_receiver(e: Expr) -> Expr
+extern "C" func expr_method_call_method_name(e: Expr) -> String
+extern "C" func expr_is_ident(e: Expr) -> Bool
+extern "C" func expr_ident_name(e: Expr) -> String
 
 // =============================================================================
-// program_uses_matrix — T24 Matrix.new(...) → emit Matrix<T> struct on demand
+// program_uses_matrix â€” T24 Matrix.new(...) â†’ emit Matrix<T> struct on demand
 // =============================================================================
 //
 // Walk the declaration list looking for any `Matrix.new(...)` constructor
@@ -78,7 +76,7 @@ extern "Rust" {
 // The detection is conservative: only the canonical constructor pattern
 // (`Matrix` Ident receiver, `new` method) triggers injection. 2-D indexing
 // on a Matrix-typed value WITHOUT a prior `Matrix.new(...)` would not
-// trigger injection by itself — but every well-formed Matrix program must
+// trigger injection by itself â€” but every well-formed Matrix program must
 // construct one first, so this signal is sufficient in practice.
 
 func program_uses_matrix(decls: Vector<Decl>) -> Bool:
@@ -125,7 +123,7 @@ func expr_uses_matrix(expr: Expr) -> Bool:
     return expr_uses_matrix_impl(expr)
 
 // =============================================================================
-// program_uses_namespace — generic bare-Ident-receiver walker
+// program_uses_namespace â€” generic bare-Ident-receiver walker
 // =============================================================================
 //
 // The shared walker shape used by most namespace-based detectors (chrono /
@@ -170,56 +168,56 @@ func expr_uses_namespace(expr: Expr, namespace: String) -> Bool:
 // Each one-liner delegates to `program_uses_namespace` with the receiver
 // name. The walker is NARROW per the T124f gotcha.
 
-// T124b: DateTime.<method>(...) → chrono
+// T124b: DateTime.<method>(...) â†’ chrono
 func program_uses_chrono(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "DateTime")
 
-// T124c: Log.<method>(...) → tracing
+// T124c: Log.<method>(...) â†’ tracing
 func program_uses_tracing(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Log")
 
-// T124d: Regex.<method>(...) → regex
+// T124d: Regex.<method>(...) â†’ regex
 func program_uses_regex(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Regex")
 
-// T124e: Toml.<method>(...) → toml
+// T124e: Toml.<method>(...) â†’ toml
 func program_uses_toml(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Toml")
 
-// T124f: Random.<method>(...) → rand
+// T124f: Random.<method>(...) â†’ rand
 func program_uses_rand(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Random")
 
-// T124f: Math.<method>(...) → no extern crate (std-only). Walker exists for
+// T124f: Math.<method>(...) â†’ no extern crate (std-only). Walker exists for
 // symmetry but returns false (Math uses std f64 methods only).
 func program_uses_math(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124g: Strings.<method>(...) → no extern crate (std-only). Walker exists
+// T124g: Strings.<method>(...) â†’ no extern crate (std-only). Walker exists
 // for symmetry but returns false.
 func program_uses_strings(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124g: Args.<method>(...) → no extern crate (std::env::args only). Walker
+// T124g: Args.<method>(...) â†’ no extern crate (std::env::args only). Walker
 // for symmetry, returns false.
 func program_uses_args(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124g: Env.<method>(...) → no extern crate (std::env only). Walker for
+// T124g: Env.<method>(...) â†’ no extern crate (std::env only). Walker for
 // symmetry, returns false.
 func program_uses_env(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124g: Process.<method>(...) → no extern crate (std::process only). Walker
+// T124g: Process.<method>(...) â†’ no extern crate (std::process only). Walker
 // for symmetry, returns false.
 func program_uses_process(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124g: Sleep.sleep(...) → no extern crate (std::thread::sleep only).
+// T124g: Sleep.sleep(...) â†’ no extern crate (std::thread::sleep only).
 func program_uses_sleep(decls: Vector<Decl>) -> Bool:
     return false
 
-// T124h: Tokio.<method>(...) / spawn(...) → tokio. Tokio is a NARROW walker:
+// T124h: Tokio.<method>(...) / spawn(...) â†’ tokio. Tokio is a NARROW walker:
 // flags ONLY the bare-Ident `Tokio` receiver AND the bare-Ident `spawn`
 // callee (the latter is the Buff async-dispatch entry point).
 func program_uses_tokio(decls: Vector<Decl>) -> Bool:
@@ -230,60 +228,60 @@ func program_uses_spawn_callee(decls: Vector<Decl>) -> Bool:
     //  bare Ident `spawn`.)
     return program_uses_spawn_callee_impl(decls)
 
-// T124h: Base64.<method>(...) → base64
+// T124h: Base64.<method>(...) â†’ base64
 func program_uses_base64(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Base64")
 
-// T124h: Hex.<method>(...) → hex
+// T124h: Hex.<method>(...) â†’ hex
 func program_uses_hex(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Hex")
 
-// T124h: PercentEncoding.<method>(...) → percent-encoding
+// T124h: PercentEncoding.<method>(...) â†’ percent-encoding
 func program_uses_percent_encoding(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "PercentEncoding")
 
-// T124h: Uuid.<method>(...) → uuid
+// T124h: Uuid.<method>(...) â†’ uuid
 func program_uses_uuid(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Uuid")
 
-// T124h: Url.<method>(...) → url
+// T124h: Url.<method>(...) â†’ url
 func program_uses_url(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Url")
 
-// T124h: Cookie.<method>(...) → cookie (web crate)
+// T124h: Cookie.<method>(...) â†’ cookie (web crate)
 func program_uses_cookie(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Cookie")
 
-// T124h: FormData.<method>(...) → form_urlencoded (std-only, but flags for
+// T124h: FormData.<method>(...) â†’ form_urlencoded (std-only, but flags for
 // the web-namespace symmetry)
 func program_uses_form_data(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "FormData")
 
-// T124h: Header.<method>(...) → http (web crate)
+// T124h: Header.<method>(...) â†’ http (web crate)
 func program_uses_header(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Header")
 
-// T124h: Http.<method>(...) → tokio-tungstenite (HTTP client + WebSocket)
+// T124h: Http.<method>(...) â†’ tokio-tungstenite (HTTP client + WebSocket)
 func program_uses_websocket(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "WebSocket")
 
-// T124h: Hmac.<method>(...) → hmac
+// T124h: Hmac.<method>(...) â†’ hmac
 func program_uses_hmac(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Hmac")
 
-// T124h: Sha2.<method>(...) → sha2
+// T124h: Sha2.<method>(...) â†’ sha2
 func program_uses_sha2(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Sha2")
 
-// T124h: Md5.<method>(...) → md5
+// T124h: Md5.<method>(...) â†’ md5
 func program_uses_md5(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "Md5")
 
-// T124h: num_cpus.<method>(...) → num_cpus
+// T124h: num_cpus.<method>(...) â†’ num_cpus
 func program_uses_num_cpus(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "num_cpus")
 
-// T124h: FuturesUtil.<method>(...) → futures-util
+// T124h: FuturesUtil.<method>(...) â†’ futures-util
 func program_uses_futures_util(decls: Vector<Decl>) -> Bool:
     return program_uses_namespace(decls, "FuturesUtil")
 
@@ -295,10 +293,8 @@ func program_uses_futures_util(decls: Vector<Decl>) -> Bool:
 // shims. The Buff port preserves the source-order walk discipline and the
 // NARROW-walker rule.
 
-extern "Rust" {
-    fn stmt_uses_matrix_impl(stmt: Stmt) -> Bool
-    fn expr_uses_matrix_impl(expr: Expr) -> Bool
-    fn stmt_uses_namespace_impl(stmt: Stmt, namespace: String) -> Bool
-    fn expr_uses_namespace_impl(expr: Expr, namespace: String) -> Bool
-    fn program_uses_spawn_callee_impl(decls: Vector<Decl>) -> Bool
-}
+extern "C" func stmt_uses_matrix_impl(stmt: Stmt) -> Bool
+extern "C" func expr_uses_matrix_impl(expr: Expr) -> Bool
+extern "C" func stmt_uses_namespace_impl(stmt: Stmt, namespace: String) -> Bool
+extern "C" func expr_uses_namespace_impl(expr: Expr, namespace: String) -> Bool
+extern "C" func program_uses_spawn_callee_impl(decls: Vector<Decl>) -> Bool

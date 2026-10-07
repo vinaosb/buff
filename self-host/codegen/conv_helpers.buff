@@ -1,9 +1,9 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/conv_helpers.rs` (T18, Track C).
 //
-// T105a — index-cast / arg-parse / typeref->Type conversion helpers
+// T105a â€” index-cast / arg-parse / typeref->Type conversion helpers
 // (mechanically extracted from rust_codegen.rs).
 //
-// Verbatim move from the parent — no logic changes. Child module of
+// Verbatim move from the parent â€” no logic changes. Child module of
 // rust_codegen so it inherits the parent imports via `use super::*` (zero
 // per-module import lists). Functions are `pub(super)` so the parent reaches
 // them through the glob below.
@@ -16,7 +16,7 @@
 // Opaque handles for syn / proc_macro2 types
 // =============================================================================
 //
-// The codegen port threads syn AST nodes through extern bindings — the Buff
+// The codegen port threads syn AST nodes through extern bindings â€” the Buff
 // code never inspects their interior, only threads them through the syn API.
 // These struct declarations establish the handle types used in signatures.
 
@@ -42,14 +42,12 @@ struct Type:
 // These are bound to the upstream syn/quote constructors. The full set lives
 // in `syn_helpers.buff`; here we declare only the ones used by this module.
 
-extern "Rust" {
-    fn rust_path_type(name: String) -> SynType
-    fn wrap_in_parens(e: SynExpr) -> SynExpr
-    fn method_call_one_arg(receiver: SynExpr, method: String, arg: SynExpr) -> SynExpr
-}
+extern "C" func rust_path_type(name: String) -> SynType
+extern "C" func wrap_in_parens(e: SynExpr) -> SynExpr
+extern "C" func method_call_one_arg(receiver: SynExpr, method: String, arg: SynExpr) -> SynExpr
 
 // =============================================================================
-// cast_to_usize — `e as usize` with conditional parens (T23)
+// cast_to_usize â€” `e as usize` with conditional parens (T23)
 // =============================================================================
 //
 // Build a Rust `as usize` cast for a vector index. Unlike `cast_to`, this
@@ -59,7 +57,7 @@ extern "Rust" {
 // the cast doesn't bind tighter than the `+`.
 
 func cast_to_usize(e: SynExpr) -> SynExpr:
-    // (matches! e { Binary | Unary | Cast | Range } → needs parens)
+    // (matches! e { Binary | Unary | Cast | Range } â†’ needs parens)
     let needs_parens = expr_needs_parens_for_cast(e)
     let operand = if needs_parens:
         wrap_in_parens(e)
@@ -68,7 +66,7 @@ func cast_to_usize(e: SynExpr) -> SynExpr:
     return make_cast_expr(operand, rust_path_type("usize"))
 
 // =============================================================================
-// cast_to — generic `(e) as T`
+// cast_to â€” generic `(e) as T`
 // =============================================================================
 //
 // Build a Rust `as` cast: `(e) as T`. The receiver is parenthesised so
@@ -78,7 +76,7 @@ func cast_to(e: SynExpr, target: String) -> SynExpr:
     return make_cast_expr(wrap_in_parens(e), rust_path_type(target))
 
 // =============================================================================
-// make_int_lit_expr — Rust integer-literal expression
+// make_int_lit_expr â€” Rust integer-literal expression
 // =============================================================================
 
 func make_int_lit_expr(n: Int) -> SynExpr:
@@ -86,7 +84,7 @@ func make_int_lit_expr(n: Int) -> SynExpr:
     return make_int_lit_expr_impl(n)
 
 // =============================================================================
-// make_binary_expr — `lhs <op> rhs`
+// make_binary_expr â€” `lhs <op> rhs`
 // =============================================================================
 
 func make_binary_expr(op: SynBinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr:
@@ -94,11 +92,11 @@ func make_binary_expr(op: SynBinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr:
     return make_binary_expr_impl(op, lhs, rhs)
 
 // =============================================================================
-// ConvKind — discriminate numeric vs bool constructor prelude fns
+// ConvKind â€” discriminate numeric vs bool constructor prelude fns
 // =============================================================================
 //
-// `Numeric` covers `Int(x)` / `Float(x)` — Rust emits `(x) as T`.
-// `Bool` is separate because Rust has no `as bool` cast; the numeric→bool
+// `Numeric` covers `Int(x)` / `Float(x)` â€” Rust emits `(x) as T`.
+// `Bool` is separate because Rust has no `as bool` cast; the numericâ†’bool
 // mapping is `x != 0`.
 
 enum ConvKind {
@@ -107,7 +105,7 @@ enum ConvKind {
 }
 
 // =============================================================================
-// parse_with_default — `x.parse::<T>().unwrap_or(default)`
+// parse_with_default â€” `x.parse::<T>().unwrap_or(default)`
 // =============================================================================
 //
 // Build the expression for the string-arg branch of `Int(x)`/`Float(x)`/
@@ -117,17 +115,17 @@ enum ConvKind {
 func parse_with_default(arg: SynExpr, target: String, kind: ConvKind) -> SynExpr:
     // 1. Build `arg.parse::<target>()` as a method call with turbofish.
     let parse_call = make_parse_turbofish_call(arg, target)
-    // 2. Pick the default literal: numerics → unsuffixed `0`, bool → `false`.
+    // 2. Pick the default literal: numerics â†’ unsuffixed `0`, bool â†’ `false`.
     let default_expr = match kind:
         ConvKind.Numeric:
             make_int_lit_expr(0)
         ConvKind.Bool:
             make_bool_lit_expr(false)
-    // 3. `.unwrap_or(<default-lit>)` — single-arg method call on the parse.
+    // 3. `.unwrap_or(<default-lit>)` â€” single-arg method call on the parse.
     return method_call_one_arg(parse_call, "unwrap_or", default_expr)
 
 // =============================================================================
-// typeref_to_type — mirror of the private fn in buff_lang_types::infer
+// typeref_to_type â€” mirror of the private fn in buff_lang_types::infer
 // =============================================================================
 //
 // Used by `RustCodegen.lower_func` to seed the TypeInferencer environment
@@ -136,21 +134,21 @@ func parse_with_default(arg: SynExpr, target: String, kind: ConvKind) -> SynExpr
 
 func typeref_to_type(ty: TypeRef) -> Option<Type>:
     // (match ty:
-    //   Named { name, .. } → match name.name.as_str() {
-    //     "Int" → Some(Type::int_default())
-    //     "Float" → Some(Type::float_default())
-    //     "Double" → Some(Type::double())
-    //     "Bool" → Some(Type::bool())
-    //     "String" → Some(Type::string())
-    //     "Char" → Some(Type::char())        // T21
-    //     "Byte" → Some(Type::byte())
-    //     "Decimal" → Some(Type::Decimal)
-    //     "Void" → Some(Type::Void)
-    //     _ → None
+    //   Named { name, .. } â†’ match name.name.as_str() {
+    //     "Int" â†’ Some(Type::int_default())
+    //     "Float" â†’ Some(Type::float_default())
+    //     "Double" â†’ Some(Type::double())
+    //     "Bool" â†’ Some(Type::bool())
+    //     "String" â†’ Some(Type::string())
+    //     "Char" â†’ Some(Type::char())        // T21
+    //     "Byte" â†’ Some(Type::byte())
+    //     "Decimal" â†’ Some(Type::Decimal)
+    //     "Void" â†’ Some(Type::Void)
+    //     _ â†’ None
     //   }
-    //   Union(members, _) → { let resolved = members.filter_map(typeref_to_type);
+    //   Union(members, _) â†’ { let resolved = members.filter_map(typeref_to_type);
     //                         Some(Type::Union(resolved)) }   // T76
-    //   _ → None)
+    //   _ â†’ None)
     return typeref_to_type_impl(ty)
 
 // =============================================================================
@@ -162,12 +160,10 @@ func typeref_to_type(ty: TypeRef) -> Option<Type>:
 // reference Rust implementation in `conv_helpers.rs` is the source of truth
 // for what each shim does.
 
-extern "Rust" {
-    fn expr_needs_parens_for_cast(e: SynExpr) -> Bool
-    fn make_cast_expr(operand: SynExpr, ty: SynType) -> SynExpr
-    fn make_int_lit_expr_impl(n: Int) -> SynExpr
-    fn make_bool_lit_expr(b: Bool) -> SynExpr
-    fn make_binary_expr_impl(op: SynBinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr
-    fn make_parse_turbofish_call(receiver: SynExpr, target: String) -> SynExpr
-    fn typeref_to_type_impl(ty: TypeRef) -> Option<Type>
-}
+extern "C" func expr_needs_parens_for_cast(e: SynExpr) -> Bool
+extern "C" func make_cast_expr(operand: SynExpr, ty: SynType) -> SynExpr
+extern "C" func make_int_lit_expr_impl(n: Int) -> SynExpr
+extern "C" func make_bool_lit_expr(b: Bool) -> SynExpr
+extern "C" func make_binary_expr_impl(op: SynBinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr
+extern "C" func make_parse_turbofish_call(receiver: SynExpr, target: String) -> SynExpr
+extern "C" func typeref_to_type_impl(ty: TypeRef) -> Option<Type>

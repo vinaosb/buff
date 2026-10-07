@@ -1,9 +1,9 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/derive_attrs.rs` (T18, Track C).
 //
-// T105a — derive/repr attribute builders (mechanically extracted from
+// T105a â€” derive/repr attribute builders (mechanically extracted from
 // rust_codegen.rs).
 //
-// Verbatim move from the parent — no logic changes. Child module of
+// Verbatim move from the parent â€” no logic changes. Child module of
 // rust_codegen so it inherits the parent imports via `use super::*` (zero
 // per-module import lists). Functions are `pub(super)` so the parent reaches
 // them through the glob below.
@@ -23,7 +23,7 @@ struct TypeRef:
     opaque_handle: Int
 
 // =============================================================================
-// derive_and_repr_attrs — T26 helper: `#[derive(Clone, Debug)]` + optional repr(C)
+// derive_and_repr_attrs â€” T26 helper: `#[derive(Clone, Debug)]` + optional repr(C)
 // =============================================================================
 //
 // Build the attribute list for a generated struct: always
@@ -49,11 +49,11 @@ func derive_and_repr_attrs(emit_repr_c: Bool) -> Vector<SynAttribute>:
     return attrs
 
 // =============================================================================
-// struct_derive_attrs — T107 helper for STRUCTS
+// struct_derive_attrs â€” T107 helper for STRUCTS
 // =============================================================================
 //
 // Structs ALWAYS derive `Clone`, `PartialEq`, `Debug` (T107 extends T26's
-// `Clone + Debug` baseline). The `Hash` derive is added CONDITIONALLY — only
+// `Clone + Debug` baseline). The `Hash` derive is added CONDITIONALLY â€” only
 // when `type_is_hash_safe` reports that ALL the struct's field types
 // (recursively, across user struct references) impl `Hash`.
 //
@@ -62,12 +62,12 @@ func derive_and_repr_attrs(emit_repr_c: Bool) -> Vector<SynAttribute>:
 //   #[derive(Clone, PartialEq, Debug)]         // some field non-Hash
 //
 // followed by an optional `#[repr(C)]` (between derive and `pub struct`) when
-// `emit_repr_c` is true — identical ordering to the T26 helper.
+// `emit_repr_c` is true â€” identical ordering to the T26 helper.
 //
 // # Why `PartialEq` is unconditional
 //
 // Every Rust primitive Buff maps to (`i64`, `f32`, `String`, `bool`,
-// `rust_decimal::Decimal`, …) impls `PartialEq`, including floats (which impl
+// `rust_decimal::Decimal`, â€¦) impls `PartialEq`, including floats (which impl
 // `PartialEq` but NOT `Eq`/`Hash`). So `PartialEq` is always safe.
 //
 // # Why `Hash` is conditional
@@ -75,12 +75,12 @@ func derive_and_repr_attrs(emit_repr_c: Bool) -> Vector<SynAttribute>:
 // Rust's derived `Hash` impl requires every field type to impl `Hash`. `f32`
 // and `f64` do NOT impl `Hash` (NaN isn't hashable). `Vec<T>` and
 // `HashMap<K,V>` do NOT impl `Hash` in std either. So a struct with a
-// float/Vec/Map field cannot derive `Hash` — the caller must precompute
+// float/Vec/Map field cannot derive `Hash` â€” the caller must precompute
 // field-Hash-safety (see `compute_hash_safe_structs`) and pass the result via
 // `include_hash`.
 
 func struct_derive_attrs(emit_repr_c: Bool, include_hash: Bool) -> Vector<SynAttribute>:
-    // Build the trait list: Clone, PartialEq, [Hash,] Debug — Debug always last.
+    // Build the trait list: Clone, PartialEq, [Hash,] Debug â€” Debug always last.
     let traits = Vector.new()
     traits.push("Clone")
     traits.push("PartialEq")
@@ -95,18 +95,18 @@ func struct_derive_attrs(emit_repr_c: Bool, include_hash: Bool) -> Vector<SynAtt
     return attrs
 
 // =============================================================================
-// push_repr_c_attr — T107 helper: append `#[repr(C)]` to the attribute list
+// push_repr_c_attr â€” T107 helper: append `#[repr(C)]` to the attribute list
 // =============================================================================
 
 func push_repr_c_attr(attrs: Vector<SynAttribute>):
     attrs.push(build_repr_c_attr())
 
 // =============================================================================
-// gpu_struct_derive_attrs — T50 helper: GPU-bound struct derives
+// gpu_struct_derive_attrs â€” T50 helper: GPU-bound struct derives
 // =============================================================================
 //
 // GPU-bound structs (those that flow through a `par_map` / `par_filter` /
-// `par_reduce` combinator — see gpu_alignment.buff) must have a stable C
+// `par_reduce` combinator â€” see gpu_alignment.buff) must have a stable C
 // layout so their byte representation is well-defined for `wgpu`
 // storage-buffer upload / readback via `bytemuck::cast_slice`. This helper
 // emits:
@@ -116,10 +116,10 @@ func push_repr_c_attr(attrs: Vector<SynAttribute>):
 //
 // # Why `Copy` is unconditional
 //
-// `bytemuck::Pod` REQUIRES `Copy` (it's part of the unsafe contract — Pod
+// `bytemuck::Pod` REQUIRES `Copy` (it's part of the unsafe contract â€” Pod
 // types must be freely bit-copyable). So every GPU-bound struct must be
 // `Copy`. For v1.0 we assume GPU-bound structs have only primitive Pod fields
-// (Int / Float / Bool / Byte / nested Pod structs / arrays-of-Pod) — if a
+// (Int / Float / Bool / Byte / nested Pod structs / arrays-of-Pod) â€” if a
 // field is NOT Pod-compatible (e.g. `String`, `Vec`, `Map`), the generated
 // `#[derive(... bytemuck::Pod ...)]` will fail to compile and rustc surfaces
 // the error at build time. This is an acceptable v1.0 limitation: GPU kernels
@@ -128,7 +128,7 @@ func push_repr_c_attr(attrs: Vector<SynAttribute>):
 // # Why `Hash` is omitted
 //
 // `Hash` requires every field to impl `Hash`. `f32` / `f64` (the most common
-// GPU-struct field types — coordinates, colours, intensities) do NOT impl
+// GPU-struct field types â€” coordinates, colours, intensities) do NOT impl
 // `Hash` (NaN is not hashable). So a GPU-bound struct CANNOT generally derive
 // `Hash`. We omit it unconditionally from the GPU derive path; users who need
 // Hash on a GPU-bound struct can implement it manually (a v1.0+ concern).
@@ -144,7 +144,7 @@ func push_repr_c_attr(attrs: Vector<SynAttribute>):
 //
 // Derive attribute first (with the bytemuck paths LAST so users reading
 // generated source see the familiar std derives first), then `#[repr(C)]`
-// between the derive and `pub struct` — identical ordering to
+// between the derive and `pub struct` â€” identical ordering to
 // `struct_derive_attrs`.
 
 func gpu_struct_derive_attrs() -> Vector<SynAttribute>:
@@ -162,10 +162,10 @@ func gpu_struct_derive_attrs() -> Vector<SynAttribute>:
     return attrs
 
 // =============================================================================
-// type_is_hash_safe — T107 recursive Hash-safety check
+// type_is_hash_safe â€” T107 recursive Hash-safety check
 // =============================================================================
 //
-// Is the given `TypeRef` "Hash-safe" — i.e. would the corresponding Rust type
+// Is the given `TypeRef` "Hash-safe" â€” i.e. would the corresponding Rust type
 // impl `Hash`?
 //
 // Used by `struct_derive_attrs` (via `RustCodegen.lower_struct_decl`) to
@@ -173,22 +173,22 @@ func gpu_struct_derive_attrs() -> Vector<SynAttribute>:
 // across composite types:
 //
 // - **Named primitives**: `Int`/`Byte`/`Bits`/`Bool`/`String`/`Char`/
-//   `Decimal` → `true` (all map to Hash-impl'ing Rust types). `Float`/
-//   `Double` → `false` (f32/f64 don't impl Hash).
+//   `Decimal` â†’ `true` (all map to Hash-impl'ing Rust types). `Float`/
+//   `Double` â†’ `false` (f32/f64 don't impl Hash).
 // - **Named user types** (struct/enum): `true` iff the type name is in
-//   `hash_safe_user_structs` — a precomputed set built by
+//   `hash_safe_user_structs` â€” a precomputed set built by
 //   `compute_hash_safe_structs` that does a fixpoint pass over all struct
 //   decls (so `struct A { b: B }` is Hash-safe iff `B` is too). Enums are
 //   conservatively assumed Hash-safe.
 // - **`Option<T>`**: `true` iff `T` is Hash-safe (Option<T>: Hash when T: Hash).
-// - **`Tuple<T,U,…>` / `Union<A,B,…>`**: `true` iff EVERY member is Hash-safe.
-// - **`Generic { base, args }`**: `false` — collections (`Vector<T>` →
-//   `Vec<T>`, `Map<K,V>` → `HashMap<K,V>`) don't impl Hash in std.
-// - **`Function { .. }`**: `false` — Buff closures lower to boxed `Fn` types
+// - **`Tuple<T,U,â€¦>` / `Union<A,B,â€¦>`**: `true` iff EVERY member is Hash-safe.
+// - **`Generic { base, args }`**: `false` â€” collections (`Vector<T>` â†’
+//   `Vec<T>`, `Map<K,V>` â†’ `HashMap<K,V>`) don't impl Hash in std.
+// - **`Function { .. }`**: `false` â€” Buff closures lower to boxed `Fn` types
 //   which don't reliably impl Hash.
 
 func type_is_hash_safe(ty: TypeRef, hash_safe_user_structs: BTreeSet<String>) -> Bool:
-    // (Recursive match — see the doc comment above for the full case table.)
+    // (Recursive match â€” see the doc comment above for the full case table.)
     return type_is_hash_safe_impl(ty, hash_safe_user_structs)
 
 // =============================================================================
@@ -199,16 +199,14 @@ func type_is_hash_safe(ty: TypeRef, hash_safe_user_structs: BTreeSet<String>) ->
 // `build_derive_attr_with_traits` and `build_repr_c_attr` shims wrap the
 // quote!-based token assembly the Rust reference uses.
 
-struct BTreeSet_String:
+struct BTreeSetString:
     opaque_handle: Int
 
-// Type alias for readability — Buff has no `type` alias in v1.x surface, so
+// Type alias for readability â€” Buff has no `type` alias in v1.x surface, so
 // we use the underlying struct name directly in signatures above.
-func btreeset_string_new() -> BTreeSet_String:
-    return BTreeSet_String.new(opaque_handle: 0)
+func btreeset_string_new() -> BTreeSetString:
+    return BTreeSetString.new(opaque_handle: 0)
 
-extern "Rust" {
-    fn build_derive_attr_with_traits(traits: Vector<String>) -> SynAttribute
-    fn build_repr_c_attr() -> SynAttribute
-    fn type_is_hash_safe_impl(ty: TypeRef, set: BTreeSet_String) -> Bool
-}
+extern "C" func build_derive_attr_with_traits(traits: Vector<String>) -> SynAttribute
+extern "C" func build_repr_c_attr() -> SynAttribute
+extern "C" func type_is_hash_safe_impl(ty: TypeRef, set: BTreeSetString) -> Bool

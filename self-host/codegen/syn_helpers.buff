@@ -1,11 +1,11 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/syn_helpers.rs` (T18, Track C).
 //
-// T105a — syn-construction helpers (mechanically extracted from
+// T105a â€” syn-construction helpers (mechanically extracted from
 // rust_codegen.rs).
 //
 // Leaf helpers that build syn AST fragments: identifiers, two-segment enum
 // paths, method-call expressions, attribute wrappers, atomic/Arc scaffolding,
-// and the KNOWN_ZERO_ARG_METHODS table. Verbatim move from the parent — no
+// and the KNOWN_ZERO_ARG_METHODS table. Verbatim move from the parent â€” no
 // logic changes. Child module of rust_codegen so it inherits the parent
 // imports via `use super::*` (zero per-module import lists).
 //
@@ -16,19 +16,19 @@
 // make_bool_lit_expr / method_call / etc).
 
 // =============================================================================
-// ast_ident_to_syn — Buff Ident → syn::Ident
+// ast_ident_to_syn â€” Buff Ident â†’ syn::Ident
 // =============================================================================
 //
 // Convert a Buff `Ident` into a `syn::Ident`. The byte offsets in the Buff
 // span don't carry over (proc-macro2 spans are opaque), so we just use
-// `call_site` here. The source-map mapping (Buff span → Rust line/col) is
+// `call_site` here. The source-map mapping (Buff span â†’ Rust line/col) is
 // recorded separately in `CodegenContext`.
 
 func ast_ident_to_syn(ident: BuffIdent) -> SynIdent:
     return syn_ident_new(buff_ident_name(ident), proc_macro2_span_call_site())
 
 // =============================================================================
-// two_segment_path — T85: `EnumName::VariantName` syn::Path
+// two_segment_path â€” T85: `EnumName::VariantName` syn::Path
 // =============================================================================
 //
 // Build a two-segment `EnumName::VariantName` `syn::Path`.
@@ -40,15 +40,15 @@ func ast_ident_to_syn(ident: BuffIdent) -> SynIdent:
 // per the crate's hard rules).
 //
 // Determinism: the path is built from two `Ident`s joined by a single `::`
-// separator — byte-identical for the same `(enum, variant)` pair.
+// separator â€” byte-identical for the same `(enum, variant)` pair.
 
 func two_segment_path(enum_name: String, variant_name: String) -> SynPath:
     // (Build a Path with two PathSegments, each PathArguments::None, joined
-    //  by a single :: separator. Constructed explicitly — no parse_quote!.)
+    //  by a single :: separator. Constructed explicitly â€” no parse_quote!.)
     return two_segment_path_impl(enum_name, variant_name)
 
 // =============================================================================
-// two_segment_path_expr — T85: wrapper for expr position
+// two_segment_path_expr â€” T85: wrapper for expr position
 // =============================================================================
 //
 // Thin wrapper around `two_segment_path` that wraps the path in an
@@ -61,7 +61,7 @@ func two_segment_path_expr(enum_name: String, variant_name: String) -> SynExpr:
     return two_segment_path_expr_impl(enum_name, variant_name)
 
 // =============================================================================
-// strip_trailing_semi_on_last_expr_stmt — T86 match-yield helper
+// strip_trailing_semi_on_last_expr_stmt â€” T86 match-yield helper
 // =============================================================================
 //
 // Strip the trailing `;` on the LAST statement of a `syn::Block` iff that
@@ -70,11 +70,11 @@ func two_segment_path_expr(enum_name: String, variant_name: String) -> SynExpr:
 // Used by `RustCodegen.lower_match_expr` when the match is in return
 // position: the parser wraps each arm body as a one-statement
 // `Block { stmts: [Stmt::ExprStmt(e)] }`, which `Self.lower_block` (correctly,
-// for general blocks) emits as `{ e; }` (statement with semi → block type
+// for general blocks) emits as `{ e; }` (statement with semi â†’ block type
 // `()`). For an arm body that must YIELD a value (so the surrounding `return
 // match n { ... }` typechecks against the function's declared return type),
 // we strip the trailing `;` on the last expression-statement so it becomes a
-// tail expression (`{ e }` → block yields the value of `e`).
+// tail expression (`{ e }` â†’ block yields the value of `e`).
 //
 // NO-OP when:
 // - the block is empty (`{}`),
@@ -87,7 +87,7 @@ func strip_trailing_semi_on_last_expr_stmt(block: SynBlock):
     strip_trailing_semi_on_last_expr_stmt_impl(block)
 
 // =============================================================================
-// rewrite_self_receiver — T75: typed-self → bare-self canonicalisation
+// rewrite_self_receiver â€” T75: typed-self â†’ bare-self canonicalisation
 // =============================================================================
 //
 // T75: rewrite the first parameter of a `syn::Signature` from a typed
@@ -106,7 +106,7 @@ func rewrite_self_receiver(sig: SynSignature) -> SynSignature:
     return rewrite_self_receiver_impl(sig)
 
 // =============================================================================
-// rust_path / rust_path_type — single-segment path builders
+// rust_path / rust_path_type â€” single-segment path builders
 // =============================================================================
 //
 // Build a single-segment `syn::Path` / `syn::Type::Path` from a `::`-
@@ -121,14 +121,14 @@ func rust_path_type(name: String) -> SynType:
     return rust_path_type_impl(name)
 
 // =============================================================================
-// wrap_in_parens — wrap a SynExpr in `(e)`
+// wrap_in_parens â€” wrap a SynExpr in `(e)`
 // =============================================================================
 
 func wrap_in_parens(e: SynExpr) -> SynExpr:
     return wrap_in_parens_impl(e)
 
 // =============================================================================
-// make_int_lit_expr_impl / make_bool_lit_expr — literal expression builders
+// make_int_lit_expr_impl / make_bool_lit_expr â€” literal expression builders
 // =============================================================================
 
 func make_int_lit_expr_impl(n: Int) -> SynExpr:
@@ -138,7 +138,7 @@ func make_bool_lit_expr(b: Bool) -> SynExpr:
     return make_bool_lit_expr_impl_external(b)
 
 // =============================================================================
-// method_call_one_arg / method_call — method-call expression builders
+// method_call_one_arg / method_call â€” method-call expression builders
 // =============================================================================
 //
 // Build `recv.method(args)` SynExpr::MethodCall nodes. The `method_call_one_
@@ -150,7 +150,7 @@ func method_call_one_arg(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
     return method_call_one_arg_impl_external(recv, method, arg)
 
 // =============================================================================
-// KNOWN_ZERO_ARG_METHODS — the no-arg method name set
+// KNOWN_ZERO_ARG_METHODS â€” the no-arg method name set
 // =============================================================================
 //
 // The set of method names that the codegen can emit as `recv.method()` (no
@@ -257,29 +257,27 @@ struct SynSignature:
 struct SynAttribute:
     opaque_handle: Int
 
-extern "Rust" {
-    fn buff_ident_name(ident: BuffIdent) -> String
-    fn syn_ident_new(name: String, span: ProcSpan2) -> SynIdent
-    fn proc_macro2_span_call_site() -> ProcSpan2
-    fn string_vector_contains(vec: Vector<String>, s: String) -> Bool
-    fn rust_call_expr(path: String, args: Vector<SynExpr>) -> SynExpr
-    fn rust_path_expr(path: String) -> SynExpr
-    fn make_borrow_expr(inner: SynExpr) -> SynExpr
-    fn make_mut_borrow_expr(inner: SynExpr) -> SynExpr
-    fn method_call_n_args(recv: SynExpr, method: String, args: Vector<SynExpr>) -> SynExpr
-    fn two_segment_path_impl(enum_name: String, variant_name: String) -> SynPath
-    fn two_segment_path_expr_impl(enum_name: String, variant_name: String) -> SynExpr
-    fn strip_trailing_semi_on_last_expr_stmt_impl(block: SynBlock)
-    fn rewrite_self_receiver_impl(sig: SynSignature) -> SynSignature
-    fn rust_path_impl(name: String) -> SynPath
-    fn rust_path_type_impl(name: String) -> SynType
-    fn wrap_in_parens_impl(e: SynExpr) -> SynExpr
-    fn make_int_lit_expr_impl_external(n: Int) -> SynExpr
-    fn make_bool_lit_expr_impl_external(b: Bool) -> SynExpr
-    fn method_call_one_arg_impl_external(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
-    fn build_derive_attr_with_traits_external(traits: Vector<String>) -> SynAttribute
-    fn build_repr_c_attr_external() -> SynAttribute
-}
+extern "C" func buff_ident_name(ident: BuffIdent) -> String
+extern "C" func syn_ident_new(name: String, span: ProcSpan2) -> SynIdent
+extern "C" func proc_macro2_span_call_site() -> ProcSpan2
+extern "C" func string_vector_contains(vec: Vector<String>, s: String) -> Bool
+extern "C" func rust_call_expr(path: String, args: Vector<SynExpr>) -> SynExpr
+extern "C" func rust_path_expr(path: String) -> SynExpr
+extern "C" func make_borrow_expr(inner: SynExpr) -> SynExpr
+extern "C" func make_mut_borrow_expr(inner: SynExpr) -> SynExpr
+extern "C" func method_call_n_args(recv: SynExpr, method: String, args: Vector<SynExpr>) -> SynExpr
+extern "C" func two_segment_path_impl(enum_name: String, variant_name: String) -> SynPath
+extern "C" func two_segment_path_expr_impl(enum_name: String, variant_name: String) -> SynExpr
+extern "C" func strip_trailing_semi_on_last_expr_stmt_impl(block: SynBlock)
+extern "C" func rewrite_self_receiver_impl(sig: SynSignature) -> SynSignature
+extern "C" func rust_path_impl(name: String) -> SynPath
+extern "C" func rust_path_type_impl(name: String) -> SynType
+extern "C" func wrap_in_parens_impl(e: SynExpr) -> SynExpr
+extern "C" func make_int_lit_expr_impl_external(n: Int) -> SynExpr
+extern "C" func make_bool_lit_expr_impl_external(b: Bool) -> SynExpr
+extern "C" func method_call_one_arg_impl_external(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
+extern "C" func build_derive_attr_with_traits_external(traits: Vector<String>) -> SynAttribute
+extern "C" func build_repr_c_attr_external() -> SynAttribute
 
 struct ProcSpan2:
     opaque_handle: Int

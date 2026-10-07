@@ -10,7 +10,7 @@
 //
 // 1. `MoveAnalyzer.preanalyze_func` runs the pure
 //    `buff_lang_types::analyze_ownership` pass over the function body to
-//    derive `OwnershipFacts` — which bindings are `Copy`, which are
+//    derive `OwnershipFacts` â€” which bindings are `Copy`, which are
 //    Arc-shared across `spawn`, and which Arc-shared bindings are
 //    subsequently mutated (CoW sites).
 // 2. During lowering, `MoveAnalyzer.needs_clone` is called for every
@@ -24,16 +24,16 @@
 //
 // # What moved in T33 (vs T33a)
 //
-// - **Char is now Copy** — the v0.1 classifier knew Int/Float/Double/Bool/
+// - **Char is now Copy** â€” the v0.1 classifier knew Int/Float/Double/Bool/
 //   Byte/Bits but missed Char (added to the language in T21). All Copy
 //   decisions now live in `OwnershipFacts` for reuse by downstream tooling
 //   (LSP, refactors).
-// - **Arc-across-spawn** — the analysis flags non-Copy bindings captured by
+// - **Arc-across-spawn** â€” the analysis flags non-Copy bindings captured by
 //   `spawn <task>`; codegen wraps them in `Arc::new(...)` and inserts
 //   `Arc::clone(&x)` inside the spawn body.
-// - **CoW mutation** — Arc-shared bindings that are subsequently mutated get
+// - **CoW mutation** â€” Arc-shared bindings that are subsequently mutated get
 //   `Arc::make_mut(&mut x)` at the assignment site.
-// - **REFACTOR** — the (formerly inline) Copy classification moved into
+// - **REFACTOR** â€” the (formerly inline) Copy classification moved into
 //   `buff_lang_types::ownership` (a pure, deterministic pass reusable beyond
 //   codegen). The stateful move counter stays here because it is inherently
 //   tied to lowering order.
@@ -63,16 +63,14 @@ struct FuncDecl:
 struct OwnershipFacts:
     opaque_handle: Int
 
-extern "Rust" {
-    fn analyze_ownership(func: FuncDecl) -> OwnershipFacts
-    fn ownership_facts_default() -> OwnershipFacts
-    fn ownership_facts_is_copy(facts: OwnershipFacts, name: String) -> Bool
-    fn ownership_facts_is_arc(facts: OwnershipFacts, name: String) -> Bool
-    fn ownership_facts_is_arc_mut(facts: OwnershipFacts, name: String) -> Bool
-}
+extern "C" func analyze_ownership(fd: FuncDecl) -> OwnershipFacts
+extern "C" func ownership_facts_default() -> OwnershipFacts
+extern "C" func ownership_facts_is_copy(facts: OwnershipFacts, name: String) -> Bool
+extern "C" func ownership_facts_is_arc(facts: OwnershipFacts, name: String) -> Bool
+extern "C" func ownership_facts_is_arc_mut(facts: OwnershipFacts, name: String) -> Bool
 
 // =============================================================================
-// MoveAnalyzer — tracks which variables are "moved" (consumed) at each point
+// MoveAnalyzer â€” tracks which variables are "moved" (consumed) at each point
 // =============================================================================
 //
 // When a variable is used after being moved, codegen inserts `.clone()`.
@@ -83,7 +81,7 @@ extern "Rust" {
 // - `used`: per-name use counter, incremented on every `needs_clone` call.
 //   First use of a non-Copy var = move (no clone); second+ use = clone.
 //   Kept as a `BTreeMap` so snapshot output is deterministic (the T29
-//   flaky-test lesson — never rely on HashMap iteration order for codegen
+//   flaky-test lesson â€” never rely on HashMap iteration order for codegen
 //   output).
 // - `facts`: the per-function `OwnershipFacts` produced by
 //   `analyze_ownership`. Carries the Copy / Arc / CoW classifications that
@@ -101,7 +99,7 @@ func move_analyzer_new() -> MoveAnalyzer:
     )
 
 // =============================================================================
-// preanalyze_func — pre-compute ownership facts (Copy / Arc / CoW)
+// preanalyze_func â€” pre-compute ownership facts (Copy / Arc / CoW)
 // =============================================================================
 //
 // Analyze a function body, pre-computing ownership facts (Copy / Arc-shared /
@@ -111,15 +109,15 @@ func move_analyzer_new() -> MoveAnalyzer:
 // `RustCodegen.lower_func`). The resulting facts are consulted via
 // `needs_clone`, `is_arc_var`, and `is_arc_mut_var` during lowering.
 
-func move_analyzer_preanalyze_func(analyzer: MoveAnalyzer, func: FuncDecl):
+func move_analyzer_preanalyze_func(analyzer: MoveAnalyzer, fd: FuncDecl):
     // T33: delegate the (pure, deterministic) classification to
     // analyze_ownership. It returns a fresh OwnershipFacts each call;
     // assigning here replaces any prior state (so a stale set from the
     // previous function can't leak in).
-    analyzer.facts = analyze_ownership(func)
+    analyzer.facts = analyze_ownership(fd)
 
 // =============================================================================
-// facts — borrow the ownership facts (read-only)
+// facts â€” borrow the ownership facts (read-only)
 // =============================================================================
 //
 // Exposed so the codegen pass can query `OwnershipFacts.is_copy` / `is_arc` /
@@ -130,7 +128,7 @@ func move_analyzer_facts(analyzer: MoveAnalyzer) -> OwnershipFacts:
     return analyzer.facts
 
 // =============================================================================
-// is_copy_var — Copy bindings never get `.clone()`
+// is_copy_var â€” Copy bindings never get `.clone()`
 // =============================================================================
 //
 // Is `name` a Copy binding (Int/Float/Double/Bool/Byte/Bits/Char)? Copy
@@ -141,7 +139,7 @@ func move_analyzer_is_copy_var(analyzer: MoveAnalyzer, name: String) -> Bool:
     return ownership_facts_is_copy(analyzer.facts, name)
 
 // =============================================================================
-// is_arc_var — Arc-shared binding (captured across `spawn`)
+// is_arc_var â€” Arc-shared binding (captured across `spawn`)
 // =============================================================================
 //
 // Is `name` an Arc-shared binding (captured across a `spawn`)?
@@ -152,7 +150,7 @@ func move_analyzer_is_arc_var(analyzer: MoveAnalyzer, name: String) -> Bool:
     return ownership_facts_is_arc(analyzer.facts, name)
 
 // =============================================================================
-// is_arc_mut_var — Arc-shared AND subsequently mutated (needs `make_mut`)
+// is_arc_mut_var â€” Arc-shared AND subsequently mutated (needs `make_mut`)
 // =============================================================================
 //
 // Is `name` Arc-shared AND subsequently mutated (needs `Arc::make_mut`)?
@@ -163,15 +161,15 @@ func move_analyzer_is_arc_mut_var(analyzer: MoveAnalyzer, name: String) -> Bool:
     return ownership_facts_is_arc_mut(analyzer.facts, name)
 
 // =============================================================================
-// needs_clone — should this variable usage emit `.clone()`?
+// needs_clone â€” should this variable usage emit `.clone()`?
 // =============================================================================
 //
 // Check if a variable usage at this point should emit `.clone()`.
 //
 // Returns `true` if `.clone()` should be inserted. Specifically:
 //
-// - Copy types → always `false` (they are copied, not moved).
-// - Non-Copy types: first use → `false` (the move); second+ use → `true`
+// - Copy types â†’ always `false` (they are copied, not moved).
+// - Non-Copy types: first use â†’ `false` (the move); second+ use â†’ `true`
 //   (insert `.clone()` so the move is valid).
 //
 // **Side effect**: increments the use counter for `var_name` unless the
@@ -190,7 +188,7 @@ func move_analyzer_needs_clone(analyzer: MoveAnalyzer, var_name: String) -> Bool
     return new_count > 1
 
 // =============================================================================
-// reset — clear all state for a new function
+// reset â€” clear all state for a new function
 // =============================================================================
 //
 // Clears both the use counters and the ownership facts.
@@ -200,18 +198,16 @@ func move_analyzer_reset(analyzer: MoveAnalyzer):
     analyzer.facts = ownership_facts_default()
 
 // =============================================================================
-// BTreeMap<String, u32> — opaque handle for the use counter
+// BTreeMap<String, u32> â€” opaque handle for the use counter
 // =============================================================================
 //
 // Kept as a BTreeMap so snapshot output is deterministic (the T29 flaky-test
-// lesson — never rely on HashMap iteration order for codegen output).
+// lesson â€” never rely on HashMap iteration order for codegen output).
 
-struct BTreeMap_String_Int:
+struct BTreeMapStringInt:
     opaque_handle: Int
 
-extern "Rust" {
-    fn btreetap_string_int_new() -> BTreeMap_String_Int
-    fn btreetap_string_int_get_or_insert_zero(map: BTreeMap_String_Int, key: String) -> Int
-    fn btreetap_string_int_set(map: BTreeMap_String_Int, key: String, val: Int)
-    fn btreetap_string_int_clear(map: BTreeMap_String_Int)
-}
+extern "C" func btreetap_string_int_new() -> BTreeMapStringInt
+extern "C" func btreetap_string_int_get_or_insert_zero(map: BTreeMapStringInt, key: String) -> Int
+extern "C" func btreetap_string_int_set(map: BTreeMapStringInt, key: String, val: Int)
+extern "C" func btreetap_string_int_clear(map: BTreeMapStringInt)

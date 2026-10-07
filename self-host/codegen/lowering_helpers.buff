@@ -1,9 +1,9 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/lowering_helpers.rs` (T18, Track C).
 //
-// T105a — expr/lowering syn builders (generic paths, calls, str coercion,
+// T105a â€” expr/lowering syn builders (generic paths, calls, str coercion,
 // math lowering) (mechanically extracted from rust_codegen.rs).
 //
-// Verbatim move from the parent — no logic changes. Child module of
+// Verbatim move from the parent â€” no logic changes. Child module of
 // rust_codegen so it inherits the parent imports via `use super::*` (zero
 // per-module import lists). Functions are `pub(super)` so the parent reaches
 // them through the glob below.
@@ -36,13 +36,11 @@ struct BuffSpan:
 struct TokenStream:
     opaque_handle: Int
 
-extern "Rust" {
-    fn rust_path(name: String) -> SynType
-    fn buff_span_dummy() -> BuffSpan
-}
+extern "C" func rust_path(name: String) -> SynType
+extern "C" func buff_span_dummy() -> BuffSpan
 
 // =============================================================================
-// make_generic_path_type — `Name<T, U, …>` (T25)
+// make_generic_path_type â€” `Name<T, U, â€¦>` (T25)
 // =============================================================================
 //
 // Build a `Type::Path` with generic type arguments, e.g. `Option<T>`, `Vec<T>`.
@@ -54,7 +52,7 @@ func make_generic_path_type(name: String, args: Vector<SynType>) -> SynType:
     return make_generic_path_type_impl(name, args)
 
 // =============================================================================
-// make_qualified_generic_path_type — `a::b::c<T, U, …>` (T25)
+// make_qualified_generic_path_type â€” `a::b::c<T, U, â€¦>` (T25)
 // =============================================================================
 //
 // Like `make_generic_path_type` but accepts a `::`-separated qualified path
@@ -70,7 +68,7 @@ func make_qualified_generic_path_type(qualified_name: String, args: Vector<SynTy
     return make_qualified_generic_path_type_impl(qualified_name, args)
 
 // =============================================================================
-// float_repr — format a float so the f32/f64 suffix binds correctly
+// float_repr â€” format a float so the f32/f64 suffix binds correctly
 // =============================================================================
 //
 // Format a float so that it always has a decimal point or exponent (so the
@@ -93,7 +91,7 @@ func float_repr(d: Double) -> String:
     return s + ".0"
 
 // =============================================================================
-// method_call_one_arg — `recv.method(arg)`
+// method_call_one_arg â€” `recv.method(arg)`
 // =============================================================================
 //
 // Build a `recv.method(arg)` single-argument method call. Used by the
@@ -105,16 +103,16 @@ func method_call_one_arg(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
     return method_call_one_arg_impl(recv, method, arg)
 
 // =============================================================================
-// rust_call_expr — `<path>(args)` (T124b)
+// rust_call_expr â€” `<path>(args)` (T124b)
 // =============================================================================
 //
-// Build a fully-qualified Rust associated-function call `<path>(args)` —
+// Build a fully-qualified Rust associated-function call `<path>(args)` â€”
 // used for prelude-type constructors like `chrono::Utc::now()` and
 // `chrono::TimeDelta::days(n)`.
 //
 // The `qualified_path` is a `::`-separated string (e.g.
 // `"chrono::Utc::now"`, `"chrono::TimeDelta::days"`). The args slice is
-// lowered already — this helper just wraps them in a `syn::ExprCall` on the
+// lowered already â€” this helper just wraps them in a `syn::ExprCall` on the
 // path expression.
 
 func rust_call_expr(qualified_path: String, args: Vector<SynExpr>) -> SynExpr:
@@ -123,7 +121,7 @@ func rust_call_expr(qualified_path: String, args: Vector<SynExpr>) -> SynExpr:
     return rust_call_expr_impl(qualified_path, args)
 
 // =============================================================================
-// str_lit_expr — Rust `&'static str` literal expression (T124b)
+// str_lit_expr â€” Rust `&'static str` literal expression (T124b)
 // =============================================================================
 //
 // Used by prelude-type parse/format codegen to pass strftime / parse format
@@ -135,7 +133,7 @@ func str_lit_expr(text: String) -> SynExpr:
     return str_lit_expr_impl(text)
 
 // =============================================================================
-// coerce_str_arg_to_ref — borrow non-literal string args (T124b)
+// coerce_str_arg_to_ref â€” borrow non-literal string args (T124b)
 // =============================================================================
 //
 // Coerce a string-typed argument expression to `&str` when the underlying
@@ -144,7 +142,7 @@ func str_lit_expr(text: String) -> SynExpr:
 // chrono's `DateTime::parse_from_rfc3339`, `NaiveDate::parse_from_str`, and
 // `DateTime::format` all take `&str`. Buff string literals
 // (`Expr::Literal(Literal::String(s))`) lower directly to a Rust `&'static
-// str` literal — so no coercion is needed in that case. For non-literal arg
+// str` literal â€” so no coercion is needed in that case. For non-literal arg
 // expressions (idents referencing `String` bindings, interpolation results,
 // ...) we wrap the lowered expression in a borrow `&<expr>` so Rust's Deref
 // coercion turns `&String` into `&str`.
@@ -155,18 +153,18 @@ func str_lit_expr(text: String) -> SynExpr:
 // `chrono::DateTime::parse_from_rfc3339(&my_string_var)` which works.
 
 func coerce_str_arg_to_ref(lowered: SynExpr, orig: BuffExpr) -> SynExpr:
-    // String literals lower to `&'static str` already — no borrow needed.
+    // String literals lower to `&'static str` already â€” no borrow needed.
     if buff_expr_is_string_literal(orig):
         return lowered
-    // Named-arg wrapper around a string literal — recurse into the value.
+    // Named-arg wrapper around a string literal â€” recurse into the value.
     if buff_expr_is_named_arg(orig):
         let value = buff_expr_named_arg_value(orig)
         return coerce_str_arg_to_ref(lowered, value)
-    // Everything else (idents, interpolation, etc.) — borrow via `&<expr>`.
+    // Everything else (idents, interpolation, etc.) â€” borrow via `&<expr>`.
     return make_borrow_expr(lowered)
 
 // =============================================================================
-// lower_math_unary — Math.sqrt(16) → `(arg as f64).method()` (T124f)
+// lower_math_unary â€” Math.sqrt(16) â†’ `(arg as f64).method()` (T124f)
 // =============================================================================
 //
 // Lower a unary `Math.<method>(x)` call to `(<arg> as f64).<method>()`.
@@ -174,11 +172,11 @@ func coerce_str_arg_to_ref(lowered: SynExpr, orig: BuffExpr) -> SynExpr:
 // as well as a Float arg like `Math.sqrt(2.0)` (matches the spec acceptance
 // `Math.sqrt(16) -> 4.0`). The cast is built via `quote!` + parse2 so the
 // resulting `syn::Expr` is a well-formed `Expr::MethodCall` on a cast
-// subexpression (NOT a string-built hack — the single string producer
+// subexpression (NOT a string-built hack â€” the single string producer
 // remains `prettyplease::unparse`).
 //
 // Used for: sqrt / sin / cos / tan / abs / floor / ceil / round
-// (8 unary Math methods — all take one arg and return Float).
+// (8 unary Math methods â€” all take one arg and return Float).
 
 func lower_math_unary(arg: SynExpr, method: String) -> Result<SynExpr, CodegenError>:
     // (let tokens = quote! { (#arg as f64).#method() };
@@ -186,7 +184,7 @@ func lower_math_unary(arg: SynExpr, method: String) -> Result<SynExpr, CodegenEr
     return lower_math_unary_impl(arg, method)
 
 // =============================================================================
-// lower_math_binary — Math.min(a, b) → `(a as f64).method(b as f64)` (T124f)
+// lower_math_binary â€” Math.min(a, b) â†’ `(a as f64).method(b as f64)` (T124f)
 // =============================================================================
 //
 // Lower a binary `Math.<method>(a, b)` call to
@@ -194,7 +192,7 @@ func lower_math_unary(arg: SynExpr, method: String) -> Result<SynExpr, CodegenEr
 // Rust's `f64::min` / `f64::max` take `f64` (and casting both keeps the
 // lowering uniform with `Math.pow` which definitely needs both as f64).
 //
-// Used for: min / max (2 binary Math methods — both take two args and return
+// Used for: min / max (2 binary Math methods â€” both take two args and return
 // Float).
 
 func lower_math_binary(args: Vector<SynExpr>, method: String) -> Result<SynExpr, CodegenError>:
@@ -204,7 +202,7 @@ func lower_math_binary(args: Vector<SynExpr>, method: String) -> Result<SynExpr,
     return lower_math_binary_impl(args, method)
 
 // =============================================================================
-// splice_receiver_into_call — wire the receiver into a path::func(&recv, true)
+// splice_receiver_into_call â€” wire the receiver into a path::func(&recv, true)
 // =============================================================================
 //
 // Take a token stream that calls a fully-qualified function with a single
@@ -217,13 +215,13 @@ func lower_math_binary(args: Vector<SynExpr>, method: String) -> Result<SynExpr,
 // walk the resulting `ExprCall` to substitute the real receiver.
 //
 // This indirection is needed because `quote!` cannot easily splice into an
-// arbitrary position inside a string-built token stream — we instead parse
+// arbitrary position inside a string-built token stream â€” we instead parse
 // the template to a real `ExprCall`, then swap the first argument.
 
 func splice_receiver_into_call(tokens: TokenStream, recv: SynExpr) -> Result<SynExpr, CodegenError>:
     // (Construct the call directly: build args = [&recv, true]; build
     //  ExprCall with func = Path(unicode_segmentation::UnicodeSegmentation::
-    //  graphemes). The `tokens` argument is discarded — we rebuild from
+    //  graphemes). The `tokens` argument is discarded â€” we rebuild from
     //  scratch to stay quote!-based.)
     return splice_receiver_into_call_impl(recv)
 
@@ -233,19 +231,17 @@ func splice_receiver_into_call(tokens: TokenStream, recv: SynExpr) -> Result<Syn
 //
 // The actual syn construction is delegated to extern "Rust" bindings.
 
-extern "Rust" {
-    fn double_to_string(d: Double) -> String
-    fn string_contains(s: String, sub: String) -> Bool
-    fn make_borrow_expr(inner: SynExpr) -> SynExpr
-    fn buff_expr_is_string_literal(e: BuffExpr) -> Bool
-    fn buff_expr_is_named_arg(e: BuffExpr) -> Bool
-    fn buff_expr_named_arg_value(e: BuffExpr) -> BuffExpr
-    fn make_generic_path_type_impl(name: String, args: Vector<SynType>) -> SynType
-    fn make_qualified_generic_path_type_impl(name: String, args: Vector<SynType>) -> SynType
-    fn method_call_one_arg_impl(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
-    fn rust_call_expr_impl(path: String, args: Vector<SynExpr>) -> SynExpr
-    fn str_lit_expr_impl(text: String) -> SynExpr
-    fn lower_math_unary_impl(arg: SynExpr, method: String) -> Result<SynExpr, CodegenError>
-    fn lower_math_binary_impl(args: Vector<SynExpr>, method: String) -> Result<SynExpr, CodegenError>
-    fn splice_receiver_into_call_impl(recv: SynExpr) -> Result<SynExpr, CodegenError>
-}
+extern "C" func double_to_string(d: Double) -> String
+extern "C" func string_contains(s: String, sub: String) -> Bool
+extern "C" func make_borrow_expr(inner: SynExpr) -> SynExpr
+extern "C" func buff_expr_is_string_literal(e: BuffExpr) -> Bool
+extern "C" func buff_expr_is_named_arg(e: BuffExpr) -> Bool
+extern "C" func buff_expr_named_arg_value(e: BuffExpr) -> BuffExpr
+extern "C" func make_generic_path_type_impl(name: String, args: Vector<SynType>) -> SynType
+extern "C" func make_qualified_generic_path_type_impl(name: String, args: Vector<SynType>) -> SynType
+extern "C" func method_call_one_arg_impl(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
+extern "C" func rust_call_expr_impl(path: String, args: Vector<SynExpr>) -> SynExpr
+extern "C" func str_lit_expr_impl(text: String) -> SynExpr
+extern "C" func lower_math_unary_impl(arg: SynExpr, method: String) -> Result<SynExpr, CodegenError>
+extern "C" func lower_math_binary_impl(args: Vector<SynExpr>, method: String) -> Result<SynExpr, CodegenError>
+extern "C" func splice_receiver_into_call_impl(recv: SynExpr) -> Result<SynExpr, CodegenError>

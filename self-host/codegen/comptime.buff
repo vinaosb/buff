@@ -1,6 +1,6 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/comptime.rs` (T18, Track C).
 //
-// T53 — Rust codegen lowering for `comptime` blocks.
+// T53 â€” Rust codegen lowering for `comptime` blocks.
 //
 // Consumes a `ComptimeFacts` produced by `analyze_program` (see
 // self-host/types/comptime.buff) and emits a `syn::Item::Const` for each
@@ -13,19 +13,19 @@
 // Each `const` item gets a deterministic name: `__BUFF_COMPTIME_<offset>`
 // where `<offset>` is the byte-offset of the original `comptime` block's
 // source span. The offset is unique per source file, so two comptime blocks
-// never collide. The name is intentionally ugly — the user references
+// never collide. The name is intentionally ugly â€” the user references
 // comptime values via their original `let` bindings, not the synthesised
 // `const` (the binding-vs-const rewiring is post-v1.x work).
 //
 // # Determinism
 //
 // Items are emitted in source-span order (BTreeMap iteration order). Same
-// comptime facts → byte-identical Rust source.
+// comptime facts â†’ byte-identical Rust source.
 //
 // # Errors
 //
 // Returns `CodegenError` with code E1304 if a `ComptimeValue` cannot be
-// lowered (the interpreter produced a value shape codegen doesn't support —
+// lowered (the interpreter produced a value shape codegen doesn't support â€”
 // currently only `Unit`, which has no Rust literal form).
 //
 // The Rust reference is 143 LOC. The Buff port mirrors the public API
@@ -33,7 +33,7 @@
 // (lower_one, format_const_name, rust_type_for, rust_expr_for).
 
 // =============================================================================
-// Opaque handles (forward declarations — see syn_helpers.buff + lib.buff)
+// Opaque handles (forward declarations â€” see syn_helpers.buff + lib.buff)
 // =============================================================================
 
 struct Item:
@@ -67,14 +67,14 @@ struct BuffSpan:
     opaque_handle: Int
 
 // =============================================================================
-// lower_comptime_facts — public entry point
+// lower_comptime_facts â€” public entry point
 // =============================================================================
 //
 // Lower every value in `facts` to a top-level Rust `const` item. Returns the
 // items in source-span order (smallest offset first). The caller
 // (`RustCodegen.generate`) prepends them to the items Vec BEFORE user
 // declarations, so user code can reference the consts (though typically the
-// user references the original `let` bindings instead — name rewiring is
+// user references the original `let` bindings instead â€” name rewiring is
 // deferred).
 
 func lower_comptime_facts(facts: ComptimeFacts) -> Result<Vector<Item>, CodegenError>:
@@ -95,7 +95,7 @@ func lower_comptime_facts(facts: ComptimeFacts) -> Result<Vector<Item>, CodegenE
     return Result.Ok(items)
 
 // =============================================================================
-// lower_one — emit one `const __BUFF_COMPTIME_<offset>: T = expr;` item
+// lower_one â€” emit one `const __BUFF_COMPTIME_<offset>: T = expr;` item
 // =============================================================================
 
 func lower_one(offset: Int, value: ComptimeValue) -> Result<Item, CodegenError>:
@@ -107,39 +107,39 @@ func lower_one(offset: Int, value: ComptimeValue) -> Result<Item, CodegenError>:
     }
 
 // =============================================================================
-// format_const_name — `__BUFF_COMPTIME_<offset>`
+// format_const_name â€” `__BUFF_COMPTIME_<offset>`
 // =============================================================================
 
 func format_const_name(offset: Int) -> String:
     return "__BUFF_COMPTIME_" + int_to_string(offset)
 
 // =============================================================================
-// span_for — placeholder span (always BuffSpan::dummy in v1.x)
+// span_for â€” placeholder span (always BuffSpan::dummy in v1.x)
 // =============================================================================
 
 func span_for(offset: Int) -> BuffSpan:
     return buff_span_dummy()
 
 // =============================================================================
-// rust_type_for — pick the Rust type for a ComptimeValue
+// rust_type_for â€” pick the Rust type for a ComptimeValue
 // =============================================================================
 //
-// Int → `i64`, Bool → `bool`, String → `String`, Unit → `()` (error path),
-// Array(els) → `Vec<E>` where E is the first element's type (or `()` if empty).
+// Int â†’ `i64`, Bool â†’ `bool`, String â†’ `String`, Unit â†’ `()` (error path),
+// Array(els) â†’ `Vec<E>` where E is the first element's type (or `()` if empty).
 
 func rust_type_for(value: ComptimeValue) -> SynType:
     // (match value:
-    //   Int(_) → parse_simple_type("i64")
-    //   Bool(_) → parse_simple_type("bool")
-    //   String(_) → parse_simple_type("String")
-    //   Unit → parse_simple_type("()")
-    //   Array(els) → { let elem = els.first().map(rust_type_for)
+    //   Int(_) â†’ parse_simple_type("i64")
+    //   Bool(_) â†’ parse_simple_type("bool")
+    //   String(_) â†’ parse_simple_type("String")
+    //   Unit â†’ parse_simple_type("()")
+    //   Array(els) â†’ { let elem = els.first().map(rust_type_for)
     //                                     .unwrap_or(parse_simple_type("()"));
     //                  parse_simple_type("Vec<" + type_to_source(elem) + ">") })
     return rust_type_for_impl(value)
 
 // =============================================================================
-// rust_expr_for — pick the Rust literal expression for a ComptimeValue
+// rust_expr_for â€” pick the Rust literal expression for a ComptimeValue
 // =============================================================================
 //
 // Returns `CodegenError` (E1304) for `Unit` (no Rust literal form). Array
@@ -147,13 +147,13 @@ func rust_type_for(value: ComptimeValue) -> SynType:
 
 func rust_expr_for(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, CodegenError>:
     // (match value:
-    //   Int(i) → Ok(SynExpr::Lit(Lit::Int(LitInt::new("{i}i64"))))
-    //   Bool(b) → Ok(SynExpr::Lit(Lit::Bool(LitBool { value: b })))
-    //   String(s) → Ok(SynExpr::Lit(Lit::Str(LitStr::new(s))))
-    //   Unit → Err(CodegenError::new(Diagnostic::error(
+    //   Int(i) â†’ Ok(SynExpr::Lit(Lit::Int(LitInt::new("{i}i64"))))
+    //   Bool(b) â†’ Ok(SynExpr::Lit(Lit::Bool(LitBool { value: b })))
+    //   String(s) â†’ Ok(SynExpr::Lit(Lit::Str(LitStr::new(s))))
+    //   Unit â†’ Err(CodegenError::new(Diagnostic::error(
     //                "cannot lower comptime `()` as a Rust const", span)
     //                .with_code(ErrorCode::ComptimeLoweringFailed)))
-    //   Array(els) → { let elems = Punctuated::new();
+    //   Array(els) â†’ { let elems = Punctuated::new();
     //                  for v in els { elems.push(rust_expr_for(v, span)?);
     //                                  elems.push_punct(Comma) }
     //                  Ok(SynExpr::Array(ExprArray { elems })) })
@@ -163,12 +163,10 @@ func rust_expr_for(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, Code
 // Implementation shims (extern bindings)
 // =============================================================================
 
-extern "Rust" {
-    fn int_to_string(n: Int) -> String
-    fn buff_span_dummy() -> BuffSpan
-    fn build_item_const(name: String, ty: SynType, expr: SynExpr) -> Item
-    fn rust_type_for_impl(value: ComptimeValue) -> SynType
-    fn rust_expr_for_impl(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, CodegenError>
-    fn facts_values_offsets(facts: ComptimeFacts) -> Vector<Int>
-    fn facts_values_get(facts: ComptimeFacts, offset: Int) -> ComptimeValue
-}
+extern "C" func int_to_string(n: Int) -> String
+extern "C" func buff_span_dummy() -> BuffSpan
+extern "C" func build_item_const(name: String, ty: SynType, expr: SynExpr) -> Item
+extern "C" func rust_type_for_impl(value: ComptimeValue) -> SynType
+extern "C" func rust_expr_for_impl(value: ComptimeValue, span: BuffSpan) -> Result<SynExpr, CodegenError>
+extern "C" func facts_values_offsets(facts: ComptimeFacts) -> Vector<Int>
+extern "C" func facts_values_get(facts: ComptimeFacts, offset: Int) -> ComptimeValue

@@ -1,6 +1,6 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/multi_crate.rs` (T18, Track C).
 //
-// T8 — Multi-crate emission mode.
+// T8 â€” Multi-crate emission mode.
 //
 // When a Buff program contains ES6-form `import { ... } from "./path.buff"`
 // declarations, emit one `.rs` file per Buff module instead of one
@@ -13,7 +13,7 @@
 //
 // Multi-crate mode activates ONLY when the root Buff program has at least
 // one `import ... from "..."` declaration. Single-file programs (no imports)
-// bypass this mode entirely — the existing `generate_rust` single-file path
+// bypass this mode entirely â€” the existing `generate_rust` single-file path
 // is used unchanged (full backwards compatibility for
 // `buff run examples/ola.buff` etc.).
 //
@@ -57,23 +57,21 @@ struct RustCodegen:
 struct SynFile:
     opaque_handle: Int
 
-extern "Rust" {
-    fn format(file: SynFile) -> String
-    fn rust_codegen_new() -> RustCodegen
-    fn rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
-    fn decl_as_import_decl(decl: Decl) -> Option<ImportDecl>
-    fn import_decl_from_path(imp: ImportDecl) -> Option<String>
-    fn import_decl_imported_names(imp: ImportDecl) -> Vector<String>
-    fn collect_rust_deps(decls: Vector<Decl>) -> BTreeSet_String
-}
+extern "C" func format(file: SynFile) -> String
+extern "C" func rust_codegen_new() -> RustCodegen
+extern "C" func rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
+extern "C" func decl_as_import_decl(decl: Decl) -> Option<ImportDecl>
+extern "C" func import_decl_from_path(imp: ImportDecl) -> Option<String>
+extern "C" func import_decl_imported_names(imp: ImportDecl) -> Vector<String>
+extern "C" func collect_rust_deps(decls: Vector<Decl>) -> BTreeSetString
 
 // =============================================================================
-// ParsedModule — one parsed Buff module
+// ParsedModule â€” one parsed Buff module
 // =============================================================================
 //
 // Built by the pipeline (which has filesystem access) by reading + lexing +
 // parsing each transitively-referenced `.buff` file. The codegen-rust crate
-// is purely AST→Rust, so it consumes these as already-parsed inputs.
+// is purely ASTâ†’Rust, so it consumes these as already-parsed inputs.
 
 struct ParsedModule:
     // Sanitised Rust ident for this module (e.g. `greet` for `./greet.buff`).
@@ -92,7 +90,7 @@ func parsed_module_new(ident: String, from_path: String, decls: Vector<Decl>) ->
     return ParsedModule.new(ident: ident, from_path: from_path, decls: decls)
 
 // =============================================================================
-// MultiCrateOutput — output of multi-crate emission (T8)
+// MultiCrateOutput â€” output of multi-crate emission (T8)
 // =============================================================================
 //
 // Returned by `generate_multi_crate`. The pipeline writes `root_source` to
@@ -104,16 +102,16 @@ struct MultiCrateOutput:
     // module + `use X::...;` imports + the non-import decls of the root Buff
     // module lowered as usual.
     root_source: String
-    // Map from module ident → generated Rust source for that module. Emitted
+    // Map from module ident â†’ generated Rust source for that module. Emitted
     // in `BTreeMap` iteration order (deterministic across runs, independent
-    // of hash seed — the T29 flaky-test lesson).
-    modules: BTreeMap_String_String
+    // of hash seed â€” the T29 flaky-test lesson).
+    modules: BTreeMapStringString
     // Aggregated extern-crate dependency set across root + all modules. The
     // pipeline consults this when wiring up the (future) Cargo project or
     // `buff.toml [rust-deps]` block.
-    extern_crates: BTreeSet_String
+    extern_crates: BTreeSetString
 
-func multi_crate_output_new(root_source: String, modules: BTreeMap_String_String, extern_crates: BTreeSet_String) -> MultiCrateOutput:
+func multi_crate_output_new(root_source: String, modules: BTreeMapStringString, extern_crates: BTreeSetString) -> MultiCrateOutput:
     return MultiCrateOutput.new(
         root_source: root_source,
         modules: modules,
@@ -121,16 +119,16 @@ func multi_crate_output_new(root_source: String, modules: BTreeMap_String_String
     )
 
 // =============================================================================
-// uses_multi_crate — predicate: does this decls list use ES6 import-from?
+// uses_multi_crate â€” predicate: does this decls list use ES6 import-from?
 // =============================================================================
 //
 // Returns `true` if any top-level decl is an `Decl::ImportDecl` with a
 // populated `from_path` field. The legacy `import a.b.c as alias` form (no
-// `from_path`) is NOT multi-crate — it has no file to link, so the predicate
+// `from_path`) is NOT multi-crate â€” it has no file to link, so the predicate
 // returns `false` and single-file codegen handles it.
 //
 // The pipeline consults this predicate before deciding which codegen path to
-// take: `true` → `generate_multi_crate`, `false` → existing `generate_rust`.
+// take: `true` â†’ `generate_multi_crate`, `false` â†’ existing `generate_rust`.
 
 func uses_multi_crate(decls: Vector<Decl>) -> Bool:
     let mut i = 0
@@ -145,7 +143,7 @@ func uses_multi_crate(decls: Vector<Decl>) -> Bool:
     return false
 
 // =============================================================================
-// module_ident_from_path — sanitise a `from "..."` path into a Rust mod ident
+// module_ident_from_path â€” sanitise a `from "..."` path into a Rust mod ident
 // =============================================================================
 //
 // Rules:
@@ -165,7 +163,7 @@ func module_ident_from_path(from_path: String) -> String:
     return module_ident_from_path_impl(from_path)
 
 // =============================================================================
-// generate_module_source — emit one module's Rust source
+// generate_module_source â€” emit one module's Rust source
 // =============================================================================
 //
 // Filter out `import` decls (they become `mod X;` + `use X::...;` at the
@@ -181,10 +179,10 @@ func generate_module_source(decls: Vector<Decl>) -> Result<String, CodegenError>
             return Result.Err(e)
 
 // =============================================================================
-// generate_multi_crate — public entry point: emit root + modules
+// generate_multi_crate â€” public entry point: emit root + modules
 // =============================================================================
 //
-// Walks the parsed modules (BTreeMap iteration order — deterministic). For
+// Walks the parsed modules (BTreeMap iteration order â€” deterministic). For
 // each module, calls `generate_module_source` and accumulates into the
 // `modules` map. The root file's source is assembled by:
 //
@@ -215,18 +213,16 @@ func filter_out_imports(decls: Vector<Decl>) -> Vector<Decl>:
         i = i + 1
     return out
 
-extern "Rust" {
-    fn unwrap_import_decl(opt: Option<ImportDecl>) -> ImportDecl
-    fn module_ident_from_path_impl(from_path: String) -> String
-    fn generate_multi_crate_impl(root_decls: Vector<Decl>, modules: Vector<ParsedModule>) -> Result<MultiCrateOutput, CodegenError>
-}
+extern "C" func unwrap_import_decl(opt: Option<ImportDecl>) -> ImportDecl
+extern "C" func module_ident_from_path_impl(from_path: String) -> String
+extern "C" func generate_multi_crate_impl(root_decls: Vector<Decl>, modules: Vector<ParsedModule>) -> Result<MultiCrateOutput, CodegenError>
 
 // =============================================================================
 // Opaque handles for the BTreeMap / BTreeSet types
 // =============================================================================
 
-struct BTreeMap_String_String:
+struct BTreeMapStringString:
     opaque_handle: Int
 
-struct BTreeSet_String:
+struct BTreeSetString:
     opaque_handle: Int

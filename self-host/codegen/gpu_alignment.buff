@@ -6,13 +6,13 @@
 // `par_reduce`) the runtime may dispatch the closure to a GPU compute shader
 // (T40 decides; T45 executes). For the GPU upload to be sound, the elements
 // flowing through the parallel pipeline MUST have a well-defined memory
-// layout — Rust's default `#[repr(Rust)]` is unspecified, so a `Vec<Point>`
+// layout â€” Rust's default `#[repr(Rust)]` is unspecified, so a `Vec<Point>`
 // uploaded as a raw byte buffer to a `wgpu` storage buffer would expose
 // whatever padding / field-reordering rustc happened to pick. That is
 // undefined behaviour at the GPU side.
 //
 // The fix is mechanical: any user struct that participates in a parallel
-// combinator pipeline is emitted with `#[repr(C)]` (stable C layout — no
+// combinator pipeline is emitted with `#[repr(C)]` (stable C layout â€” no
 // hidden padding between declared fields, fields in declaration order) plus
 // `#[derive(Copy, bytemuck::Pod, bytemuck::Zeroable)]` so the generated Rust
 // can `bytemuck::cast_slice::<Point, u8>(&vec)` for the GPU upload + readback.
@@ -23,18 +23,18 @@
 // iff at least ONE of the following holds at any parallel combinator call
 // site in the program:
 //
-// 1. **Closure parameter annotation** — the closure passed to the `par_*`
+// 1. **Closure parameter annotation** â€” the closure passed to the `par_*`
 //    combinator has a parameter whose `TypeRef` names the struct. This is
 //    the "struct flows in" direction: `v.par_map({ p: Point => p.x })`.
 //
-// 2. **Struct construction inside the parallel closure body** — the closure
+// 2. **Struct construction inside the parallel closure body** â€” the closure
 //    body contains a `Expr::StructInit { type_name: <Name> }` expression.
 //    This is the "struct flows out" direction:
 //    `v.par_map({ x => Point { x: x, y: 0.0 } })`.
 //
 // Both signals are structural (no type-inference needed) and deterministic
-// (BTreeSet, source-order walk). A struct that fails BOTH checks — including
-// structs used only inside sequential `.map` or `.filter` calls — is left
+// (BTreeSet, source-order walk). A struct that fails BOTH checks â€” including
+// structs used only inside sequential `.map` or `.filter` calls â€” is left
 // untouched: its codegen is byte-identical to the pre-T50 output.
 //
 // # Why not the receiver type?
@@ -42,19 +42,19 @@
 // The receiver `v.par_map(...)` carries no type annotation in the AST.
 // Resolving "what is the element type of `v`" requires the full type-
 // inference fixpoint (T12's `TypeInferencer`) plus cross-statement
-// propagation — far beyond the scope of a codegen-time pre-pass. Signals
+// propagation â€” far beyond the scope of a codegen-time pre-pass. Signals
 // (1) and (2) above cover the same intent without the inference cost.
 //
 // The Rust reference is 643 LOC. The Buff port mirrors the public API
 // surface (gpu_bound_structs + is_parallel_combinator).
 
 // =============================================================================
-// GPU_DISPATCH_COMBINATORS — the parallel-combinator name list
+// GPU_DISPATCH_COMBINATORS â€” the parallel-combinator name list
 // =============================================================================
 //
 // Re-exported here so this module is the single source of truth for "is this
 // method a GPU-dispatch trigger?". Mirrors `race_analysis::PARALLEL_COMBINATORS`
-// (T41) — duplicated here rather than re-imported so the GPU-alignment module
+// (T41) â€” duplicated here rather than re-imported so the GPU-alignment module
 // has no upstream dependency on the race detector (the two analyses are
 // conceptually independent: race detection rejects unsafe closures;
 // gpu-alignment decorates structs. Decoupling them keeps each analysis
@@ -71,10 +71,10 @@ func gpu_dispatch_combinators() -> Vector<String>:
     return out
 
 // =============================================================================
-// is_parallel_combinator — predicate form
+// is_parallel_combinator â€” predicate form
 // =============================================================================
 //
-// Predicate form of `GPU_DISPATCH_COMBINATORS` — is `name` one of the
+// Predicate form of `GPU_DISPATCH_COMBINATORS` â€” is `name` one of the
 // parallel combinators whose closure may be GPU-dispatched?
 //
 // Public so tests can verify the predicate without hard-coding the list.
@@ -107,22 +107,20 @@ struct Stmt:
 struct Expr:
     opaque_handle: Int
 
-struct BTreeSet_String:
+struct BTreeSetString:
     opaque_handle: Int
 
-extern "Rust" {
-    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
-    fn decl_as_struct_decl(decl: Decl) -> Option<StructDecl>
-    fn func_decl_body(f: FuncDecl) -> Block
-    fn struct_decl_name(s: StructDecl) -> String
-    fn string_vector_contains(vec: Vector<String>, s: String) -> Bool
-    fn btreetap_string_new() -> BTreeSet_String
-    fn btreetap_string_insert(set: BTreeSet_String, s: String)
-    fn btreetap_string_contains(set: BTreeSet_String, s: String) -> Bool
-}
+extern "C" func decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+extern "C" func decl_as_struct_decl(decl: Decl) -> Option<StructDecl>
+extern "C" func func_decl_body(f: FuncDecl) -> Block
+extern "C" func struct_decl_name(s: StructDecl) -> String
+extern "C" func string_vector_contains(vec: Vector<String>, s: String) -> Bool
+extern "C" func btreetap_string_new() -> BTreeSetString
+extern "C" func btreetap_string_insert(set: BTreeSetString, s: String)
+extern "C" func btreetap_string_contains(set: BTreeSetString, s: String) -> Bool
 
 // =============================================================================
-// gpu_bound_structs — public entry point
+// gpu_bound_structs â€” public entry point
 // =============================================================================
 //
 // Detect the set of user-defined struct names that flow through a parallel
@@ -141,9 +139,9 @@ extern "Rust" {
 // walk's source-order discipline guarantees the same input program always
 // yields the same set.
 
-func gpu_bound_structs(decls: Vector<Decl>) -> BTreeSet_String:
+func gpu_bound_structs(decls: Vector<Decl>) -> BTreeSetString:
     // Build the universe of user-defined struct names. We only ever mark
-    // USER structs as gpu-bound — builtin types (Int, Float, etc.) have
+    // USER structs as gpu-bound â€” builtin types (Int, Float, etc.) have
     // their own fixed lowering and don't take user attributes.
     let user_structs = btreetap_string_new()
     let mut i = 0
@@ -167,27 +165,27 @@ func gpu_bound_structs(decls: Vector<Decl>) -> BTreeSet_String:
     return found
 
 // =============================================================================
-// analyze_func — walk one function body collecting GPU-bound struct names
+// analyze_func â€” walk one function body collecting GPU-bound struct names
 // =============================================================================
 //
 // Mirrors the walker structure of `race_analysis::analyze_func` but collects
 // rather than rejects.
 
-func analyze_func(func: FuncDecl, user_structs: BTreeSet_String, found: BTreeSet_String):
-    walk_block(func_decl_body(func), false, user_structs, found)
+func analyze_func(fd: FuncDecl, user_structs: BTreeSetString, found: BTreeSetString):
+    walk_block(func_decl_body(fd), false, user_structs, found)
 
 // =============================================================================
-// walk_block — walk a Block
+// walk_block â€” walk a Block
 // =============================================================================
 //
 // `in_parallel_closure: true` iff this block is the body of a closure that
 // was passed as an argument to a parallel combinator. When `true`,
 // `Expr::StructInit` nodes encountered here trigger Signal 2 (struct
 // construction inside a parallel closure body). When `false`, StructInit
-// nodes do NOT trigger — a top-level `Point { x: 0.0 }` outside any parallel
+// nodes do NOT trigger â€” a top-level `Point { x: 0.0 }` outside any parallel
 // closure is not a GPU-bound signal.
 
-func walk_block(block: Block, in_parallel_closure: Bool, user_structs: BTreeSet_String, found: BTreeSet_String):
+func walk_block(block: Block, in_parallel_closure: Bool, user_structs: BTreeSetString, found: BTreeSetString):
     let stmts = block_stmts(block)
     let mut i = 0
     for i < stmts.len():
@@ -195,7 +193,7 @@ func walk_block(block: Block, in_parallel_closure: Bool, user_structs: BTreeSet_
         i = i + 1
 
 // =============================================================================
-// walk_stmt / walk_expr — recursive AST walker
+// walk_stmt / walk_expr â€” recursive AST walker
 // =============================================================================
 //
 // The full recursive walk mirrors the Rust reference 1:1. The Buff port
@@ -203,30 +201,30 @@ func walk_block(block: Block, in_parallel_closure: Bool, user_structs: BTreeSet_
 // recursion lives in a single quote!-free, snapshot-stable place. The shape
 // is preserved: every arm is documented, the order matches the Rust source.
 
-func walk_stmt(stmt: Stmt, in_parallel_closure: Bool, user_structs: BTreeSet_String, found: BTreeSet_String):
+func walk_stmt(stmt: Stmt, in_parallel_closure: Bool, user_structs: BTreeSetString, found: BTreeSetString):
     // (match stmt:
-    //   LetDecl { value, .. } → walk_expr(value, ...)
-    //   LetPattern { value, .. } → walk_expr(value, ...)
-    //   Assignment { target, value, .. } → { walk_expr(target, ...);
+    //   LetDecl { value, .. } â†’ walk_expr(value, ...)
+    //   LetPattern { value, .. } â†’ walk_expr(value, ...)
+    //   Assignment { target, value, .. } â†’ { walk_expr(target, ...);
     //                                        walk_expr(value, ...) }
-    //   ExprStmt(e, _) → walk_expr(e, ...)
-    //   Return(e, _) | Break(e, _) | Continue(e, _) → walk_opt_expr(e, ...)
-    //   If { cond, then_body, else_body, .. } → { walk_expr(cond, ...);
+    //   ExprStmt(e, _) â†’ walk_expr(e, ...)
+    //   Return(e, _) | Break(e, _) | Continue(e, _) â†’ walk_opt_expr(e, ...)
+    //   If { cond, then_body, else_body, .. } â†’ { walk_expr(cond, ...);
     //     walk_block(then_body, in_parallel_closure, ...);
     //     walk_opt_block(else_body, in_parallel_closure, ...) }
-    //   For { iter, body, .. } → { walk_expr(iter, ...);
+    //   For { iter, body, .. } â†’ { walk_expr(iter, ...);
     //                              walk_block(body, in_parallel_closure, ...) }
-    //   While { cond, body, .. } → { walk_expr(cond, ...);
+    //   While { cond, body, .. } â†’ { walk_expr(cond, ...);
     //                                walk_block(body, in_parallel_closure, ...) }
-    //   Match { scrut, arms, .. } → { walk_expr(scrut, ...);
+    //   Match { scrut, arms, .. } â†’ { walk_expr(scrut, ...);
     //     for arm in arms { walk_expr(arm.body, ...);
     //                       walk_opt_expr(arm.guard, ...) } }
-    //   BlockInner(b) → walk_block(b, in_parallel_closure, ...)
-    //   ComptimeBlock(b, _) → walk_block(b, false, ...)   // comptime is CPU-only
+    //   BlockInner(b) â†’ walk_block(b, in_parallel_closure, ...)
+    //   ComptimeBlock(b, _) â†’ walk_block(b, false, ...)   // comptime is CPU-only
     // )
     walk_stmt_impl(stmt, in_parallel_closure, user_structs, found)
 
-func walk_expr(expr: Expr, in_parallel_closure: Bool, user_structs: BTreeSet_String, found: BTreeSet_String):
+func walk_expr(expr: Expr, in_parallel_closure: Bool, user_structs: BTreeSetString, found: BTreeSetString):
     // (Signal 1: when in_parallel_closure && this is a Lambda with a typed
     //  param whose TypeRef names a user struct, mark the struct.
     //  Signal 2: when in_parallel_closure && this is StructInit whose
@@ -243,14 +241,12 @@ func walk_expr(expr: Expr, in_parallel_closure: Bool, user_structs: BTreeSet_Str
 // =============================================================================
 //
 // The actual recursion is delegated to extern "Rust" bindings. The Buff port
-// preserves the algorithm's shape (Block → Stmt → Expr dispatch in source
+// preserves the algorithm's shape (Block â†’ Stmt â†’ Expr dispatch in source
 // order); the Rust reference is the source of truth for the per-arm
 // construction.
 
-extern "Rust" {
-    fn unwrap_struct_decl(opt: Option<StructDecl>) -> StructDecl
-    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
-    fn block_stmts(b: Block) -> Vector<Stmt>
-    fn walk_stmt_impl(stmt: Stmt, in_parallel_closure: Bool, user_structs: BTreeSet_String, found: BTreeSet_String)
-    fn walk_expr_impl(expr: Expr, in_parallel_closure: Bool, user_structs: BTreeSet_String, found: BTreeSet_String)
-}
+extern "C" func unwrap_struct_decl(opt: Option<StructDecl>) -> StructDecl
+extern "C" func unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+extern "C" func block_stmts(b: Block) -> Vector<Stmt>
+extern "C" func walk_stmt_impl(stmt: Stmt, in_parallel_closure: Bool, user_structs: BTreeSetString, found: BTreeSetString)
+extern "C" func walk_expr_impl(expr: Expr, in_parallel_closure: Bool, user_structs: BTreeSetString, found: BTreeSetString)

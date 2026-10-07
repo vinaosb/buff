@@ -1,6 +1,6 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/rust_codegen/method_call_lowering.rs` (T18, Track C).
 //
-// T105a — method/builtin-call lowering: one_arg_method..matrix_new
+// T105a â€” method/builtin-call lowering: one_arg_method..matrix_new
 // (mechanically extracted from rust_codegen.rs).
 //
 // Verbatim move of `impl RustCodegen` methods into this child module so the
@@ -38,35 +38,33 @@ struct CodegenError:
 struct ConvKind:
     opaque_handle: Int
 
-extern "Rust" {
-    fn codegen_lower_expr(codegen: RustCodegen, e: Expr) -> Result<SynExpr, CodegenError>
-    fn codegen_lower_one_arg(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn codegen_infer_expr(codegen: RustCodegen, e: Expr) -> Type
-    fn type_is_float_like(t: Type) -> Bool
-    fn type_is_string(t: Type) -> Bool
-    fn type_is_unknown(t: Type) -> Bool
-    fn wrap_in_parens(e: SynExpr) -> SynExpr
-    fn cast_to(e: SynExpr, target: String) -> SynExpr
-    fn method_call_no_args(recv: SynExpr, method: String) -> SynExpr
-    fn method_call_one_arg(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
-    fn method_call_n_args(recv: SynExpr, method: String, args: Vector<SynExpr>) -> SynExpr
-    fn make_int_lit_expr(n: Int) -> SynExpr
-    fn make_binary_expr(op: BinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr
-    fn parse_with_default(arg: SynExpr, target: String, kind: ConvKind) -> SynExpr
-    fn bin_op_ne() -> BinOp
-    fn unsupported(codegen: RustCodegen, msg: String) -> CodegenError
-    fn conv_kind_numeric() -> ConvKind
-    fn conv_kind_bool() -> ConvKind
-}
+extern "C" func codegen_lower_expr(codegen: RustCodegen, e: Expr) -> Result<SynExpr, CodegenError>
+extern "C" func codegen_lower_one_arg(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func codegen_infer_expr(codegen: RustCodegen, e: Expr) -> Type
+extern "C" func type_is_float_like(t: Type) -> Bool
+extern "C" func type_is_string(t: Type) -> Bool
+extern "C" func type_is_unknown(t: Type) -> Bool
+extern "C" func wrap_in_parens(e: SynExpr) -> SynExpr
+extern "C" func cast_to(e: SynExpr, target: String) -> SynExpr
+extern "C" func method_call_no_args(recv: SynExpr, method: String) -> SynExpr
+extern "C" func method_call_one_arg(recv: SynExpr, method: String, arg: SynExpr) -> SynExpr
+extern "C" func method_call_n_args(recv: SynExpr, method: String, args: Vector<SynExpr>) -> SynExpr
+extern "C" func make_int_lit_expr(n: Int) -> SynExpr
+extern "C" func make_binary_expr(op: BinOp, lhs: SynExpr, rhs: SynExpr) -> SynExpr
+extern "C" func parse_with_default(arg: SynExpr, target: String, kind: ConvKind) -> SynExpr
+extern "C" func bin_op_ne() -> BinOp
+extern "C" func unsupported(codegen: RustCodegen, msg: String) -> CodegenError
+extern "C" func conv_kind_numeric() -> ConvKind
+extern "C" func conv_kind_bool() -> ConvKind
 
 struct BinOp:
     opaque_handle: Int
 
 // =============================================================================
-// lower_one_arg_method — `abs(x)` → `(x).abs()` (or `x.abs()` no-parens)
+// lower_one_arg_method â€” `abs(x)` â†’ `(x).abs()` (or `x.abs()` no-parens)
 // =============================================================================
 //
-// Lower `abs(x)` → `(x).abs()`. Wrapping the receiver in parens ensures
+// Lower `abs(x)` â†’ `(x).abs()`. Wrapping the receiver in parens ensures
 // integer literals like `5` lower to `(5).abs()` rather than the ambiguous
 // `5.abs()` (which Rust parses as a field access on a float literal `5.`).
 
@@ -82,7 +80,7 @@ func lower_one_arg_method(codegen: RustCodegen, args: Vector<Expr>, method: Stri
             return Result.Err(e)
 
 // =============================================================================
-// lower_min_max — `min(a, b)` / `max(a, b)` → `(a).<method>(b)`
+// lower_min_max â€” `min(a, b)` / `max(a, b)` â†’ `(a).<method>(b)`
 // =============================================================================
 
 func lower_min_max(codegen: RustCodegen, args: Vector<Expr>, method: String) -> Result<SynExpr, CodegenError>:
@@ -100,7 +98,7 @@ func lower_min_max(codegen: RustCodegen, args: Vector<Expr>, method: String) -> 
             return Result.Err(e)
 
 // =============================================================================
-// lower_float_unary — `sqrt(x)` → `((x) as f64).<method>()`
+// lower_float_unary â€” `sqrt(x)` â†’ `((x) as f64).<method>()`
 // =============================================================================
 //
 // Lower a float-returning unary math fn (`sqrt`/`floor`/`ceil`/`round`) to
@@ -116,10 +114,10 @@ func lower_float_unary(codegen: RustCodegen, args: Vector<Expr>, method: String)
             return Result.Err(e)
 
 // =============================================================================
-// lower_pow — `pow(base, exp)` → `.powf` for floats, `.pow` for ints
+// lower_pow â€” `pow(base, exp)` â†’ `.powf` for floats, `.pow` for ints
 // =============================================================================
 //
-// Lower `pow(base, exp)` — picks `.powf` for float bases and `.pow` for
+// Lower `pow(base, exp)` â€” picks `.powf` for float bases and `.pow` for
 // integer bases (Rust's `i64::pow` takes `u32`, hence the `as u32` cast).
 // Inference errors fall back to the integer form (which works for the common
 // case).
@@ -145,7 +143,7 @@ func lower_pow(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr, Code
             return Result.Err(e)
 
 // =============================================================================
-// lower_convert — `Int(x)` / `Float(x)` / `Bool(x)` type conversion
+// lower_convert â€” `Int(x)` / `Float(x)` / `Bool(x)` type conversion
 // =============================================================================
 //
 // Lower a type conversion (`Int(x)` / `Float(x)` / `Bool(x)`).
@@ -160,19 +158,19 @@ func lower_convert(codegen: RustCodegen, args: Vector<Expr>, target: String, kin
             // Infer the arg's type to dispatch on the source category.
             let arg_ty = codegen_infer_expr(codegen, args.get(0))
             if type_is_string(arg_ty):
-                // String → parse
+                // String â†’ parse
                 return Result.Ok(parse_with_default(arg, target, kind))
-            // Non-string → numeric coercion (`as T`) for Int/Float, or `!= 0` for Bool.
+            // Non-string â†’ numeric coercion (`as T`) for Int/Float, or `!= 0` for Bool.
             if conv_kind_eq(kind, conv_kind_numeric()):
                 return Result.Ok(cast_to(arg, target))
-            // ConvKind::Bool path: `(x) != 0` — wrap arg in parens so compound exprs bind right.
+            // ConvKind::Bool path: `(x) != 0` â€” wrap arg in parens so compound exprs bind right.
             let zero = make_int_lit_expr(0)
             return Result.Ok(make_binary_expr(bin_op_ne(), wrap_in_parens(arg), zero))
         Result.Err(e):
             return Result.Err(e)
 
 // =============================================================================
-// lower_to_string — `String(x)` → `(x).to_string()`
+// lower_to_string â€” `String(x)` â†’ `(x).to_string()`
 // =============================================================================
 //
 // Works for any Rust `Display` type.
@@ -189,55 +187,55 @@ func lower_to_string(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr
 // =============================================================================
 //
 // Each family of methods is a dispatch table keyed on the method name. The
-// Buff port preserves the per-method name → lowering rule mapping; the
+// Buff port preserves the per-method name â†’ lowering rule mapping; the
 // actual lowering is delegated to the Rust reference (the dispatch table is
-// long — 100+ arms for String alone — and the Buff port summarises the shape
+// long â€” 100+ arms for String alone â€” and the Buff port summarises the shape
 // rather than reproducing every arm verbatim).
 
 func lower_vector_method(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
     // (match method:
-    //   "push" → method_call_one_arg(recv, "push", lower(args[0]))
-    //   "pop" → method_call_no_args(recv, "pop") (returns Option<T>)
-    //   "len" → method_call_no_args(recv, "len")
-    //   "is_empty" → method_call_no_args(recv, "is_empty")
-    //   "map" → method_call_one_arg(recv, "map", lower(args[0]))   // lambda arg
-    //   "filter" → method_call_one_arg(recv, "filter", lower(args[0]))
-    //   "reduce" → ... (par_reduce vs reduce dispatch)
+    //   "push" â†’ method_call_one_arg(recv, "push", lower(args[0]))
+    //   "pop" â†’ method_call_no_args(recv, "pop") (returns Option<T>)
+    //   "len" â†’ method_call_no_args(recv, "len")
+    //   "is_empty" â†’ method_call_no_args(recv, "is_empty")
+    //   "map" â†’ method_call_one_arg(recv, "map", lower(args[0]))   // lambda arg
+    //   "filter" â†’ method_call_one_arg(recv, "filter", lower(args[0]))
+    //   "reduce" â†’ ... (par_reduce vs reduce dispatch)
     //   ...)
     return lower_vector_method_impl(codegen, recv, method, args)
 
 func lower_map_method(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
     // (match method:
-    //   "set" / "insert" → method_call_n_args(recv, "insert", lowered_args)
-    //   "get" → method_call_one_arg(recv, "get", lowered_arg) (returns Option<V>)
-    //   "remove" → method_call_one_arg(recv, "remove", lowered_arg)
-    //   "len" → method_call_no_args(recv, "len")
-    //   "keys" → method_call_no_args(recv, "keys")
+    //   "set" / "insert" â†’ method_call_n_args(recv, "insert", lowered_args)
+    //   "get" â†’ method_call_one_arg(recv, "get", lowered_arg) (returns Option<V>)
+    //   "remove" â†’ method_call_one_arg(recv, "remove", lowered_arg)
+    //   "len" â†’ method_call_no_args(recv, "len")
+    //   "keys" â†’ method_call_no_args(recv, "keys")
     //   ...)
     return lower_map_method_impl(codegen, recv, method, args)
 
 func lower_string_method(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
     // (match method:
-    //   "chars" → method_call_no_args(recv, "chars")
-    //   "bytes" → method_call_no_args(recv, "bytes")
-    //   "len" → method_call_no_args(recv, "len")
-    //   "to_uppercase" → method_call_no_args(recv, "to_uppercase")
-    //   "to_lowercase" → method_call_no_args(recv, "to_lowercase")
-    //   "trim" → method_call_no_args(recv, "trim")
-    //   "contains" → method_call_one_arg(recv, "contains", lowered_arg)
-    //   "starts_with" / "ends_with" → ...
-    //   "split" → method_call_one_arg(recv, "split", lowered_arg)
-    //   "replace" → method_call_n_args(recv, "replace", [from, to])
-    //   "parse" → turbofish + unwrap_or
+    //   "chars" â†’ method_call_no_args(recv, "chars")
+    //   "bytes" â†’ method_call_no_args(recv, "bytes")
+    //   "len" â†’ method_call_no_args(recv, "len")
+    //   "to_uppercase" â†’ method_call_no_args(recv, "to_uppercase")
+    //   "to_lowercase" â†’ method_call_no_args(recv, "to_lowercase")
+    //   "trim" â†’ method_call_no_args(recv, "trim")
+    //   "contains" â†’ method_call_one_arg(recv, "contains", lowered_arg)
+    //   "starts_with" / "ends_with" â†’ ...
+    //   "split" â†’ method_call_one_arg(recv, "split", lowered_arg)
+    //   "replace" â†’ method_call_n_args(recv, "replace", [from, to])
+    //   "parse" â†’ turbofish + unwrap_or
     //   ...)
     return lower_string_method_impl(codegen, recv, method, args)
 
 func lower_option_method(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
     // (match method:
-    //   "unwrap" → method_call_no_args(recv, "unwrap")
-    //   "unwrap_or" → method_call_one_arg(recv, "unwrap_or", lowered_default)
-    //   "is_some" / "is_none" → method_call_no_args
-    //   "map" / "and_then" / "filter" / "or" / "or_else" → lambda arg
+    //   "unwrap" â†’ method_call_no_args(recv, "unwrap")
+    //   "unwrap_or" â†’ method_call_one_arg(recv, "unwrap_or", lowered_default)
+    //   "is_some" / "is_none" â†’ method_call_no_args
+    //   "map" / "and_then" / "filter" / "or" / "or_else" â†’ lambda arg
     //   ...)
     return lower_option_method_impl(codegen, recv, method, args)
 
@@ -270,19 +268,19 @@ func lower_decimal_method(codegen: RustCodegen, recv: SynExpr, method: String, a
     return lower_decimal_method_impl(codegen, recv, method, args)
 
 // =============================================================================
-// lower_matrix_methods — T24 Matrix<T> dispatch
+// lower_matrix_methods â€” T24 Matrix<T> dispatch
 // =============================================================================
 //
 // Lower `matrix.rows()` / `matrix.cols()` / `matrix.get(i, j)` /
 // `matrix.set(i, j, v)` / `matrix.transpose()` / etc. to the corresponding
 // Matrix-struct method calls (the Matrix struct is emitted on-demand by the
-// codegen — see lower_matrix_decl in decl_lowering.buff).
+// codegen â€” see lower_matrix_decl in decl_lowering.buff).
 
 func lower_matrix_method(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>:
     return lower_matrix_method_impl(codegen, recv, method, args)
 
 // =============================================================================
-// lower_buf_matrix_new — T24 Matrix.new(...) constructor
+// lower_buf_matrix_new â€” T24 Matrix.new(...) constructor
 // =============================================================================
 //
 // Lower `Matrix.new(rows, cols, data)` to the on-demand-emitted Matrix
@@ -299,16 +297,14 @@ func lower_buf_matrix_new(codegen: RustCodegen, args: Vector<Expr>) -> Result<Sy
 func conv_kind_eq(a: ConvKind, b: ConvKind) -> Bool:
     return conv_kind_eq_impl(a, b)
 
-extern "Rust" {
-    fn int_to_string(n: Int) -> String
-    fn conv_kind_eq_impl(a: ConvKind, b: ConvKind) -> Bool
-    fn lower_vector_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_map_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_string_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_option_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_result_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_iter_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_decimal_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_matrix_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-    fn lower_buf_matrix_new_impl(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
-}
+extern "C" func int_to_string(n: Int) -> String
+extern "C" func conv_kind_eq_impl(a: ConvKind, b: ConvKind) -> Bool
+extern "C" func lower_vector_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_map_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_string_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_option_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_result_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_iter_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_decimal_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_matrix_method_impl(codegen: RustCodegen, recv: SynExpr, method: String, args: Vector<Expr>) -> Result<SynExpr, CodegenError>
+extern "C" func lower_buf_matrix_new_impl(codegen: RustCodegen, args: Vector<Expr>) -> Result<SynExpr, CodegenError>

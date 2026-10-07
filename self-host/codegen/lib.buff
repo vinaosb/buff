@@ -1,19 +1,19 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/lib.rs` (T18, Track C).
 //
-// Buff Rust codegen crate — converts Buff AST to Rust source via
+// Buff Rust codegen crate â€” converts Buff AST to Rust source via
 // syn/quote/prettyplease.
 //
 // # Pipeline
 //
 //   &[buff_lang_ast::Decl]
-//        │
-//        ▼  RustCodegen::generate
+//        â”‚
+//        â–¼  RustCodegen::generate
 //   syn::File
-//        │
-//        ▼  format::format  (prettyplease::unparse)
+//        â”‚
+//        â–¼  format::format  (prettyplease::unparse)
 //   String  (valid Rust source)
 //
-// Every Rust construct is built through `syn` types — we never hand-format
+// Every Rust construct is built through `syn` types â€” we never hand-format
 // Rust strings. The single string producer is `prettyplease`, whose output
 // is equivalent to a `rustfmt` pass.
 //
@@ -47,7 +47,7 @@
 // ConvKind + parse_with_default / typeref_to_type.
 
 // --- comptime.buff ---
-// T53 comptime-facts → Rust `const` items lowering. lower_comptime_facts.
+// T53 comptime-facts â†’ Rust `const` items lowering. lower_comptime_facts.
 
 // --- derive_attrs.buff ---
 // T105a derive/repr attribute builders. derive_and_repr_attrs /
@@ -61,7 +61,7 @@
 // lower_math_unary / lower_math_binary / splice_receiver_into_call.
 
 // --- atomic_analysis.buff ---
-// T42 atomic promotion (let mut → AtomicI64 fetch_add). analyze /
+// T42 atomic promotion (let mut â†’ AtomicI64 fetch_add). analyze /
 // AtomicPromotions / AtomicSet.
 
 // --- race_analysis.buff ---
@@ -92,30 +92,30 @@
 // T105a dependency detection (collect_rust_deps / scan_extern_fns).
 
 // --- extern_crate_detection.buff ---
-// T105a extern-crate name detection (DateTime → chrono, Regex → regex, …).
+// T105a extern-crate name detection (DateTime â†’ chrono, Regex â†’ regex, â€¦).
 // 1696-LOC registry consulted by the main codegen loop.
 
 // --- extern_crate_detection_extra.buff ---
 // T105a extra extern-crate name detection (the long-tail prelude types).
 
 // --- type_lowering.buff ---
-// T105a Buff TypeRef → syn::Type lowering (primitives / collections /
+// T105a Buff TypeRef â†’ syn::Type lowering (primitives / collections /
 // user types / Option / Tuple / Union / Function).
 
 // --- decl_lowering.buff ---
-// T105a Buff Decl → syn::Item lowering (FuncDecl / StructDecl /
+// T105a Buff Decl â†’ syn::Item lowering (FuncDecl / StructDecl /
 // EnumDecl / TraitDecl / UseDecl / ConstDecl). The 1530-LOC visitor arm.
 
 // --- expr_lowering.buff ---
-// T105a Buff Expr → syn::Expr lowering (Literal / Ident / BinaryOp /
-// FuncCall / MethodCall / Lambda / Match / If / For / Block / …).
+// T105a Buff Expr â†’ syn::Expr lowering (Literal / Ident / BinaryOp /
+// FuncCall / MethodCall / Lambda / Match / If / For / Block / â€¦).
 
 // --- method_call_lowering.buff ---
 // T105a method-call lowering (`.chars()` / `.len()` / `.map()` / `.filter()`
-// / …). 1305-LOC dispatch table.
+// / â€¦). 1305-LOC dispatch table.
 
 // --- rust_codegen.buff ---
-// The 10,477-LOC main entry. RustCodegen visitor: ALL AST→syn lowering
+// The 10,477-LOC main entry. RustCodegen visitor: ALL ASTâ†’syn lowering
 // (prelude calls + prelude type assoc fns + the extern_crates BTreeSet +
 // lower_func / lower_stmt / lower_expr dispatch).
 
@@ -175,18 +175,16 @@ struct Item:
 struct ItemFn:
     opaque_handle: Int
 
-extern "Rust" {
-    fn format(file: SynFile) -> String
-    fn rust_codegen_new() -> RustCodegen
-    fn rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
-    fn build_source_map(decls: Vector<Decl>, rust_source: String, buff_path: Path, buff_source: String) -> SourceMap
-}
+extern "C" func format(file: SynFile) -> String
+extern "C" func rust_codegen_new() -> RustCodegen
+extern "C" func rust_codegen_generate(codegen: RustCodegen, decls: Vector<Decl>) -> Result<SynFile, CodegenError>
+extern "C" func build_source_map(decls: Vector<Decl>, rust_source: String, buff_path: Path, buff_source: String) -> SourceMap
 
 struct Path:
     opaque_handle: Int
 
 // =============================================================================
-// format_file — convenience alias for format
+// format_file â€” convenience alias for format
 // =============================================================================
 //
 // Convenience alias for `format` so external callers (tests, the CLI) can
@@ -200,7 +198,7 @@ func format_file(file: SynFile) -> String:
     return format(file)
 
 // =============================================================================
-// generate_rust — convenience: decls → formatted Rust source
+// generate_rust â€” convenience: decls â†’ formatted Rust source
 // =============================================================================
 //
 // Convenience: lower a slice of Buff declarations to formatted Rust source.
@@ -216,11 +214,11 @@ func generate_rust(decls: Vector<Decl>) -> Result<String, CodegenError>:
             return Result.Err(e)
 
 // =============================================================================
-// generate_rust_with_source_map — T24: + `.buffmap` sidecar emission
+// generate_rust_with_source_map â€” T24: + `.buffmap` sidecar emission
 // =============================================================================
 //
 // Lower a slice of Buff declarations to formatted Rust source + capture the
-// Rust-line ↔ Buff-span source map for `.buffmap` sidecar emission.
+// Rust-line â†” Buff-span source map for `.buffmap` sidecar emission.
 //
 // Equivalent to `generate_rust` followed by
 // `buff_lang_debug_info::build_source_map`. The CLI calls this when
@@ -229,12 +227,12 @@ func generate_rust(decls: Vector<Decl>) -> Result<String, CodegenError>:
 // locations.
 //
 // The source map is built from the FORMATTED Rust source (post-prettyplease)
-// so the recorded Rust line numbers match what `rustc` actually sees — and
+// so the recorded Rust line numbers match what `rustc` actually sees â€” and
 // what shows up in panic `Location` rows. The `buff_source` slice is
-// consumed for byte-offset → `(line, col)` lookup; it must be the same source
+// consumed for byte-offset â†’ `(line, col)` lookup; it must be the same source
 // that produced `decls`.
 
-func generate_rust_with_source_map(decls: Vector<Decl>, buff_path: Path, buff_source: String) -> Result<Tuple_String_SourceMap, CodegenError>:
+func generate_rust_with_source_map(decls: Vector<Decl>, buff_path: Path, buff_source: String) -> Result<TupleStringSourceMap, CodegenError>:
     match generate_rust(decls):
         Result.Ok(rust_source):
             let source_map = build_source_map(decls, rust_source, buff_path, buff_source)
@@ -242,17 +240,17 @@ func generate_rust_with_source_map(decls: Vector<Decl>, buff_path: Path, buff_so
         Result.Err(e):
             return Result.Err(e)
 
-// Result<Tuple<String, SourceMap>, CodegenError> — Buff has no `(T, T)` tuple
+// Result<Tuple<String, SourceMap>, CodegenError> â€” Buff has no `(T, T)` tuple
 // type in the surface syntax; model as a struct.
-struct Tuple_String_SourceMap:
+struct TupleStringSourceMap:
     first: String
     second: SourceMap
 
-func tuple_string_sourcemap_new(s: String, m: SourceMap) -> Tuple_String_SourceMap:
-    return Tuple_String_SourceMap.new(first: s, second: m)
+func tuple_string_sourcemap_new(s: String, m: SourceMap) -> TupleStringSourceMap:
+    return TupleStringSourceMap.new(first: s, second: m)
 
 // =============================================================================
-// generate_rust_with_features — T0-B4: `@feature(name)` gating
+// generate_rust_with_features â€” T0-B4: `@feature(name)` gating
 // =============================================================================
 //
 // Lower a slice of Buff declarations to formatted Rust source, gated by the
@@ -262,7 +260,7 @@ func tuple_string_sourcemap_new(s: String, m: SourceMap) -> Tuple_String_SourceM
 // `features`. Decls without `@feature` are always emitted. Mirrors Rust's
 // `#[cfg(feature = "...")]` + Go build tags.
 //
-// When `features` is empty, all `@feature(name)` decls are dropped — this
+// When `features` is empty, all `@feature(name)` decls are dropped â€” this
 // matches Cargo's `--no-default-features` behaviour. To get the "everything
 // on" behaviour (useful for `buff check` that just wants to type-check all
 // source), pass the full feature list.
@@ -272,7 +270,7 @@ func generate_rust_with_features(decls: Vector<Decl>, features: Vector<String>) 
     return generate_rust(filtered)
 
 // =============================================================================
-// filter_by_features — T0-B4: filter a slice by `@feature(name)` gating
+// filter_by_features â€” T0-B4: filter a slice by `@feature(name)` gating
 // =============================================================================
 //
 // Returns a new `Vec<Decl>` containing only:
@@ -299,8 +297,8 @@ func filter_by_features(decls: Vector<Decl>, features: Vector<String>) -> Vector
 // `@feature(name)` with `name` in `features`.
 func decl_feature_satisfied(decl: Decl, features: Vector<String>) -> Bool:
     // (match decl:
-    //   FuncDecl(f) → inspect f.attributes
-    //   _ → return true   // Only FuncDecls carry attributes today (T35).)
+    //   FuncDecl(f) â†’ inspect f.attributes
+    //   _ â†’ return true   // Only FuncDecls carry attributes today (T35).)
     let attrs_opt = decl_func_attributes(decl)
     if attrs_opt == Option.None:
         return true
@@ -309,7 +307,7 @@ func decl_feature_satisfied(decl: Decl, features: Vector<String>) -> Bool:
     for i < attrs.len():
         let attr = attrs.get(i)
         if attribute_name(attr) == "feature":
-            // @feature(name) — first arg is the feature name.
+            // @feature(name) â€” first arg is the feature name.
             let arg_opt = attribute_first_arg(attr)
             if arg_opt == Option.None:
                 return false
@@ -320,7 +318,7 @@ func decl_feature_satisfied(decl: Decl, features: Vector<String>) -> Bool:
     return true
 
 // =============================================================================
-// generate_test_rust — T35: test-harness Rust source for `buff test`
+// generate_test_rust â€” T35: test-harness Rust source for `buff test`
 // =============================================================================
 //
 // Generate a **test harness** Rust source for `buff test`. Produces a
@@ -332,8 +330,8 @@ func decl_feature_satisfied(decl: Decl, features: Vector<String>) -> Bool:
 // The harness is assembled by:
 //
 // 1. Running the normal codegen on ALL decls (so helper functions, structs,
-//    etc. are emitted as usual — tests can call them).
-// 2. **Removing** the user's `fn main()` (if present) — a program can only
+//    etc. are emitted as usual â€” tests can call them).
+// 2. **Removing** the user's `fn main()` (if present) â€” a program can only
 //    have one `main`, and the test harness provides its own.
 // 3. **Stripping `#[test]` attributes** from the generated items. The
 //    codegen emits `#[test]` on `@test` fns (so `buff build` produces
@@ -362,18 +360,16 @@ func generate_test_rust(decls: Vector<Decl>, test_names: Vector<String>) -> Resu
 // Implementation shims (extern bindings)
 // =============================================================================
 
-extern "Rust" {
-    fn decl_func_attributes(decl: Decl) -> Option<AttributeList>
-    fn attribute_name(attr: Attribute) -> String
-    fn attribute_first_arg(attr: Attribute) -> Option<String>
-    fn features_contains(features: Vector<String>, name: String) -> Bool
-    fn unwrap_attributes(opt: Option<AttributeList>) -> AttributeList
-    fn unwrap_string(opt: Option<String>) -> String
-    fn file_retain_excluding_main(file: SynFile) -> SynFile
-    fn file_strip_test_attrs(file: SynFile) -> SynFile
-    fn file_append_item_fn(file: SynFile, item: ItemFn) -> SynFile
-    fn build_test_runner_main(test_names: Vector<String>) -> ItemFn
-}
+extern "C" func decl_func_attributes(decl: Decl) -> Option<AttributeList>
+extern "C" func attribute_name(attr: Attribute) -> String
+extern "C" func attribute_first_arg(attr: Attribute) -> Option<String>
+extern "C" func features_contains(features: Vector<String>, name: String) -> Bool
+extern "C" func unwrap_attributes(opt: Option<AttributeList>) -> AttributeList
+extern "C" func unwrap_string(opt: Option<String>) -> String
+extern "C" func file_retain_excluding_main(file: SynFile) -> SynFile
+extern "C" func file_strip_test_attrs(file: SynFile) -> SynFile
+extern "C" func file_append_item_fn(file: SynFile, item: ItemFn) -> SynFile
+extern "C" func build_test_runner_main(test_names: Vector<String>) -> ItemFn
 
 struct AttributeList:
     opaque_handle: Int
