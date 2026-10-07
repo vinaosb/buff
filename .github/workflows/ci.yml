@@ -196,10 +196,10 @@ jobs:
           # Reject any placeholder patterns in installers/:
           #   - <FILL-ME or FILL_ME (legacy placeholders)
           #   - sha256 "" (empty hash — must be filled by release workflow)
-          #   - sha256 "FILL (any FILL-prefixed placeholder)
-          # The release workflow (release.yml job: update-sha256) fills all
-          # hashes via update-sha256.sh before publishing.
-          if grep -rnE 'sha256\s+("(FILL|<)|"")' installers/ 2>/dev/null; then
+          #   - sha256 "FILL..." EXCEPT the sanctioned FILL-BY-RELEASE-WORKFLOW
+          #     marker, which is the documented intentional pre-release state
+          #     (filled by release.yml job: update-sha256 before publishing).
+          if grep -rnP 'sha256\s+"(FILL(?!-BY-RELEASE-WORKFLOW)|<)|sha256\s+""' installers/ 2>/dev/null; then
             echo "::error::Found placeholder sha256 in installer files (must be filled by release workflow)"
             FAIL=1
           fi
