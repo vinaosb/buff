@@ -30,12 +30,10 @@ fn mock_smtp_port() -> u16 {
 
 fn run_mock_smtp(port: u16) {
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("mock smtp bind");
-    for stream in listener.incoming() {
-        if let Ok(mut s) = stream {
-            thread::spawn(move || {
-                let _ = handle_mock_smtp(&mut s);
-            });
-        }
+    for mut s in listener.incoming().flatten() {
+        thread::spawn(move || {
+            let _ = handle_mock_smtp(&mut s);
+        });
     }
 }
 
