@@ -305,6 +305,8 @@ fully interchangeable. Precedence mirrors the symbolic forms (and Python):
 
 ## Architecture
 
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full crate taxonomy, dependency rules, and API-boundary invariants.
+
 ```
 .buff source
     │
