@@ -8,7 +8,7 @@
 
 # Bug Resolution Status (Updated 2026-08-07)
 
-**10 of 14 bugs RESOLVED. 4 DEFERRED (canonical alternatives exist).**
+**10 of 14 bugs RESOLVED. 4 DEFERRED (canonical alternatives exist). 1 new issue tracked (BUG-15, windows-only, advisory).**
 
 | Bug | Status | PR | Resolution |
 |-----|--------|-----|------------|
@@ -24,8 +24,28 @@
 | BUG-10 | ✅ RESOLVED | #71 | Param type annotations made optional (inferred from context). |
 | BUG-11 | ✅ RESOLVED | #67 | Match layout form + colon-block arms + multi-statement bodies. |
 | BUG-12 | ✅ RESOLVED | #65 | Brace escape via `\{` handler in string_interp.rs. |
-| BUG-13 | ✅ RESOLVED | #69 | Multi-statement lambda bodies supported. |
+| BUG-13 | ✅ RESOLVED | #69, #74 | Multi-statement lambda bodies supported (parser + codegen tail fix). |
 | BUG-14 | ✅ RESOLVED | #66 | Bare enum variants resolved via `enum_registry` in `Expr::Ident`. |
+
+### BUG-15: windows-only stack overflow in the compiled program's panic path (OPEN)
+
+- **Severity:** LOW (advisory CI only — `test-core` windows job, `continue-on-error`)
+- **Evidence:** `error_mapping_tests::test_end_to_end_runtime_error_mapped_to_buff` fails on
+  windows-latest: the child process compiled from `func main(): print(1 / 0)` reports
+  `thread 'main' has overflowed its stack` instead of the division-by-zero panic, so the
+  `.buff`-path translation assertion fails. Confirmed PRE-EXISTING (present on the PR #65
+  CI run at the start of the v1.26 fix session, before any of its changes); previously
+  masked by the cargo-test doctest failures.
+- **Suspected root cause:** the Buff panic hook (`buff-lang-debug-info` `panic_hook.rs`) runs
+  `Backtrace::capture()` while already inside a hardware-exception (div-by-zero) panic; on
+  Windows the dbghelp symbol resolution needs more stack than remains, converting the
+  intended panic into a stack overflow. Linux/macOS have more stack headroom and pass.
+- **Repro:** `cargo test -p buff-lang-cli --test error_mapping_tests` on a Windows runner.
+- **Candidate fixes** (untested — needs a Windows environment to iterate): spawn the
+  backtrace capture on a dedicated thread with a large stack; or skip `Backtrace::capture()`
+  on `cfg(windows)` when inside the panic hook and rely on the `RUST_BACKTRACE=1` escape
+  hatch; or grow the child's main-thread stack via the PE header (`/STACK`) in
+  `compile_rust_to_exe`.
 
 ---
 
