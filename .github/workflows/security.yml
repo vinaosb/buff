@@ -26,8 +26,15 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
-        # Ignore list lives in audit.toml (single source of truth — W5/T31).
-        run: cargo audit
+        # W5/T31 finding: a root-level audit.toml is NOT auto-honored by
+        # bare `cargo audit` on CI (PR #81: RUSTSEC-2026-0258 fired as a
+        # fatal error despite being listed in audit.toml's ignore array).
+        # The CLI flag is load-bearing; audit.toml remains the documented
+        # per-ID rationale surface (enforced by the audit_toml_reasons
+        # test), but the ignore itself must ALSO be passed here until
+        # cargo-audit config discovery is solved (.cargo/audit.toml or
+        # explicit --config).
+        run: cargo audit --ignore RUSTSEC-2026-0258
         continue-on-error: false
       - name: Upload audit report
         if: always()
