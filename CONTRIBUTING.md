@@ -71,19 +71,37 @@ and the [WHERE TO LOOK table in the root AGENTS.md](./AGENTS.md).
 
 ## Development Workflow
 
-Run these commands before every commit. CI enforces all of them:
+CI gates PRs through `.github/workflows/ci.yml` (plus
+`.github/workflows/security.yml` for cargo-audit). Useful local equivalents
+before every commit:
 
 ```bash
 cargo check --workspace
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo fmt --check --all
+cargo clippy $CI_CRATES --all-targets -- -D warnings
+cargo test -p <crates you touched>
 ```
 
-The CI workflow runs clippy **with** `--all-targets`, so local and CI
-checks are identical. (An earlier version of this note said CI omitted
-`--all-targets` — that is outdated; CI line 18 of
-`.github/workflows/ci.yml` includes it.)
+### Hard gates (failures block merge)
+
+| Job | What actually runs |
+|---|---|
+| `cargo fmt` | `cargo fmt --check --all` |
+| `cargo clippy` | `cargo clippy $CI_CRATES --all-targets -- -D warnings`. `CI_CRATES` (defined in ci.yml) is an explicit allow-list: the compiler crates (including the `buff-lang-check` / `buff-lang-fmt` / `buff-lang-pipeline` extraction crates), the tooling crates, and the framework crates that are already warning-clean. Framework MVPs with pre-existing drift are excluded from the list. |
+| `cargo deny` | `cargo-deny` bans + licenses check over the workspace (enforces the "no C library" rule; documented exceptions in `deny.toml`) |
+| `buff check + run` | Builds the CLI, then runs the golden-output harness over `examples/*.buff.expected` — any stdout mismatch fails the build (`exit 1`). `buff check` failures on examples without golden files are warnings only. |
+| `Docker image build` | Builds `docker/builder.Dockerfile` via buildx |
+| `Equivalence check` | Behavioral equivalence harness (`scripts/equivalence-rust-vs-buff.sh`): self-host `.buff` ports must produce the same stdout as their Rust reference binaries |
+| `cargo audit` (security.yml) | Runs on PRs to `main` as a hard gate (`continue-on-error: false`; one advisory ignored via `--ignore`) |
+
+### Advisory jobs (do not block merge)
+
+| Job | Status |
+|---|---|
+| `cargo test (core)` | `continue-on-error: true`; 3-OS matrix over the core compiler crates |
+| `cargo test (framework)` | `continue-on-error: true`; ubuntu only, workspace minus the core crates |
+| `Installer lint` | `continue-on-error: true` on PRs; only gates on release (`v*` tags) |
+| `Self-host bootstrap` | **count-only**: runs `buff check` over the `self-host/` corpus and reports `PASS/FAIL` counts as a notice, but never fails the build. The corpus still has known failures being worked down; turning this into a gate is deferred until it reaches zero. |
 
 ### Running examples
 
@@ -230,8 +248,11 @@ to an existing task.
 - Keep PRs focused on a single concern. Split large changes into smaller,
   reviewable pieces.
 - Link related issues in the PR description.
-- All CI gates must pass: `cargo fmt --check`, `cargo clippy --workspace -- -D
-  warnings`, `cargo test --workspace` on all three OSes.
+- All CI hard gates must pass: `cargo fmt --check --all`,
+  `cargo clippy $CI_CRATES --all-targets -- -D warnings`, `cargo deny`,
+  the golden-output harness, the Docker image build, the equivalence
+  check, and `cargo audit` (see "Development Workflow" above for the
+  full gate/advisory split; `cargo test` is currently advisory).
 - Do not force-push after someone has reviewed your PR.
 
 ## Roadmap and Planning
