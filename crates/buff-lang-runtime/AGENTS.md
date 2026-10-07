@@ -46,7 +46,7 @@ Tests use `MockGpuBackend` to run on hosts without GPU hardware.
 
 ## CONVENTIONS
 
-- **NO `unwrap`/`expect`/`panic!` in non-test code** (extra-strict: wgpu panics are opaque and unrecoverable).
+- **Panic policy: the runtime panics ONLY on violated internal contracts** (each panic site's invariant is documented at the module where it lives — e.g. the WGSL binding layout below). There is deliberately NO blanket "no panic" guarantee. `buff-assertions`' panics ARE the assertion mechanism and are legal per its own AGENTS.md. Code paths that can fail on USER input still return `Result`.
 - `Result<_, RuntimeError>` everywhere in public API. Mutex poisoning handled via `unwrap_or`/`map_err`.
 - All map/set types are `BTreeMap`/`BTreeSet`, never `HashMap`/`HashSet` (project hard rule, even for runtime caches).
 - `GpuBackend` trait is object-safe (no generic methods, no `Self` by value) so callers hold `Box<dyn GpuBackend>` or `Option<&dyn GpuBackend>`.
