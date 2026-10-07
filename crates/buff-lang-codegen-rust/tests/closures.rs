@@ -1,13 +1,13 @@
-//! T34 integration tests â€” closures / lambdas codegen.
+//! T34 integration tests — closures / lambdas codegen.
 //!
-//! Builds on T23's minimal closure support (`{ params => expr }` â†’
+//! Builds on T23's minimal closure support (`{ params => expr }` →
 //! `|params| expr`) and T34's **variable capture** analysis.
 //!
 //! Coverage:
 //!
-//! - `{ x => x * 2 }` â†’ `|x| x * 2` (single-param)
-//! - `{ x, y => x + y }` â†’ `|x, y| x + y` (multi-param)
-//! - closure captures external Copy var: `let f = 10; { x => x + f }` â†’ `|x| x + f`
+//! - `{ x => x * 2 }` → `|x| x * 2` (single-param)
+//! - `{ x, y => x + y }` → `|x, y| x + y` (multi-param)
+//! - closure captures external Copy var: `let f = 10; { x => x + f }` → `|x| x + f`
 //! - closure in `.map()`: `[1,2,3].map({ x => x + f })` captures `f`
 //! - closure in `.filter()`: `[1,2,3].filter({ x => x > f })`
 //! - nested closure: `{ x => { y => x + y } }`
@@ -172,12 +172,12 @@ fn must_reparse(src: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Single-param closure: `{ x => x * 2 }` â†’ `|x| x * 2`
+// 1. Single-param closure: `{ x => x * 2 }` → `|x| x * 2`
 // ---------------------------------------------------------------------------
 
 #[test]
 fn closures_single_param() {
-    // { x => x * 2 } â†’ |x| x * 2
+    // { x => x * 2 } → |x| x * 2
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Mul,
         ident_expr("x"),
@@ -189,12 +189,12 @@ fn closures_single_param() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Multi-param closure: `{ x, y => x + y }` â†’ `|x, y| x + y`
+// 2. Multi-param closure: `{ x, y => x + y }` → `|x, y| x + y`
 // ---------------------------------------------------------------------------
 
 #[test]
 fn closures_multi_param() {
-    // { x, y => x + y } â†’ |x, y| x + y
+    // { x, y => x + y } → |x, y| x + y
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Add,
         ident_expr("x"),
@@ -215,7 +215,7 @@ fn closures_multi_param() {
 #[test]
 fn closures_capture_external_copy_var() {
     // let f = 10
-    // { x => x + f } â†’ |x| x + f   (f is captured; Copy â†’ no clone)
+    // { x => x + f } → |x| x + f   (f is captured; Copy → no clone)
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Add,
         ident_expr("x"),
@@ -236,7 +236,7 @@ fn closures_capture_external_copy_var() {
         src.contains("|x| x + f"),
         "expected `|x| x + f` (capture f) in: {src}"
     );
-    // f is Copy (Int literal) â€” no .clone() should appear.
+    // f is Copy (Int literal) — no .clone() should appear.
     assert!(
         !src.contains("f.clone()"),
         "Copy capture should NOT get .clone(): {src}"
@@ -252,7 +252,7 @@ fn closures_capture_external_copy_var() {
 fn closures_map_with_capture() {
     // let f = 10
     // let r = [1, 2, 3].map({ x => x + f })
-    // â†’ vec![1, 2, 3].into_iter().map(|x| x + f).collect::<Vec<_>>()
+    // → vec![1, 2, 3].into_iter().map(|x| x + f).collect::<Vec<_>>()
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Add,
         ident_expr("x"),
@@ -298,7 +298,7 @@ fn closures_map_with_capture() {
 fn closures_filter_with_capture() {
     // let threshold = 0
     // [1, 2, 3].filter({ x => x > threshold })
-    // â†’ vec![...].into_iter().filter(|x| x > threshold).collect::<Vec<_>>()
+    // → vec![...].into_iter().filter(|x| x > threshold).collect::<Vec<_>>()
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Gt,
         ident_expr("x"),
@@ -335,7 +335,7 @@ fn closures_filter_with_capture() {
 
 #[test]
 fn closures_nested() {
-    // { x => { y => x + y } } â†’ |x| |y| x + y
+    // { x => { y => x + y } } → |x| |y| x + y
     let inner_body = binary_op(
         buff_lang_ast::op::BinaryOp::Add,
         ident_expr("x"),
@@ -359,7 +359,7 @@ fn closures_nested() {
 
 #[test]
 fn closures_returning_computed_expr() {
-    // { x => x * x + x } â†’ |x| x * x + x
+    // { x => x * x + x } → |x| x * x + x
     let body = binary_op(
         buff_lang_ast::op::BinaryOp::Add,
         binary_op(
@@ -378,7 +378,7 @@ fn closures_returning_computed_expr() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Captured non-Copy var used multiple times in closure body â€” NO spurious clone
+// 8. Captured non-Copy var used multiple times in closure body — NO spurious clone
 //    (T34 capture-aware codegen: the key interaction with MoveAnalyzer)
 // ---------------------------------------------------------------------------
 
@@ -391,7 +391,7 @@ fn closures_captured_non_copy_no_spurious_clone_inside_body() {
     // TWICE inside the closure body. Without T34's capture-aware codegen,
     // the MoveAnalyzer would insert `.clone()` on the second use (seeing
     // it as "use after move"). With T34, the capture stack tells the
-    // ident-lowering path to emit s plainly both times â€” Rust handles
+    // ident-lowering path to emit s plainly both times — Rust handles
     // the capture (by reference, since .len() only reads).
     let s_len = || method_call(ident_expr("s"), "len", vec![]);
     let body = binary_op(
@@ -428,7 +428,7 @@ fn closures_captured_non_copy_no_spurious_clone_inside_body() {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Captured non-Copy var used once inside closure + once after â€” the
+// 9. Captured non-Copy var used once inside closure + once after — the
 //    after-use is OUTSIDE the closure so it goes through normal MoveAnalyzer.
 //    This verifies the capture stack is correctly scoped (only affects
 //    uses INSIDE the closure body).
@@ -438,12 +438,12 @@ fn closures_captured_non_copy_no_spurious_clone_inside_body() {
 fn closures_capture_stack_scoped_to_body() {
     // let s = "hi"
     // [1].map({ x => x + s.len() })   // s captured, used once inside
-    // print(s)                        // s used AFTER closure â€” normal path
+    // print(s)                        // s used AFTER closure — normal path
     //
     // The closure-body use of s is a capture (no clone). The post-closure
     // use of s goes through the normal MoveAnalyzer path. Since s is
     // non-Copy and used once before (inside closure), the post-closure use
-    // is the "second use" â†’ .clone() MAY be inserted (conservative: Rust
+    // is the "second use" → .clone() MAY be inserted (conservative: Rust
     // might have captured by ref, making the clone spurious but sound).
     // The key assertion: NO clone inside the closure body.
     let body = binary_op(
@@ -481,13 +481,13 @@ fn closures_capture_stack_scoped_to_body() {
 
 // ---------------------------------------------------------------------------
 // 10. Zero-param closure (captures everything, takes no args)
-//     { => f } â†’ || f   (edge case: no params, only captures)
+//     { => f } → || f   (edge case: no params, only captures)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn closures_zero_param_capture_only() {
     // let f = 42
-    // { => f } â†’ || f
+    // { => f } → || f
     let stmts = vec![
         Stmt::LetDecl {
             name: ident("f"),

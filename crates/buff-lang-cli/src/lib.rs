@@ -1,4 +1,4 @@
-﻿//! Buff CLI library â€” exposes the compiler pipeline and command
+//! Buff CLI library — exposes the compiler pipeline and command
 //! implementations so that integration tests (and future embedders) can drive
 //! `buff build` / `buff run` programmatically without spawning a subprocess.
 //!
@@ -9,20 +9,20 @@
 //!
 //! ```text
 //!   .buff source
-//!        â”‚
-//!        â–¼  read_to_string
+//!        │
+//!        ▼  read_to_string
 //!   String
-//!        â”‚
-//!        â–¼  buff_lang_lexer::tokenize
+//!        │
+//!        ▼  buff_lang_lexer::tokenize
 //!   Vec<Token>
-//!        â”‚
-//!        â–¼  buff_lang_parser::parse
+//!        │
+//!        ▼  buff_lang_parser::parse
 //!   Vec<Decl>
-//!        â”‚
-//!        â–¼  buff_lang_codegen_rust::generate_rust
+//!        │
+//!        ▼  buff_lang_codegen_rust::generate_rust
 //!   String  (valid Rust source)
-//!        â”‚
-//!        â–¼  pipeline::compile_rust_to_exe (rustc --edition 2021)
+//!        │
+//!        ▼  pipeline::compile_rust_to_exe (rustc --edition 2021)
 //!   native executable
 //! ```
 //!
@@ -33,7 +33,7 @@
 
 // Boxing the large error types (CodegenError etc. returned through the
 // pipeline) would reshape the public `compile_to_rust` / `compile_rust_to_exe`
-// surface and every command consumer. Out of scope â€” matches the same
+// surface and every command consumer. Out of scope — matches the same
 // documented trade-off applied in buff-eval / buff-lang-codegen-rust /
 // buff-lang-types. Allowed at the crate level.
 #![allow(clippy::result_large_err)]

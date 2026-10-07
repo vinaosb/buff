@@ -4,7 +4,7 @@
 // file. The Buff code below shows how the same program would look
 // once buff-cli is wired into the prelude + codegen layer. Until that
 // wiring ships (follow-up coordinated commit), this is a forward
-// declaration only â€” `buff run` cannot yet execute it.
+// declaration only — `buff run` cannot yet execute it.
 
 func main():
     let app = App.new("hello")

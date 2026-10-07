@@ -1,4 +1,4 @@
-﻿# M7.2: Performance Regression Check
+# M7.2: Performance Regression Check
 
 **Date:** 2026-08-07
 **Environment:** Docker buff-dev (Linux x86_64, Rust 1.95.0)

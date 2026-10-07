@@ -1,4 +1,4 @@
-﻿//! T124j integration tests - filesystem prelude modules codegen.
+//! T124j integration tests - filesystem prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the three T124j filesystem
 //! modules:

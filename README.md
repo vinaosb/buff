@@ -1,4 +1,4 @@
-﻿# Buff
+# Buff
 
 [![CI](https://github.com/vinaosb/buff/actions/workflows/ci.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/ci.yml)
 [![Security](https://github.com/vinaosb/buff/actions/workflows/security.yml/badge.svg)](https://github.com/vinaosb/buff/actions/workflows/security.yml)

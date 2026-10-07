@@ -1,4 +1,4 @@
-﻿# T138c — Verification engine + CI solvability gate
+# T138c — Verification engine + CI solvability gate
 
 ## Files modified/created
 

@@ -1,4 +1,4 @@
-﻿//! T124m integration tests - TCP / UDP / WebSocket prelude modules
+//! T124m integration tests - TCP / UDP / WebSocket prelude modules
 //! codegen.
 //!
 //! Verifies that the Rust codegen lowers the three T124m networking

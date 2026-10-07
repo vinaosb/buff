@@ -1,4 +1,4 @@
-﻿T124l Process & OS modules - VERIFICATION EVIDENCE
+T124l Process & OS modules - VERIFICATION EVIDENCE
 Date: 2026-07-20  parent HEAD: 3471c18
 GATES:
 - cargo test -p buff-lang-codegen-rust --test process_codegen => 30 passed; 0 failed (EXIT 0)

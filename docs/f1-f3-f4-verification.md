@@ -1,4 +1,4 @@
-﻿# F1/F3/F4: Final Verification Reports
+# F1/F3/F4: Final Verification Reports
 
 **Date:** 2026-08-07
 

@@ -1,4 +1,4 @@
-﻿//! T124h integration tests - web prelude modules codegen.
+//! T124h integration tests - web prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the five T124h web modules:
 //!

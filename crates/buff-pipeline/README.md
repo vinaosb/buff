@@ -1,4 +1,4 @@
-﻿# buff-pipeline
+# buff-pipeline
 
 > DAG-based ETL pipeline for the **Buff** language. Bounded `Channel<T>` queues connect stages; backpressure is natural.
 

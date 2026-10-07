@@ -1,4 +1,4 @@
-﻿T123 Workspace support - Evidence
+T123 Workspace support - Evidence
 ===============================
 Date: 2026-07-20  parent HEAD: 694c983
 

@@ -1,4 +1,4 @@
-﻿
+
 ## T1: Rename .sisyphus plan/notepad files + repair internal links (2026-07-15 22:43:20)
 
 ### Summary

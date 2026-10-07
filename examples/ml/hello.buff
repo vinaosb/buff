@@ -1,10 +1,10 @@
-// Buff ML â€” Linear Regression
+// Buff ML — Linear Regression
 //
 // Train a single Linear(1, 1) layer on synthetic data y = 2x + 3.
 // After 300 epochs of SGD (lr=0.05), learned weights converge to
-// w â‰ˆ 2.0 and bias â‰ˆ 3.0.
+// w ≈ 2.0 and bias ≈ 3.0.
 //
-// Codegen integration is deferred (per crates/buff-ml/AGENTS.md) â€”
+// Codegen integration is deferred (per crates/buff-ml/AGENTS.md) —
 // this file documents the intended Buff API and parses via `buff check`.
 // Run the Rust reference impl via: cargo run -p buff-ml --example linear_regression
 
@@ -12,7 +12,7 @@ import Tensor from buff.tensor
 import { Model, Linear, SGD, Tape, mse_loss } from buff.ml
 
 func main():
-    print("Buff ML â€” Linear Regression")
+    print("Buff ML — Linear Regression")
 
     // Synthetic data: y = 2x + 3
     let x = Tensor.from_vec(

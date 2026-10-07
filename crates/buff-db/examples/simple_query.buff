@@ -3,7 +3,7 @@
 // direct `buff_db::Pool` Rust API.
 //
 // NOTE: T18 ships with forward-declaration only (mirrors the T8 Tensor
-// precedent) â€” `Database.connect` is wired in this commit but the
+// precedent) — `Database.connect` is wired in this commit but the
 // pool.query / pool.execute instance methods are deferred to a sibling
 // task that adds the coordinated `Type::Pool` variant in
 // `crates/buff-lang-types/src/ty.rs` (outside the T18 shared zone per

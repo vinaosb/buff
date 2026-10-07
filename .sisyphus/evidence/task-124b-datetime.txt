@@ -1,4 +1,4 @@
-﻿T124b DateTime module (v1.4 stdlib) - EVIDENCE
+T124b DateTime module (v1.4 stdlib) - EVIDENCE
 ================================================
 Verified by Atlas 2026-07-20T00:51:23.7358184-03:00.
 

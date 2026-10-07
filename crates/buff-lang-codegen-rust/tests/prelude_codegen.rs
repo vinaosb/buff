@@ -1,4 +1,4 @@
-//! T96 â€” Standard library prelude: Rust **codegen** integration tests.
+//! T96 — Standard library prelude: Rust **codegen** integration tests.
 //!
 //! These tests verify that the prelude function names lower to the correct
 //! Rust idioms. They are the codegen half of the T96 acceptance criteria;
@@ -7,14 +7,14 @@
 //!
 //! ## Coverage
 //!
-//! - **Math**: `abs` â†’ `.abs()`, `min`/`max` â†’ `.min()`/`.max()`,
-//!   `sqrt`/`floor`/`ceil`/`round` â†’ `((x) as f64).<m>()`, `pow` â†’
+//! - **Math**: `abs` → `.abs()`, `min`/`max` → `.min()`/`.max()`,
+//!   `sqrt`/`floor`/`ceil`/`round` → `((x) as f64).<m>()`, `pow` →
 //!   `.pow((e) as u32)` for ints and `.powf((e) as f64)` for floats.
 //! - **Conversions**: `Int(x)`/`Float(x)`/`Bool(x)` dispatch on the arg
 //!   type (`as T` for numerics, `.parse::<T>().unwrap_or(default)` for
-//!   strings); `String(x)` â†’ `.to_string()`.
-//! - **I/O**: `print("lit")` â†’ `println!("lit")` (no `{}`), `print(x)` â†’
-//!   `println!("{}", x)`, `read_line()` â†’ stdin block.
+//!   strings); `String(x)` → `.to_string()`.
+//! - **I/O**: `print("lit")` → `println!("lit")` (no `{}`), `print(x)` →
+//!   `println!("{}", x)`, `read_line()` → stdin block.
 //! - A **snapshot** test pins the combined output of a small program that
 //!   uses prelude math + I/O together.
 
@@ -88,7 +88,7 @@ fn func_with_stmts(name: &str, stmts: Vec<Stmt>) -> Decl {
 }
 
 // ---------------------------------------------------------------------------
-// 1. abs â†’ .abs()  (with parens around the receiver)
+// 1. abs → .abs()  (with parens around the receiver)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -113,7 +113,7 @@ fn prelude_codegen_abs_neg_five() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. min / max â†’ .min() / .max()
+// 2. min / max → .min() / .max()
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -145,7 +145,7 @@ fn prelude_codegen_min_max() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. sqrt / floor / ceil / round â†’ ((x) as f64).<method>()
+// 3. sqrt / floor / ceil / round → ((x) as f64).<method>()
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -181,7 +181,7 @@ fn prelude_codegen_float_unary_math() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. pow â†’ .pow((e) as u32) for int base, .powf((e) as f64) for float base
+// 4. pow → .pow((e) as u32) for int base, .powf((e) as f64) for float base
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -231,7 +231,7 @@ fn prelude_codegen_pow_float_base_uses_powf() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Conversions â€” Int / Float / String / Bool
+// 5. Conversions — Int / Float / String / Bool
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -306,7 +306,7 @@ fn prelude_codegen_bool_of_int_not_equal_zero() {
         )],
     );
     let src = generate_rust(&[f]).unwrap();
-    // Numeric â†’ Bool uses `(x) != 0`.
+    // Numeric → Bool uses `(x) != 0`.
     assert!(src.contains("!= 0"), "src = {src}");
     syn::parse_str::<syn::File>(&src).expect("must re-parse");
 }
@@ -335,7 +335,7 @@ fn prelude_codegen_bool_of_string_parses() {
 
 #[test]
 fn prelude_codegen_print_string_literal_no_placeholder() {
-    // func main() { print("hello") } â†’ println!("hello") (no {})
+    // func main() { print("hello") } → println!("hello") (no {})
     let f = func_with_stmts(
         "main",
         vec![Stmt::ExprStmt(
@@ -354,7 +354,7 @@ fn prelude_codegen_print_string_literal_no_placeholder() {
 
 #[test]
 fn prelude_codegen_print_non_literal_uses_placeholder() {
-    // func main() { let x = 42; print(x) } â†’ println!("{}", x)
+    // func main() { let x = 42; print(x) } → println!("{}", x)
     let f = func_with_stmts(
         "main",
         vec![
@@ -416,7 +416,7 @@ fn prelude_codegen_read_line_returns_string() {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Combined snapshot â€” math + I/O together
+// 7. Combined snapshot — math + I/O together
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -487,7 +487,7 @@ fn prelude_codegen_combined_snapshot() {
 
 #[test]
 fn prelude_codegen_user_func_call_still_passthrough() {
-    // A non-prelude function name (e.g. "my_func") is NOT intercepted â€” it
+    // A non-prelude function name (e.g. "my_func") is NOT intercepted — it
     // lowers to a plain Rust call expression `my_func(arg)`.
     let f = func_with_stmts(
         "main",

@@ -1,4 +1,4 @@
-﻿//! Descriptive statistics for Buff.
+//! Descriptive statistics for Buff.
 //!
 //! Provides fundamental statistical functions operating on `f64` slices.
 //! All functions are pure-Rust implementations.

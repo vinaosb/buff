@@ -1,4 +1,4 @@
-﻿cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
 At line:1 char:64
 + ... -msvc.ps1"; cargo test -p buff-science -- test_mean test_variance tes ...
 +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

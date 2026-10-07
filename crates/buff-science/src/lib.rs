@@ -1,4 +1,4 @@
-﻿//! `buff-science` — Linear algebra, numerical methods, and statistics for Buff.
+//! `buff-science` — Linear algebra, numerical methods, and statistics for Buff.
 //!
 //! Builds on [`buff_tensor::Tensor`] for matrix operations with pure-Rust
 //! implementations of inverse (Gauss-Jordan), determinant (LU), and solve

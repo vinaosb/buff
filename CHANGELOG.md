@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to the Buff transpiler are documented in this file.
 

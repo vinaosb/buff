@@ -1,8 +1,8 @@
-// sprite.buff â€” draw sprites example (T16).
+// sprite.buff — draw sprites example (T16).
 //
 // Demonstrates loading a texture and drawing sprites via the
 // Renderer command queue. In the headless MVP, load_texture is
-// a stub â€” the draw calls are recorded and visible in tests.
+// a stub — the draw calls are recorded and visible in tests.
 
 import buff_game.Game
 import buff_game.GameConfig

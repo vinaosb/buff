@@ -1,4 +1,4 @@
-﻿T124m: Networking modules - TCP, UDP, WebSocket
+T124m: Networking modules - TCP, UDP, WebSocket
 ================================================
 Commit: (this commit)
 Date: 2026-07-20

@@ -1,7 +1,7 @@
-// input.buff â€” keyboard input example (T16).
+// input.buff — keyboard input example (T16).
 //
 // Demonstrates reading keyboard input via the polled Input state.
-// In the headless MVP, input is injected programmatically â€” the
+// In the headless MVP, input is injected programmatically — the
 // scene checks for WASD keys and prints which direction is pressed.
 
 import buff_game.Game

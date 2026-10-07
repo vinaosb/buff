@@ -1,4 +1,4 @@
-﻿# buff-pipeline
+# buff-pipeline
 
 DAG-based ETL pipeline framework for Buff. **EXPERIMENTAL** (T14, v1.13 frameworks wave 3).
 

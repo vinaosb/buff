@@ -1,17 +1,17 @@
-// Buff ML â€” XOR via 2-layer MLP
+// Buff ML — XOR via 2-layer MLP
 //
 // Classic XOR problem: linearly inseparable, requires a hidden layer.
 // Architecture: Linear(2 -> 4) -> Sigmoid -> Linear(4 -> 1) -> Sigmoid
 // Loss: mse_loss. Optimizer: Adam (lr=0.1).
 //
-// Codegen integration is deferred â€” this file documents the API and
+// Codegen integration is deferred — this file documents the API and
 // parses via `buff check`. Rust reference: cargo run -p buff-ml --example xor
 
 import Tensor from buff.tensor
 import { Model, Linear, Sigmoid, Adam, Tape, mse_loss } from buff.ml
 
 func main():
-    print("Buff ML â€” XOR via MLP")
+    print("Buff ML — XOR via MLP")
 
     // XOR truth table: 4 input pairs + 4 expected outputs
     let x = Tensor.from_vec(

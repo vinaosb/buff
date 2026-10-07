@@ -1,4 +1,4 @@
-﻿T124k Crypto (Hash SHA-256/512, MD5; HMAC-SHA256) - VERIFICATION EVIDENCE
+T124k Crypto (Hash SHA-256/512, MD5; HMAC-SHA256) - VERIFICATION EVIDENCE
 Date: 2026-07-20  HEAD-parent: 44fcf9c
 GATES:
 - cargo clippy --workspace --all-targets -- -D warnings => EXIT 0 (Finished, 0 warnings)
