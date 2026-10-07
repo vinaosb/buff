@@ -14,7 +14,9 @@
 # SHA-256 hashes are filled by the release workflow (release.yml job: update-sha256).
 # Do NOT compute manually — they must match the binaries built by GitHub Actions
 # per-platform.  The CI installer-lint job verifies no placeholders remain before release.
-# Placeholder format uses FILL-BY-RELEASE-WORKFLOW (caught by CI installer-lint).
+# Placeholder format uses FILL-BY-RELEASE-WORKFLOW (allowed by CI
+# installer-lint as the documented pre-release state; empty or legacy
+# placeholder formats are still rejected).
 
 class Buff < Formula
   desc "Buff — a high-level language that transpiles to Rust"

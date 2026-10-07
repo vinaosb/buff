@@ -16,7 +16,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/buff-lang/buff/releases/download/v1.24.0/buff-v1.24.0-windows-x64.zip",
-            "hash": "<FILL-ME: sha256 of buff-v1.24.0-windows-x64.zip — see the .sha256 sidecar on the release>"
+            "hash": "FILL-BY-RELEASE-WORKFLOW: sha256 of buff-v1.24.0-windows-x64.zip — see the .sha256 sidecar on the release"
         }
     },
     "bin": "buff.exe",

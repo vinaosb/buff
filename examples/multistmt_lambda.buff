@@ -1,0 +1,21 @@
+// v1.26 example — multi-statement lambda bodies (BUG-13 fix).
+// Run: `buff run examples/multistmt_lambda.buff`
+//
+// Lambda bodies were restricted to a single expression before v1.26.
+// This example exercises both separator styles inside `.map()` closures:
+//   - newline-separated statements with a trailing implicit-return expr
+//   - semicolon-separated statements on one line
+
+func main():
+    let doubled = [1, 2, 3, 4].map({ x =>
+        let y = x * 2
+        y
+    })
+    print(doubled[0])
+    print(doubled[1])
+    print(doubled[2])
+    print(doubled[3])
+
+    let labeled = [10, 20].map({ x => let tag = x + 100; tag })
+    print(labeled[0])
+    print(labeled[1])

@@ -1,0 +1,23 @@
+// v1.26 example — layout-sensitive match with multi-statement arms (BUG-11 fix).
+// Run: `buff run examples/match_layout.buff`
+//
+// Before v1.26, match only supported the brace form with single-expression
+// arms. This example exercises all three fixed sub-issues:
+//   (a) the `match x:` layout form (colon + indented arms)
+//   (b) colon-block arms (`200:`) with indented bodies
+//   (c) multi-statement arm bodies (`let` + `return`)
+
+func describe(code: Int) -> String:
+    match code:
+        200:
+            let label = "success"
+            return label
+        404:
+            return "missing"
+        _:
+            return "other"
+
+func main():
+    print(describe(200))
+    print(describe(404))
+    print(describe(500))
