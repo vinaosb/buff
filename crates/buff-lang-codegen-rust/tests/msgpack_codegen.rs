@@ -1,4 +1,4 @@
-﻿//! T51 integration tests - MessagePack prelude namespace codegen.
+//! T51 integration tests - MessagePack prelude namespace codegen.
 //!
 //! Verifies that the Rust codegen lowers the three T51 MsgPack
 //! associated functions:

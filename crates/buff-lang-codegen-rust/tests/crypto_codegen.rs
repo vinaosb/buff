@@ -1,4 +1,4 @@
-﻿//! T124k integration tests - cryptographic prelude modules codegen.
+//! T124k integration tests - cryptographic prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the two T124k crypto modules:
 //!

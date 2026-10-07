@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Pre-commit hook: extension cap enforcement + AGENTS.md metadata refresh
 
 COUNTER_FILE=".sisyphus/evidence/extensions-counter.json"

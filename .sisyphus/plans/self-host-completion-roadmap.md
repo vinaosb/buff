@@ -1,4 +1,4 @@
-﻿# Self-Host Completion Roadmap (v16 — OPTIMIZED with all 5-agent review fixes)
+# Self-Host Completion Roadmap (v16 — OPTIMIZED with all 5-agent review fixes)
 
 **Status:** READY FOR EXECUTION. Tags v1.0.0-v1.39.0 ALL canonical (14 tags EXIST per coh-001). AI-executed (no time estimates).
 **Created:** 2026-07-26 (v16: fixes ALL issues from 2-round 5-agent review: Momus ✅OKAY, Oracle factual corrections, Metis B1-B7 blocks, Explore executability gaps)

@@ -1,4 +1,4 @@
-﻿//! T124l integration tests - Process + OS prelude modules codegen.
+//! T124l integration tests - Process + OS prelude modules codegen.
 //!
 //! Verifies that the Rust codegen lowers the two T124l system
 //! modules:

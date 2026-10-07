@@ -1,4 +1,4 @@
-﻿//! T124c integration tests â€” `Log` prelude module codegen.
+//! T124c integration tests â€” `Log` prelude module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Log.<level>("msg")` to `tracing::<level>!("msg")`.

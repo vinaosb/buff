@@ -1,4 +1,4 @@
-﻿//! T2 (v1.13 wave 1): codegen tests for the Channel MPSC primitive.
+//! T2 (v1.13 wave 1): codegen tests for the Channel MPSC primitive.
 //!
 //! Verifies that the Rust codegen lowers:
 //!

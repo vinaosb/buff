@@ -1,4 +1,4 @@
-﻿//! T124e integration tests â€” `Toml` prelude namespace module codegen.
+//! T124e integration tests â€” `Toml` prelude namespace module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Toml.parse(s)` to

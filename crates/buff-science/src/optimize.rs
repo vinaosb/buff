@@ -1,4 +1,4 @@
-﻿//! Numerical optimization methods.
+//! Numerical optimization methods.
 
 use crate::error::{ScienceError, ScienceResult};
 

@@ -1,4 +1,4 @@
-﻿//! LSP request handlers â€” pure functions on [`DocumentState`].
+//! LSP request handlers â€” pure functions on [`DocumentState`].
 //!
 //! Every handler takes a `&DocumentState` (plus request params) and returns
 //! the matching LSP response type. There is no I/O here â€” the [`server`]

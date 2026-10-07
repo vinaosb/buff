@@ -1,4 +1,4 @@
-﻿//! T119 integration tests â€” minimal extern/bindgen.
+//! T119 integration tests â€” minimal extern/bindgen.
 //!
 //! Coverage:
 //!

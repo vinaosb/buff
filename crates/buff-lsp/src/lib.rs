@@ -1,4 +1,4 @@
-﻿#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
+#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]
 //! `buff-lsp` â€” Language Server Protocol server for the Buff language.
 //!
 //! Built on the [`lsp_server`] crate (rust-analyzer's JSON-RPC scaffold)

@@ -1,4 +1,4 @@
-﻿
+
 
 ## F2: Code Quality Review (final-wave) — 2026-07-16 00:07:34
 

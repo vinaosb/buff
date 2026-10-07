@@ -1,4 +1,4 @@
-﻿# Decisions Log — self-host-completion-roadmap
+# Decisions Log — self-host-completion-roadmap
 
 ## 2026-07-26 — Plan initialized
 - v16 plan committed at dcd1fc5

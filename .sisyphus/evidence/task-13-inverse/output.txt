@@ -1,4 +1,4 @@
-﻿cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
 At line:1 char:64
 + ... setup-msvc.ps1"; cargo test -p buff-science test_inverse 2>&1 | Out-F ...
 +                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

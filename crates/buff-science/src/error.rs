@@ -1,4 +1,4 @@
-﻿//! Error types for buff-science operations.
+//! Error types for buff-science operations.
 
 use std::fmt;
 

@@ -1,4 +1,4 @@
-﻿//! `buff-eval` â€” a thin evaluation engine over the existing Buff compiler
+//! `buff-eval` â€” a thin evaluation engine over the existing Buff compiler
 //! primitives (`tokenize`, `parse`, `TypeInferencer`, `generate_rust`).
 //!
 //! # Shared rustc-invoke helpers (T35)

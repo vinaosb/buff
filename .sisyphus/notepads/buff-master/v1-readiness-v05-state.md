@@ -1,4 +1,4 @@
-﻿# v1.0 Readiness: v0.5 State Report
+# v1.0 Readiness: v0.5 State Report
 
 **Generated:** 2026-07-19
 **Source:** Comprehensive analysis of buff repo at C:\Users\vsbb1\source\repos\buff

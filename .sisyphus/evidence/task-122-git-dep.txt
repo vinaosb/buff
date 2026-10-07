@@ -1,4 +1,4 @@
-﻿T122 Git dependency support - Evidence
+T122 Git dependency support - Evidence
 =================================
 Date: 2026-07-20  HEAD-parent: 59ed507
 

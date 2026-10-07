@@ -1,4 +1,4 @@
-﻿//! T124d integration tests â€” `Regex` prelude module codegen.
+//! T124d integration tests â€” `Regex` prelude module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Regex.compile(p)` to `regex::Regex::new(p).unwrap_or_else(...)`.

@@ -1,4 +1,4 @@
-﻿//! Buff CLI library â€” exposes the compiler pipeline and command
+//! Buff CLI library â€” exposes the compiler pipeline and command
 //! implementations so that integration tests (and future embedders) can drive
 //! `buff build` / `buff run` programmatically without spawning a subprocess.
 //!

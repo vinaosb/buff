@@ -1,4 +1,4 @@
-﻿T125-prep: buff-eval shared evaluation core
+T125-prep: buff-eval shared evaluation core
 Verified: 2026-07-20T12:11:42.2614515-03:00
 HEAD before commit: 264ff35
 
