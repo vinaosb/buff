@@ -7,15 +7,15 @@ the tutorial; this is the spec.
 
 ## 6.1 Lexical structure
 
-### Keywords (25)
+### Keywords (30)
 
 These identifiers are reserved and cannot be used as names:
 
 ```
 func let mut struct enum trait type
-if else for return break continue in match
+if else for while return break continue in match
 async spawn import export from as
-true false extern unsafe
+true false extern unsafe guard extend defer impl
 ```
 
 Notably **absent**: `class`, `null` / `nil`, `await`, `try`, `catch`, `new`,

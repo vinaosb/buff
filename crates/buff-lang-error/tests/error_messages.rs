@@ -30,7 +30,7 @@ fn err_at(start: usize, end: usize, msg: &str) -> Diagnostic {
 }
 
 /// Prelude + keyword candidate set used by the "Did you mean?" tests. Taken
-/// from `crates/buff-lang-types/src/prelude.rs` + the 25 keywords; kept here
+/// from `crates/buff-lang-types/src/prelude.rs` + the 30 keywords; kept here
 /// as a static slice so the test does not need to depend on the types crate.
 fn candidates() -> Vec<&'static str> {
     let prelude: &[&str] = &[

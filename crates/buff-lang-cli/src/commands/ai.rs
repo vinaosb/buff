@@ -297,10 +297,11 @@ fn section_language_syntax() -> String {
     s.push_str("- **No `null`/`nil`** — absence is `Option<T>`.\n");
     s.push_str("- **No class hierarchies** — OOP via structs + traits + embedding.\n\n");
 
-    s.push_str("### Reserved keywords (25)\n\n");
+    s.push_str("### Reserved keywords (30)\n\n");
     s.push_str("```\n");
-    s.push_str("func let mut struct enum trait type if else for return break continue in match\n");
-    s.push_str("async spawn import export from as true false extern unsafe\n");
+    s.push_str("func let mut struct enum trait type if else for while return break continue in\n");
+    s.push_str("match async spawn import export from as true false extern unsafe guard extend\n");
+    s.push_str("defer impl\n");
     s.push_str("```\n\n");
 
     s.push_str("### Primitive types\n\n");

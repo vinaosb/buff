@@ -253,7 +253,7 @@ const EXAMPLES = {
 
 // ----- CodeMirror instance ---------------------------------------------
 // Rust mode is close enough to Buff for highlighting (keywords overlap:
-// func→fn-ish, let, return, if, else, match...). Buff's 25 keywords are a
+// func→fn-ish, let, return, if, else, match...). Buff's 30 keywords are a
 // subset of Rust's surface syntax; we accept the imperfect mapping rather
 // than ship a custom CodeMirror mode.
 const editor = CodeMirror.fromTextArea(editorEl, {

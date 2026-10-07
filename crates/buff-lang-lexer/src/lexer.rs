@@ -5,7 +5,7 @@
 //! accurate span and indentation tracking.
 //!
 //! Features:
-//! - 25 keywords + identifiers
+//! - 30 keywords + identifiers
 //! - Integer, float (`3.14`), double (`3.14d`), byte (`0xFF`, `0b1010`),
 //!   decimal (`99.90m`) literals
 //! - Single- and multi-char operators

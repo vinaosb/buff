@@ -94,13 +94,14 @@ status table).
 
 [root-readme]: https://github.com/buff-lang/buff/blob/v1x-frameworks/README.md
 
-## The 25 keywords
+## The 30 keywords
 
-Buff reserves 25 keywords. Everything else is an identifier:
+Buff reserves 30 keywords. Everything else is an identifier:
 
 ```
-func let mut struct enum trait type if else for return break continue in match
-async spawn import export from as true false extern unsafe
+func let mut struct enum trait type if else for while return break continue in
+match async spawn import export from as true false extern unsafe guard extend
+defer impl
 ```
 
 Notably **absent**: `class`, inheritance, `null` / `nil`, manual pointers

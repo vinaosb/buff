@@ -31,10 +31,11 @@ version.
 
 ### 1.1 Public language syntax
 
-The **25 reserved keywords** (`func`, `let`, `mut`, `struct`, `enum`, `trait`,
-`type`, `if`, `else`, `for`, `return`, `break`, `continue`, `in`, `match`,
-`async`, `spawn`, `import`, `export`, `from`, `as`, `true`, `false`,
-`extern`, `unsafe`) are fixed. The **layout-sensitive grammar** (offside rule,
+The **30 reserved keywords** (`func`, `let`, `mut`, `struct`, `enum`, `trait`,
+`type`, `if`, `else`, `for`, `while`, `return`, `break`, `continue`, `in`,
+`match`, `async`, `spawn`, `import`, `export`, `from`, `as`, `true`, `false`,
+`extern`, `unsafe`, `guard`, `extend`, `defer`, `impl`) are fixed. The
+**layout-sensitive grammar** (offside rule,
 4-space indentation, brace-for-data convention) is stable. The **three
 parse-time desugars** — pipeline `|>`, null-conditional `?.`, null-coalesce
 `??` — lower to the same AST nodes for all of v1.x. New keywords may be added

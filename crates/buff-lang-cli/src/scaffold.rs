@@ -7,7 +7,7 @@
 //! keeps the dependency surface minimal.
 //!
 //! [`validate_project_name`] enforces the same identifier rules the lexer will
-//! later apply to symbols, plus a check against the 25 reserved keywords (see
+//! later apply to symbols, plus a check against the 30 reserved keywords (see
 //! `crates/buff-lang-lexer/src/token.rs`).
 
 /// Reserved Buff keywords (must match the lexer's keyword table).
@@ -16,9 +16,9 @@
 /// keeps `buff new` / `buff init` decoupled from lexer internals — the keyword
 /// list is small and stable since v0.1.
 pub const KEYWORDS: &[&str] = &[
-    "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "return",
-    "break", "continue", "in", "match", "async", "spawn", "import", "export", "from", "as", "true",
-    "false", "extern", "unsafe",
+    "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "while",
+    "return", "break", "continue", "in", "match", "async", "spawn", "import", "export", "from",
+    "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
 ];
 
 /// `buff.toml` manifest template.
@@ -730,10 +730,10 @@ mod tests {
     }
 
     #[test]
-    fn keywords_table_has_25_entries() {
+    fn keywords_table_has_30_entries() {
         // Mirrors the lexer keyword count; if either side changes the other
         // must follow.
-        assert_eq!(KEYWORDS.len(), 25, "Buff has 25 reserved keywords");
+        assert_eq!(KEYWORDS.len(), 30, "Buff has 30 reserved keywords");
     }
 
     #[test]

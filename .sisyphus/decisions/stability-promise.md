@@ -48,10 +48,11 @@ same major version. "Break" means: a program that compiled and ran on version
 
 The **grammar** of the Buff language is stable. Specifically:
 
-- The **25 reserved keywords** are fixed: `func`, `let`, `mut`, `struct`,
-  `enum`, `trait`, `type`, `if`, `else`, `for`, `return`, `break`,
+- The **30 reserved keywords** are fixed: `func`, `let`, `mut`, `struct`,
+  `enum`, `trait`, `type`, `if`, `else`, `for`, `while`, `return`, `break`,
   `continue`, `in`, `match`, `async`, `spawn`, `import`, `export`, `from`,
-  `as`, `true`, `false`, `extern`, `unsafe`. A keyword shipped in v1.x stays
+  `as`, `true`, `false`, `extern`, `unsafe`, `guard`, `extend`, `defer`,
+  `impl`. A keyword shipped in v1.x stays
   reserved through all of v1.x and only becomes *un*-reserved at a major bump
   (v2.0+). New keywords may be **added** only as **contextual keywords**
   (parsed by position, not reserved globally) or **edition-gated** (see §3);

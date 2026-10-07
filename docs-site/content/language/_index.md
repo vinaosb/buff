@@ -33,13 +33,13 @@ Buff omits a deliberate set of features that exist in Rust:
 The compiler emits only "easy" Rust on your behalf; you never see what's
 hidden.
 
-## Reserved keywords (25)
+## Reserved keywords (30)
 
 ```
 func let mut struct enum trait type
-if else for return break continue in match
+if else for while return break continue in match
 async spawn import export from as
-true false extern unsafe
+true false extern unsafe guard extend defer impl
 ```
 
 If you need one of these as an identifier, prefix it (Buff has no escape

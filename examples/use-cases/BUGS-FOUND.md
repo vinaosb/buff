@@ -88,7 +88,7 @@ files cited in the repo (called out per bug).
 ### BUG-2: no top-level `const` (and `const` is not even a reserved keyword)
 - **Severity:** HIGH
 - **Evidence:** `[parse] [Error] only function declarations are allowed at top level, found `ident(const)``
-- **Root cause:** `const` is absent from the 25 reserved keywords, so the lexer tokenises it as a plain identifier; the top-level dispatch table (`crates/buff-lang-parser/src/parser.rs`, `parse_one_decl`) has no const arm, and `Decl` has no `ConstDecl` variant.
+- **Root cause:** `const` is absent from the 30 reserved keywords, so the lexer tokenises it as a plain identifier; the top-level dispatch table (`crates/buff-lang-parser/src/parser.rs`, `parse_one_decl`) has no const arm, and `Decl` has no `ConstDecl` variant.
 - **Also breaks:** `examples/use-cases/error_recovery.buff`, `examples/data-science-workbench/server.buff` — both declare top-level `const`.
 - **Workaround used:** inlined the literals at their use sites.
 
