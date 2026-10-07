@@ -5,7 +5,7 @@
 // T41 introduced race detection: any closure passed to a parallel combinator
 // (`par_map` / `par_filter` / `par_reduce`) that mutates a variable captured
 // from the enclosing scope is a hard `race_analysis::ParallelMutabilityError`.
-// That is correct — naive mutation of a shared variable across worker threads
+// That is correct â€” naive mutation of a shared variable across worker threads
 // is a data race.
 //
 // T42 opens a narrow **escape hatch** for one specific, common, easily-made-
@@ -27,25 +27,25 @@
 //
 // A captured variable `t` is promotable iff ALL of the following hold:
 //
-// 1. **Enclosing-scope shape** — there is a `let mut t = <int literal>` in
+// 1. **Enclosing-scope shape** â€” there is a `let mut t = <int literal>` in
 //    the SAME function as the parallel combinator call.
-// 2. **Captured** — `t` is captured by the parallel closure (free in the
+// 2. **Captured** â€” `t` is captured by the parallel closure (free in the
 //    body, not bound by a param or an inner `let`).
-// 3. **Mutation shape inside the parallel closure** — every mutation of `t`
+// 3. **Mutation shape inside the parallel closure** â€” every mutation of `t`
 //    whose site is at the closure body's TOP LEVEL uses the `+=` operator.
-// 4. **Combinator** — the enclosing parallel combinator is `par_map` or
+// 4. **Combinator** â€” the enclosing parallel combinator is `par_map` or
 //    `par_reduce`. (`par_filter` is NOT an accumulation.)
-// 5. **No nested-closure mutation** — if `t` is mutated inside a NESTED
+// 5. **No nested-closure mutation** â€” if `t` is mutated inside a NESTED
 //    closure within the parallel closure, we conservatively refuse promotion.
 //
-// A variable that fails ANY of (1)-(5) is left alone — T41's race detector
+// A variable that fails ANY of (1)-(5) is left alone â€” T41's race detector
 // continues to flag its mutation as a `ParallelMutabilityError`.
 //
 // The Rust reference is 1025 LOC. The Buff port mirrors the public API
 // surface (AtomicPromotions, AtomicSet, analyze, is_integer_literal_init).
 
 // =============================================================================
-// ACCUMULATING_COMBINATORS — narrower than PARALLEL_COMBINATORS
+// ACCUMULATING_COMBINATORS â€” narrower than PARALLEL_COMBINATORS
 // =============================================================================
 //
 // `par_*` combinators whose closures are valid accumulation contexts for T42
@@ -62,11 +62,11 @@ func accumulating_combinators() -> Vector<String>:
     return out
 
 // =============================================================================
-// AtomicSet — map of promotable variable name → integer initial value
+// AtomicSet â€” map of promotable variable name â†’ integer initial value
 // =============================================================================
 //
 // For ONE function. Stored as a `BTreeMap` so iteration order is
-// deterministic (the T29 flaky-test lesson — never `HashMap` for codegen-
+// deterministic (the T29 flaky-test lesson â€” never `HashMap` for codegen-
 // feeding data).
 
 struct AtomicSet:
@@ -85,7 +85,7 @@ func atomic_set_insert(set: AtomicSet, name: String, initial: Int):
     atomic_set_insert_impl(set, name, initial)
 
 // =============================================================================
-// AtomicPromotions — program-wide atomic-promotion result
+// AtomicPromotions â€” program-wide atomic-promotion result
 // =============================================================================
 //
 // Keyed by function name (a variable `t` in `fn foo` is independent of a
@@ -94,7 +94,7 @@ func atomic_set_insert(set: AtomicSet, name: String, initial: Int):
 // tests via `atomic_promotions_empty` + `atomic_promotions_insert`.
 
 struct AtomicPromotions:
-    by_function: BTreeMap_String_AtomicSet
+    by_function: BTreeMapStringAtomicSet
 
 // Empty promotions set (no variable anywhere is promotable).
 func atomic_promotions_empty() -> AtomicPromotions:
@@ -127,7 +127,7 @@ func atomic_promotions_insert(promos: AtomicPromotions, func_name: String, var_n
     btreetap_string_atomicset_set(promos.by_function, func_name, set)
 
 // =============================================================================
-// analyze — program-level entry: walk Decls, return AtomicPromotions
+// analyze â€” program-level entry: walk Decls, return AtomicPromotions
 // =============================================================================
 //
 // Run atomic-promotion detection across the entire program. Returns the
@@ -150,7 +150,7 @@ func analyze(decls: Vector<Decl>) -> AtomicPromotions:
     return promos
 
 // =============================================================================
-// analyze_func — per-function walker
+// analyze_func â€” per-function walker
 // =============================================================================
 //
 // Walk one function body looking for the accumulator pattern. For each
@@ -165,7 +165,7 @@ func analyze_func(func_decl: FuncDecl) -> AtomicSet:
     return analyze_func_impl(func_decl)
 
 // =============================================================================
-// is_integer_literal_init — predicate: is this Expr an integer literal?
+// is_integer_literal_init â€” predicate: is this Expr an integer literal?
 // =============================================================================
 //
 // Exported for tests so they can verify the predicate on synthesised ASTs.
@@ -186,21 +186,19 @@ struct FuncDecl:
 struct Expr:
     opaque_handle: Int
 
-struct BTreeMap_String_AtomicSet:
+struct BTreeMapStringAtomicSet:
     opaque_handle: Int
 
-extern "Rust" {
-    fn decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
-    fn unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
-    fn func_decl_name(f: FuncDecl) -> String
-    fn atomic_set_new_impl() -> AtomicSet
-    fn atomic_set_get_impl(set: AtomicSet, name: String) -> Option<Int>
-    fn atomic_set_insert_impl(set: AtomicSet, name: String, initial: Int)
-    fn atomic_set_is_empty(set: AtomicSet) -> Bool
-    fn unwrap_atomic_set(opt: Option<AtomicSet>) -> AtomicSet
-    fn btreetap_string_atomicset_new() -> BTreeMap_String_AtomicSet
-    fn btreetap_string_atomicset_get(map: BTreeMap_String_AtomicSet, k: String) -> Option<AtomicSet>
-    fn btreetap_string_atomicset_set(map: BTreeMap_String_AtomicSet, k: String, v: AtomicSet)
-    fn analyze_func_impl(func: FuncDecl) -> AtomicSet
-    fn is_integer_literal_init_impl(e: Expr) -> Bool
-}
+extern "C" func decl_as_func_decl(decl: Decl) -> Option<FuncDecl>
+extern "C" func unwrap_func_decl(opt: Option<FuncDecl>) -> FuncDecl
+extern "C" func func_decl_name(f: FuncDecl) -> String
+extern "C" func atomic_set_new_impl() -> AtomicSet
+extern "C" func atomic_set_get_impl(set: AtomicSet, name: String) -> Option<Int>
+extern "C" func atomic_set_insert_impl(set: AtomicSet, name: String, initial: Int)
+extern "C" func atomic_set_is_empty(set: AtomicSet) -> Bool
+extern "C" func unwrap_atomic_set(opt: Option<AtomicSet>) -> AtomicSet
+extern "C" func btreetap_string_atomicset_new() -> BTreeMapStringAtomicSet
+extern "C" func btreetap_string_atomicset_get(map: BTreeMapStringAtomicSet, k: String) -> Option<AtomicSet>
+extern "C" func btreetap_string_atomicset_set(map: BTreeMapStringAtomicSet, k: String, v: AtomicSet)
+extern "C" func analyze_func_impl(fd: FuncDecl) -> AtomicSet
+extern "C" func is_integer_literal_init_impl(e: Expr) -> Bool

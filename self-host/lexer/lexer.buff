@@ -318,7 +318,7 @@ func lex_range(
             Option.Some(kind) => {
                 push_kind(state, kind, lx_span(state, tok_start, state.pos))
                 continue
-            }
+            },
             Option.None => return Ok(false)
         }
 
@@ -328,7 +328,7 @@ func lex_range(
                 state.pos = state.pos + 1
                 push_kind(state, kind, lx_span(state, tok_start, state.pos))
                 continue
-            }
+            },
             Option.None => return Ok(false)
         }
 
@@ -339,14 +339,13 @@ func lex_range(
                     state.pos = state.pos + pair.len
                     push_kind(state, pair.kind, lx_span(state, tok_start, state.pos))
                     continue
-                }
+                },
                 Option.None => return Ok(false)
             }
-        }
 
         return Result.Err(lexer_error_unexpected_char(Int.to_char(c), lx_span(state, tok_start, tok_start + 1)))
 
-    return Result.Ok(())
+    return Result.Ok(out)
 
 // ===========================================================================
 // T93: Raw string r"..." / r#"..."# scanning
@@ -509,7 +508,7 @@ func parse_char_escape(body: String, span: Span) -> Result<Char, LexerError>:
         let hex = strip_braces(rest)
         match parse_u32_radix(hex, 16) {
             Result.Ok(code) => return Result.Ok(Int.to_char(code)),
-            Result.Err(_) => return Result.Err(lexer_error_new("invalid Unicode escape: \\u{" + hex + "}", span)),
+            Result.Err(_) => return Result.Err(lexer_error_new("invalid Unicode escape: \\u\{" + hex + "\}", span)),
         }
     return Result.Err(lexer_error_new("unknown char escape: \\" + Char.to_string(first), span))
 
@@ -545,9 +544,10 @@ func scan_char(state: LexerState, quote_start: Int) -> Result<Int, LexerError>:
             return Result.Err(lexer_error_new("unterminated char literal escape", lx_span(state, esc_start, state.end)))
         // Determine how many bytes the escape body occupies (excluding \).
         let body_end = compute_escape_body_end(state, esc_start, after_backslash)
-        match body_end {
-            Result.Err(e) => return Result.Err(e),
-            Result.Ok(be) => {
+        match body_end:
+            Result.Err(e):
+                return Result.Err(e)
+            Result.Ok(be):
                 let body = slice_to_string_lx(state, esc_start + 1, be)
                 let scalar = parse_char_escape(body, lx_span(state, esc_start, be))?
                 if be >= state.end || state.bytes[be] != squote_byte:
@@ -557,8 +557,6 @@ func scan_char(state: LexerState, quote_start: Int) -> Result<Int, LexerError>:
                     ))
                 push_kind(state, TokenKind.CharLit(scalar), lx_span(state, quote_start, be + 1))
                 return Result.Ok(be + 1)
-            }
-        }
     // Single scalar value (1..=4 bytes UTF-8).
     let rest = slice_to_string_lx(state, i, state.end)
     let ch = rest[0]
@@ -583,7 +581,7 @@ func compute_escape_body_end(state: LexerState, esc_start: Int, after_backslash:
         let mut j = after_backslash + 1
         if j >= state.end || state.bytes[j] != lbrace_byte:
             return Result.Err(lexer_error_new(
-                "Unicode escape must use the form `\\u{XXXX}`",
+                "Unicode escape must use the form `\\u\{XXXX\}`",
                 lx_span(state, esc_start, int_min(j, state.end)),
             ))
         j = j + 1  // past {
@@ -591,7 +589,7 @@ func compute_escape_body_end(state: LexerState, esc_start: Int, after_backslash:
             j = j + 1
         if j >= state.end:
             return Result.Err(lexer_error_new(
-                "unterminated Unicode escape `\\u{...}`",
+                "unterminated Unicode escape `\\u\{...\}`",
                 lx_span(state, esc_start, state.end),
             ))
         return Result.Ok(j + 1)  // one past }
@@ -603,7 +601,10 @@ func int_min(a: Int, b: Int) -> Int:
         return a
     return b
 
-func not(b: Bool) -> Bool:
+// Local helper kept for the port's call sites; `not` is now the BUG-4 word
+// operator, so the definition cannot use that name. Existing `not(x)` calls
+// resolve to the identical operator.
+func bool_not(b: Bool) -> Bool:
     if b:
         return false
     return true
@@ -681,7 +682,7 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
             state.pos = state.pos + 1
             let s = slice_to_string_lx(state, start, state.pos)
             let trimmed = s.substring(0, s.len() - 1)
-            match Double.from(trimmed) {
+            match Float(trimmed) {
                 Result.Ok(v) => return Result.Ok(TokenKind.DoubleLit(v)),
                 Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
             }
@@ -691,7 +692,7 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
             let raw = slice_to_string_lx(state, start, state.pos - 1)
             return Result.Ok(TokenKind.DecimalLit(raw))
         let s = slice_to_string_lx(state, start, state.pos)
-        match Float.from(s) {
+        match Float(s) {
             Result.Ok(v) => return Result.Ok(TokenKind.FloatLit(v)),
             Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
         }
@@ -703,7 +704,7 @@ func scan_number(state: LexerState, start: Int) -> Result<TokenKind, LexerError>
         return Result.Ok(TokenKind.DecimalLit(raw))
 
     let s = slice_to_string_lx(state, start, state.pos)
-    match Int.from(s) {
+    match Int(s) {
         Result.Ok(v) => return Result.Ok(TokenKind.IntLit(v)),
         Result.Err(_) => return Result.Err(lexer_error_invalid_number(lx_span(state, start, state.pos))),
     }
@@ -738,7 +739,7 @@ func scan_operator(state: LexerState, start: Int, end: Int) -> Option<TokenKind>
             Option.Some(k) => {
                 state.pos = start + 2
                 return Option.Some(k)
-            }
+            },
             Option.None => return Option.None,
         }
     return Option.None
@@ -1085,7 +1086,7 @@ func parse_u32_radix(digits: String, radix: Int) -> Result<Int, Error>:
             Option.Some(v) => {
                 value = value * radix + v
                 idx = idx + 1
-            }
+            },
             Option.None => return Result.Error(invalid_number_error()),
         }
     return Result.Ok(value)

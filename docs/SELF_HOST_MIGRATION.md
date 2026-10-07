@@ -4,6 +4,13 @@
 **Decision record:** `.sisyphus/decisions/deprecation-phase-b.md`
 **Roadmap reference:** `.sisyphus/plans/self-host-completion-roadmap.md` (P5.10)
 
+> **FREEZE (W5/T30):** self-host corpus reflects v1.39 keyword/grammar
+> surface; frozen pending v1.40 self-host milestone (DR-014). 52/58
+> CI-glob files pass `buff check` as of this freeze; the 6 remaining
+> failures are catalogued in
+> `.sisyphus/evidence/task-29-corpus-diagnosis.txt` (4 blocked by a
+> parser dedent bug, 2 by semantic naming choices).
+
 ---
 
 ## 1. Why

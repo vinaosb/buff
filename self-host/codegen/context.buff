@@ -1,6 +1,6 @@
 // Buff self-host port of `crates/buff-lang-codegen-rust/src/context.rs` (T18, Track C).
 //
-// Codegen context — tracks generated names, source-map info, and module
+// Codegen context â€” tracks generated names, source-map info, and module
 // structure.
 //
 // `CodegenContext` is owned by `RustCodegen` during a single code-generation
@@ -17,7 +17,7 @@
 // record_mapping).
 
 // =============================================================================
-// Forward declarations (from buff-lang-error port — placeholder shapes)
+// Forward declarations (from buff-lang-error port â€” placeholder shapes)
 // =============================================================================
 //
 // `Span` and `SourceId` come from the buff-lang-error crate. The self-host
@@ -33,32 +33,28 @@ struct SourceId:
     value: Int
 
 // =============================================================================
-// syn::Ident — opaque handle for syn identifiers
+// syn::Ident â€” opaque handle for syn identifiers
 // =============================================================================
 //
 // `syn::Ident::new(name, span)` constructs an identifier. The Buff port
 // treats the result as opaque (the codegen never inspects Ident interiors).
 
-extern "Rust" {
-    fn syn_ident_new(name: String, span: proc_macro2_Span) -> syn_Ident
-}
+extern "C" func syn_ident_new(name: String, span: ProcMacro2Span) -> SynIdent
 
-struct proc_macro2_Span:
+struct ProcMacro2Span:
     opaque_handle: Int
 
-struct syn_Ident:
+struct SynIdent:
     opaque_handle: Int
 
-extern "Rust" {
-    fn proc_macro2_span_call_site() -> proc_macro2_Span
-}
+extern "C" func proc_macro2_span_call_site() -> ProcMacro2Span
 
 // =============================================================================
 // Source-map position pair
 // =============================================================================
 //
 // `source_mappings` is a `HashMap<Span, (usize, usize)>` in the Rust
-// reference. Buff has no `(T, T)` tuple type in the surface syntax — the
+// reference. Buff has no `(T, T)` tuple type in the surface syntax â€” the
 // port models the value as a `LineCol` struct.
 
 struct LineCol:
@@ -69,10 +65,10 @@ func line_col_new(line: Int, col: Int) -> LineCol:
     return LineCol.new(line: line, col: col)
 
 // =============================================================================
-// CodegenContext — per-pass state for Rust codegen
+// CodegenContext â€” per-pass state for Rust codegen
 // =============================================================================
 //
-// Not shared across concurrent codegen runs — each `RustCodegen` owns its
+// Not shared across concurrent codegen runs â€” each `RustCodegen` owns its
 // own. The state is small and cheap to clone if needed.
 
 struct CodegenContext:
@@ -94,29 +90,27 @@ func codegen_context_new() -> CodegenContext:
     )
 
 // =============================================================================
-// gen_tmp — generate a fresh unique temporary variable identifier
+// gen_tmp â€” generate a fresh unique temporary variable identifier
 // =============================================================================
 //
-// Names look like `__buff_tmp_0`, `__buff_tmp_1`, … so they cannot collide
+// Names look like `__buff_tmp_0`, `__buff_tmp_1`, â€¦ so they cannot collide
 // with any user identifier (which never contains `__`).
 
-func codegen_context_gen_tmp(ctx: CodegenContext) -> syn_Ident:
+func codegen_context_gen_tmp(ctx: CodegenContext) -> SynIdent:
     let name = "__buff_tmp_" + int_to_string(ctx.tmp_counter)
     ctx.tmp_counter = ctx.tmp_counter + 1
     return syn_ident_new(name, proc_macro2_span_call_site())
 
 // =============================================================================
-// record_mapping — record a Buff → Rust position mapping for the source map
+// record_mapping â€” record a Buff â†’ Rust position mapping for the source map
 // =============================================================================
 
 func codegen_context_record_mapping(ctx: CodegenContext, buff_span: Span, rust_line: Int, rust_col: Int):
     ctx.source_mappings.set(buff_span, line_col_new(rust_line, rust_col))
 
 // =============================================================================
-// Local helpers (forward decls — implementations live in the runtime support
+// Local helpers (forward decls â€” implementations live in the runtime support
 // shim that the self-host pipeline links against)
 // =============================================================================
 
-extern "Rust" {
-    fn int_to_string(n: Int) -> String
-}
+extern "C" func int_to_string(n: Int) -> String

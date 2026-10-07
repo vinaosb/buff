@@ -447,7 +447,18 @@ impl RustCodegen {
         let mut inputs: Punctuated<syn::FnArg, syn::Token![,]> = Punctuated::new();
         for p in &f.params {
             let ident = ast_ident_to_syn(&p.name);
-            let ty = self.ast_typeref_to_syn(&p.ty)?;
+            // BUG-10: an unannotated param parses as the `_` placeholder
+            // (TypeRef::Named { name: "_" }). `_` is not a legal Rust
+            // item-signature type (E0121), so emit Buff's default Int
+            // annotation instead — the same unknown-args-fall-back-to-i64
+            // convention buff_type_to_syn already applies to unknown
+            // generic args. `self` receivers (Named { "Self" }) and every
+            // real annotation are untouched.
+            let ty = if matches!(&p.ty, TypeRef::Named { name, .. } if name.name == "_") {
+                rust_path_type("i64")
+            } else {
+                self.ast_typeref_to_syn(&p.ty)?
+            };
             inputs.push(syn::FnArg::Typed(PatType {
                 attrs: Vec::new(),
                 pat: Box::new(Pat::Ident(PatIdent {
