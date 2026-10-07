@@ -181,6 +181,10 @@ jobs:
             echo "::endgroup::"
           done
           echo "Results: $PASS passed, $FAIL failed, $SKIPPED skipped"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::$FAIL golden outputs diverged"
+            exit 1
+          fi
 
   # ── Installer lint (fast, checks for placeholder strings) ─────────────────
   installer-lint:
