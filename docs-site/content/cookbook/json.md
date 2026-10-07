@@ -144,9 +144,9 @@ func main():
 
 JSON-lines (`.jsonl`) is one JSON object per line. `String.split(sep)`
 returns a `Vector<String>` (UTF-8, no allocation beyond the splits).
-Iterate, skip empties, parse each line. The `for` loop is the only
-iteration construct — Buff has no `while` keyword by convention; for
-unbounded iteration use recursion or `for` over a stream.
+Iterate, skip empties, parse each line. `for` and `while` are the
+iteration keywords; for unbounded iteration use `while cond:` or `for`
+over a stream.
 
 `buff-dataframe` (T7) ships `DataFrame.from_json(path)` for the same
 pattern with column-kind inference — `Int`/`Float`/`Bool`/`String`

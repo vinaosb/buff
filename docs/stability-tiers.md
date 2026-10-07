@@ -15,7 +15,7 @@ COMPATIBILITY.md stability promise. Code that compiles today keeps compiling.
 
 | Feature | Notes |
 |---|---|
-| Syntax (keywords, operators, punctuation, grammar) | All 25 keywords stable. |
+| Syntax (keywords, operators, punctuation, grammar) | All 30 keywords stable. |
 | Type system (Int, Float, String, Bool, Vector, Map, Option, Result, Tuple) | Inference rules stable. |
 | Control flow (if/else, for, match, while, break, continue) | Including range iterators (`0..10`). |
 | Functions (func, closures `{ x => ... }`) | Including implicit async propagation. |

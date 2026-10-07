@@ -7,15 +7,15 @@ the tutorial; this is the spec.
 
 ## 6.1 Lexical structure
 
-### Keywords (25)
+### Keywords (30)
 
 These identifiers are reserved and cannot be used as names:
 
 ```
 func let mut struct enum trait type
-if else for return break continue in match
+if else for while return break continue in match
 async spawn import export from as
-true false extern unsafe
+true false extern unsafe guard extend defer impl
 ```
 
 Notably **absent**: `class`, `null` / `nil`, `await`, `try`, `catch`, `new`,
@@ -162,8 +162,8 @@ func name(param: Type, param2: Type) -> ReturnType:
     body
 ```
 
-- Parameters are `name: Type`. The type annotation is required on public
-  functions, optional elsewhere (inferred).
+- Parameters are `name: Type`. Type annotations are optional — inference
+  covers parameters on public functions too.
 - Return type after `->`. Optional; inferred if absent.
 - `main` is the entry point, takes no parameters, returns `Void`.
 
@@ -373,15 +373,16 @@ Buff has two import forms:
 // Local module (relative path):
 import { greet } from "./greet.buff"
 
-// Framework crate (namespace):
-from "buff/web" import Web, Request, Response
+// Framework crate (namespace) — DEFERRED, not yet available:
+// from "buff/web" import Web, Request, Response
 ```
 
 - `import { name1, name2 } from "./path.buff"` — imports *values* (functions,
   constants) from a sibling `.buff` file. The path is relative to the current
   file.
-- `from "buff/web" import Web, Request, Response` — imports *types* from a
-  framework crate (workspace path). You then use them as `Web.method()`.
+- `from "buff/web" import Web, Request, Response` — planned framework-crate
+  import form. **Deferred — not yet available**; framework types cannot be
+  imported today.
 
 A `.buff` file exports names with the `export` keyword:
 
@@ -527,12 +528,11 @@ operator.
 
 > **Status**: struct/enum/trait *declarations* are codegen-verified (see
 > `crates/buff-lang-codegen-rust/tests/{struct,enum}_codegen.rs`) and the
-> generated Rust re-parses via `syn`. The CLI's single-file parser does not
-> yet accept these declarations at the top level — it accepts `func`
-> declarations only. Matching on user-defined enum *values* is also a codegen
-> gap (variants emit unqualified: `Red` not `Color::Red`). The built-in
-> `Option` and `Result` enums work end-to-end. This is the v0.5 codegen gap
-> tracked in `.sisyphus/notepads/buff-v05-language/issues.md`.
+> generated Rust re-parses via `syn`. The parser accepts these declarations
+> at the top level (alongside `func`, `impl`, `import`/`export`, `extern`,
+> and `extend` blocks). Matching on user-defined enum *values* also works
+> end-to-end: bare variants resolve via the enum registry (BUG-14, fixed in
+> PR #66). The built-in `Option` and `Result` enums work end-to-end as well.
 
 ### Structs
 
@@ -583,7 +583,8 @@ Enum variants are **unqualified** in match arms — `Circle(r)`, not
 trait Greetable:
     func greeting(self) -> String
 
-// (impl syntax is part of the parser-gap above; see status note.)
+// (impl syntax is supported: `impl Trait for Type { ... }`; see the
+// status note above.)
 ```
 
 Traits define an interface; types implement them. Buff avoids class

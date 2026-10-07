@@ -125,7 +125,7 @@ func main():
     print("Hello, Buff!")
 ```
 
-- `func` — declares a function. One of Buff's 25 keywords.
+- `func` — declares a function. One of Buff's 30 keywords.
 - `main` — the entry point, exactly like C / Rust / Go. The runtime calls
   `main()` with no arguments.
 - `()` — empty parameter list. (Buff has no `argc`/`argv` on `main`; use the

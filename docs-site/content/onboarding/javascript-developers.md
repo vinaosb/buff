@@ -92,7 +92,7 @@ and compute-heavy work, Buff is competitive today.
 | `function f<T>(x: T): T` | `func f<T>(x: T) -> T:` | Same generics syntax. |
 | `class Foo extends Bar` | (no inheritance) | Use trait + composition. |
 | `enum Color { Red }` | `enum Color: Red` | Same idea. |
-| `as const` | `const X = ...` | Module-level constant. |
+| `as const` | `let X = ...` | Buff has no `const` yet (tracked as BUG-2); use `let`/`@comptime` per current syntax. |
 | `as Foo` (cast) | (no equivalent — use match) | No type assertions. |
 
 ### Strings and template literals
