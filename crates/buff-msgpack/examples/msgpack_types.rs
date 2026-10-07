@@ -9,7 +9,7 @@ fn main() {
         json!(false),
         json!(42),
         json!(-128),
-        json!(3.14159),
+        json!(std::f64::consts::PI),
         json!("hello 世界"),
         json!([1, 2, 3]),
         json!({"key": "value"}),

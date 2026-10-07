@@ -7,7 +7,7 @@ fn main() {
         Computed::new(move || count.get() * 2)
     };
 
-    Effect::new({
+    let _ = Effect::new({
         let doubled = doubled.clone();
         move || {
             println!("doubled = {}", doubled.get());

@@ -19,7 +19,7 @@ fn lit_kind_num(lit: &Literal) -> u64 {
 
 fn main() {
     let a = Literal::Int(42);
-    let b = Literal::Float(3.14);
+    let b = Literal::Float(std::f32::consts::PI);
     let c = Literal::String("hello".to_string());
     let d = Literal::Bool(true);
 

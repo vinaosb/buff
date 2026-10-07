@@ -161,9 +161,9 @@ fn binary_op(op: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
     }
 }
 
-/// Wrap `stmts` in a 0-arg function `f` and run codegen. Returns the
-/// `Result<String, CodegenError>` so tests can assert on either side.
-fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, CodegenError> {
+/// Wrap `stmts` in a 0-arg function `f` and run codegen. The error is boxed
+/// (clippy::result_large_err) so tests can assert on either side.
+fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, Box<CodegenError>> {
     let func = FuncDecl {
         name: ident("f"),
         params: Vec::new(),
@@ -179,13 +179,13 @@ fn codegen_stmts(stmts: Vec<Stmt>) -> Result<String, CodegenError> {
         type_params: Vec::new(),
         span: span(),
     };
-    generate_rust(&[Decl::FuncDecl(func)])
+    generate_rust(&[Decl::FuncDecl(func)]).map_err(Box::new)
 }
 
 /// Assert `result` is an Err whose diagnostic is a
 /// [`ParallelMutabilityError`]-shaped message naming `expected_var`.
 /// Centralised so each positive test reads as a one-liner.
-fn assert_parallel_mutability(result: Result<String, CodegenError>, expected_var: &str) {
+fn assert_parallel_mutability(result: Result<String, Box<CodegenError>>, expected_var: &str) {
     let err = result.expect_err("expected ParallelMutability error, got Ok");
     assert!(
         err.diagnostic.message.contains("ParallelMutability"),

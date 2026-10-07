@@ -428,7 +428,7 @@ fn iso8601_now() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let days = (secs / 86400) as i64;
-    let sec_of_day = (secs % 86400) as u64;
+    let sec_of_day = secs % 86400;
     let (y, m, d) = civil_from_days(days);
     let hh = sec_of_day / 3600;
     let mm = (sec_of_day % 3600) / 60;

@@ -42,14 +42,14 @@ fn from_rows_basic_inference() {
 fn from_rows_float_inference() {
     let df = DataFrame::from_rows(
         vec!["x".into()],
-        vec![vec!["1.5".into()], vec!["2.0".into()], vec!["3.14".into()]],
+        vec![vec!["1.5".into()], vec!["2.0".into()], vec!["2.5".into()]],
     );
     assert!(matches!(
         df.get_column("x").unwrap().kind(),
         ColumnKind::Float
     ));
     let slice = df.get_column("x").unwrap().as_float_slice().unwrap();
-    assert_eq!(slice, &[1.5, 2.0, 3.14]);
+    assert_eq!(slice, &[1.5, 2.0, 2.5]);
 }
 
 #[test]

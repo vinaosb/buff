@@ -38,7 +38,7 @@ fn multiple_effects_on_same_signal() {
     let runs_a = Signal::new(0);
     let runs_b = Signal::new(0);
 
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs_a = runs_a.clone();
         move || {
@@ -46,7 +46,7 @@ fn multiple_effects_on_same_signal() {
             runs_a.set(runs_a.get() + 1);
         }
     });
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs_b = runs_b.clone();
         move || {
@@ -87,7 +87,7 @@ fn chained_computed_propagates_change() {
 fn batch_no_change_no_notification() {
     let src = Signal::new(5);
     let runs = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs = runs.clone();
         move || {
@@ -108,7 +108,7 @@ fn effect_with_conditional_dependency_tracks_only_taken_branch() {
     let b = Signal::new(20);
     let last = Signal::new(0);
 
-    Effect::new({
+    let _ = Effect::new({
         let flag = flag.clone();
         let a = a.clone();
         let b = b.clone();
@@ -186,7 +186,7 @@ fn computed_clone_shares_storage() {
 fn deeply_nested_batch_dedups_correctly() {
     let src = Signal::new(0);
     let runs = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs = runs.clone();
         move || {

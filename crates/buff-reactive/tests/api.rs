@@ -12,7 +12,7 @@ fn signal_new_get_set_roundtrip() {
 fn signal_update_applies_fn_and_notifies() {
     let s = Signal::new(5);
     let count = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let s = s.clone();
         let count = count.clone();
         move || {
@@ -71,7 +71,7 @@ fn computed_caches_until_deps_change() {
 fn effect_runs_once_on_creation() {
     let runs = Signal::new(0);
     let source = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let source = source.clone();
         let runs = runs.clone();
         move || {
@@ -86,7 +86,7 @@ fn effect_runs_once_on_creation() {
 fn effect_reruns_on_dependency_change() {
     let runs = Signal::new(0);
     let source = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let source = source.clone();
         let runs = runs.clone();
         move || {
@@ -109,7 +109,7 @@ fn effect_chains_through_computed() {
         move || src.get() * 2
     });
     let sink = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let doubled = doubled.clone();
         let sink = sink.clone();
         move || {
@@ -127,7 +127,7 @@ fn effect_chains_through_computed() {
 fn batch_defers_notifications() {
     let src = Signal::new(0);
     let runs = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs = runs.clone();
         move || {
@@ -152,7 +152,7 @@ fn batch_defers_notifications() {
 fn nested_batch_runs_once_at_outer_exit() {
     let src = Signal::new(0);
     let runs = Signal::new(0);
-    Effect::new({
+    let _ = Effect::new({
         let src = src.clone();
         let runs = runs.clone();
         move || {

@@ -19,6 +19,9 @@ use buff_lang_error::{Diagnostic, Span};
 // Local SnippetKind stand-in (private upstream — mirrors eval.buff's model).
 // ---------------------------------------------------------------------------
 
+// Payload fields mirror the upstream `SnippetKind` shape; this smoke example
+// only reads the tag, never the payloads.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum SnippetKind {
     Empty,
@@ -172,8 +175,8 @@ fn main() {
     // state. The .buff port reads these fields directly; here we print the
     // known initial values to match the output.
     let _ev0 = Evaluator::new();
-    println!("");
-    println!("");
+    println!();
+    println!();
     println!("false");
 
     // --- Evaluator with accumulated state ---

@@ -10,7 +10,7 @@
 //!
 //! Plus 5 insta snapshots (per T46 acceptance criteria: ≥10 tests).
 
-use buff_nlp::{Language, NlpError, StemAlgorithm, Text};
+use buff_nlp::{NlpError, StemAlgorithm, Text};
 
 const ENGLISH_SAMPLE: &str =
     "The quick brown fox jumps over the lazy dog near the riverbank every morning.";
@@ -180,8 +180,9 @@ fn language_display_format() {
 
 #[test]
 fn text_default_is_namespace_marker() {
-    // Text is a unit-like namespace marker; Default is the codegen
-    // panic-free fallback (matches DataFrame / Image precedent).
+    // Deliberate: this test exercises `Text::default()` itself (codegen
+    // panic-free fallback), so the lint's `Text` suggestion defeats the intent.
+    #[allow(clippy::default_constructed_unit_structs)]
     let _ = Text::default();
 }
 

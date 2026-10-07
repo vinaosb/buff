@@ -76,9 +76,9 @@ fn parse_sci(src: &str) -> Expr {
         .expect("scientific-edition parser should succeed")
 }
 
-fn parse_std(src: &str) -> Result<Expr, buff_lang_error::ParseError> {
+fn parse_std(src: &str) -> Result<Expr, Box<buff_lang_error::ParseError>> {
     let tokens = tokenize(src, sid()).expect("lexer should succeed");
-    parse_expression_with_edition(&tokens, sid(), Edition::Standard)
+    parse_expression_with_edition(&tokens, sid(), Edition::Standard).map_err(Box::new)
 }
 
 fn shape(e: &Expr) -> String {

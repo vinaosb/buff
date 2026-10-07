@@ -20,7 +20,7 @@ fn main() {
             r#"{{
     "name": "buff-app",
     "version": 2,
-    "pi": 3.14159,
+    "pi": 2.5,
     "enabled": true,
     "tags": ["dev", "test"]
 }}"#
@@ -33,7 +33,7 @@ fn main() {
     // Read back values
     assert_eq!(cfg.get("name"), Some("buff-app".to_string()));
     assert_eq!(cfg.get_int("version"), Some(2));
-    assert!(cfg.get_float("pi").unwrap() - 3.14159 < 0.0001);
+    assert!(cfg.get_float("pi").unwrap() - 2.5 < 0.0001);
     assert_eq!(cfg.get_bool("enabled"), Some(true));
 
     println!("config_types: all value type assertions passed");

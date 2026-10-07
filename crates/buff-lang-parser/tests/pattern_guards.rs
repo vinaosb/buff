@@ -95,7 +95,7 @@ fn t40_guard_with_complex_expression() {
     assert!(arms[0]
         .guard
         .as_ref()
-        .map(|g| g.span().start >= 0)
+        .map(|g| g.span().end > g.span().start)
         .unwrap_or(false));
 }
 

@@ -13,7 +13,7 @@
 //! 4. **Function definitions** — valid `func` definitions parse to
 //!    `Decl::FuncDecl` with the correct name.
 
-use buff_lang_ast::{Decl, Expr, Literal};
+use buff_lang_ast::Decl;
 use buff_lang_error::SourceId;
 use buff_lang_lexer::tokenize;
 use buff_lang_parser::parse;
