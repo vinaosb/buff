@@ -36,9 +36,9 @@ fn config_set_default_int() {
 #[test]
 fn config_set_default_float() {
     let cfg = Config::new();
-    cfg.set_default("pi", 3.14);
+    cfg.set_default("pi", std::f64::consts::PI);
     let val = cfg.get_float("pi").unwrap();
-    assert!((val - 3.14).abs() < 0.001);
+    assert!((val - std::f64::consts::PI).abs() < 0.001);
 }
 
 #[test]
