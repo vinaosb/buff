@@ -1,4 +1,4 @@
-﻿//! T34 integration tests â€” closures / lambdas codegen.
+//! T34 integration tests â€” closures / lambdas codegen.
 //!
 //! Builds on T23's minimal closure support (`{ params => expr }` â†’
 //! `|params| expr`) and T34's **variable capture** analysis.
@@ -503,6 +503,58 @@ fn closures_zero_param_capture_only() {
     assert!(
         src.contains("|| f"),
         "expected `|| f` zero-param closure in: {src}"
+    );
+    must_reparse(&src);
+}
+
+// ---------------------------------------------------------------------------
+// BUG-13: multi-statement closure body — final ExprStmt is the tail
+// ---------------------------------------------------------------------------
+
+#[test]
+fn closures_multistmt_body_tail_expression() {
+    // { x =>
+    //     let y = x * 2
+    //     y
+    // }  ->  |x| { let y = x * 2; y }
+    //
+    // The final expression MUST be the block tail (no trailing `;`),
+    // otherwise the closure returns () and `.map()` fails to typecheck.
+    let let_y = Stmt::LetDecl {
+        name: ident("y"),
+        value: binary_op(
+            buff_lang_ast::op::BinaryOp::Mul,
+            ident_expr("x"),
+            int_expr(2),
+        ),
+        mutable: false,
+        ty: None,
+        span: span(),
+    };
+    let params: Vec<Param> = vec![Param {
+        name: ident("x"),
+        ty: placeholder_ty(),
+        default_value: None,
+        is_comptime: false,
+        span: span(),
+    }];
+    let lambda = Expr::Lambda {
+        params,
+        body: Block {
+            stmts: vec![let_y, Stmt::ExprStmt(ident_expr("y"), span())],
+            span: span(),
+        },
+        return_type: None,
+        span: span(),
+    };
+    let src = codegen_one_expr(lambda);
+    assert!(
+        src.contains("|x| {\n        let y = x * 2;\n        y\n    }"),
+        "expected multi-stmt closure with tail expr in: {src}"
+    );
+    assert!(
+        !src.contains("y;\n    }"),
+        "closure tail must not carry a trailing semicolon: {src}"
     );
     must_reparse(&src);
 }

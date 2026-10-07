@@ -92,14 +92,21 @@ impl RustCodegen {
 
     /// Lower a lambda body. If the block is a single `ExprStmt`, lower that
     /// expression directly (so `|x| x * 2` not `|x| { x * 2 }`); otherwise
-    /// lower the block as a `syn::Expr::Block`.
+    /// lower the block as a `syn::Expr::Block` with the final `ExprStmt` as
+    /// the tail expression (BUG-13: `|x| { let y = x * 2; y }` must return
+    /// `y`, not `()` — `lower_stmt` emits every `ExprStmt` with a trailing
+    /// semicolon, so the last one is stripped here, mirroring the T86
+    /// match-arm tail strip in `lower_match_expr`).
     pub(super) fn lower_lambda_body(&mut self, body: &Block) -> Result<SynExpr, CodegenError> {
         if body.stmts.len() == 1 {
             if let Stmt::ExprStmt(e, _) = &body.stmts[0] {
                 return self.lower_expr(e);
             }
         }
-        let block = self.lower_block(body)?;
+        let mut block = self.lower_block(body)?;
+        if let Some(SynStmt::Expr(_, semi)) = block.stmts.last_mut() {
+            *semi = None;
+        }
         Ok(SynExpr::Block(syn::ExprBlock {
             attrs: Vec::new(),
             label: None,
