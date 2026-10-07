@@ -17,7 +17,9 @@ else
     BRANCH_NAME=$(git branch --show-current)
     if [ -f "AGENTS.md" ]; then
         sed -i "s/\*\*Commit:\*\* [a-f0-9]*/**Commit:** $COMMIT_HASH/" AGENTS.md
-        sed -i "s/\*\*Branch:\*\* \`[^`]*\`/**Branch:** \`$BRANCH_NAME\`/" AGENTS.md
+        # Pipe delimiter: branch names contain "/" (which trips MSYS sed
+        # arg-munging on Windows) but can never contain "|".
+        sed -i 's|\*\*Branch:\*\* `[^`]*`|**Branch:** `'"$BRANCH_NAME"'`|' AGENTS.md
         git add AGENTS.md
         AGENTS_UPDATED=1
     fi

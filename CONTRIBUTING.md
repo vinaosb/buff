@@ -167,6 +167,26 @@ perf(runtime): add pipeline caching and buffer pooling
 The scope is the crate or component affected. Keep the subject line under 72
 characters. Write the body only when the "why" is not obvious from the diff.
 
+### Git hooks
+
+The repo ships a pre-commit hook in [`.githooks/`](./.githooks/). It is not
+active by default; install it with:
+
+```bash
+git config core.hookspath .githooks
+```
+
+Once installed, the hook runs on every commit and:
+
+- enforces the extension cap tracked in
+  `.sisyphus/evidence/extensions-counter.json` (rejects commits that exceed
+  the allowed number of scoped extensions), and
+- refreshes the `**Commit:**` / `**Branch:**` metadata lines in `AGENTS.md`
+  when a commit does not already stage `AGENTS.md`.
+
+Contributors on Windows may keep commits with `--no-verify` if the hook
+misbehaves in their shell environment — CI remains the authoritative gate.
+
 ## Testing Strategy
 
 - **Snapshot tests (insta):** The primary testing mechanism. AST structures,
