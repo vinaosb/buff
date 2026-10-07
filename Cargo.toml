@@ -27,6 +27,13 @@ members = ["crates/*"]
 # semver-incompatible version.
 
 [workspace.dependencies]
+# Accepted transitive duplicate chains (cargo tree audit, debt-zero W4):
+# windows-sys ×5, hashbrown ×5, tungstenite ×4, darling ×3, spin ×3.
+# All are TRANSITIVE (no direct dep of any workspace crate pulls a second
+# major deliberately); unifying them means migrating parent crates, so the
+# cost far exceeds the benefit. ACCEPTED; revisit on major-version bumps
+# of their parent crates. Related accepted-debt record (h2 0.3 chain via
+# ethers-rs/oauth2): .sisyphus/decisions/accepted-debt-ethers-oauth2.md
 # `visit` feature added in T69 (@no-alloc lint): enables `syn::visit::Visit`,
 # the immutable AST walker the allocation-scanner uses to recurse into every
 # expression of a lowered function body. Additive (features only widen syn's
