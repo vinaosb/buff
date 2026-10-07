@@ -130,7 +130,7 @@ pub fn generate_cargo_toml(cfg: &BuffConfig) -> String {
     //     a real `name = { path = "<vendor>/<name>-<version>" }` entry
     //     once vendoring lands.
     if !cfg.registry_dependencies.is_empty() {
-        out.push_str("\n# [registry-dependencies] (T127 — cargo wiring TODO)\n");
+        out.push_str("\n# [registry-dependencies] (not yet wired — tracked as T127)\n");
         for (name, dep) in &cfg.registry_dependencies {
             out.push_str(&format!(
                 "# {name} = \"{}\" (resolve + vendor on next `buff build`)\n",
