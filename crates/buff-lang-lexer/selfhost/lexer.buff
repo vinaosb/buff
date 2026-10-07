@@ -1,7 +1,7 @@
 // buff-lang-lexer self-host port (feasibility stage).
 //
 // Ports the public surface of `crates/buff-lang-lexer/src/token.rs`:
-//   - TokenKind enum (101 variants: literals, keywords, operators, delimiters,
+//   - TokenKind enum (102 variants: literals, keywords, operators, delimiters,
 //     layout, string-interpolation, Unicode math operators).
 //   - Token struct { kind, span }.
 //   - LexerError struct (simplified — wraps a message + span).
@@ -39,7 +39,7 @@ func span_new(s: Int, e: Int) -> Span:
     return Span { start: s, end: e }
 
 // ----------------------------------------------------------------------------
-// TokenKind — ALL 101 variants ported from token.rs.
+// TokenKind — ALL 102 variants ported from token.rs.
 // ----------------------------------------------------------------------------
 enum TokenKind {
     // --- Literals ---
@@ -63,7 +63,7 @@ enum TokenKind {
     // --- Identifiers ---
     Ident(String),
 
-    // --- 29 keywords (Kw-prefixed to avoid clashing with Buff's own keywords) ---
+    // --- 30 keywords (Kw-prefixed to avoid clashing with Buff's own keywords) ---
     KwFunc,
     KwLet,
     KwMut,
@@ -74,6 +74,7 @@ enum TokenKind {
     KwIf,
     KwElse,
     KwFor,
+    KwWhile,
     KwReturn,
     KwBreak,
     KwContinue,
@@ -236,7 +237,7 @@ func token_kind_num(kind: TokenKind) -> Int:
         StringEnd => 14,
         // Identifier (15)
         Ident(_) => 15,
-        // Keywords (16-44)
+        // Keywords (16-45)
         KwFunc => 16,
         KwLet => 17,
         KwMut => 18,
@@ -247,95 +248,96 @@ func token_kind_num(kind: TokenKind) -> Int:
         KwIf => 23,
         KwElse => 24,
         KwFor => 25,
-        KwReturn => 26,
-        KwBreak => 27,
-        KwContinue => 28,
-        KwIn => 29,
-        KwMatch => 30,
-        KwAsync => 31,
-        KwSpawn => 32,
-        KwImport => 33,
-        KwExport => 34,
-        KwFrom => 35,
-        KwAs => 36,
-        KwTrue => 37,
-        KwFalse => 38,
-        KwExtern => 39,
-        KwUnsafe => 40,
-        KwGuard => 41,
-        KwExtend => 42,
-        KwDefer => 43,
-        KwImpl => 44,
-        // Operators (45-77)
-        DotDot => 45,
-        DotDotEq => 46,
-        Plus => 47,
-        Minus => 48,
-        Star => 49,
-        Slash => 50,
-        Percent => 51,
-        EqEq => 52,
-        NotEq => 53,
-        Lt => 54,
-        Gt => 55,
-        LtEq => 56,
-        GtEq => 57,
-        AndAnd => 58,
-        OrOr => 59,
-        Not => 60,
-        Question => 61,
-        QuestionQuestion => 62,
-        QuestionDot => 63,
-        Caret => 64,
-        Pipe => 65,
-        Amp => 66,
-        Shl => 67,
-        Shr => 68,
-        Tilde => 69,
-        Arrow => 70,
-        FatArrow => 71,
-        Assign => 72,
-        PlusEq => 73,
-        MinusEq => 74,
-        StarEq => 75,
-        SlashEq => 76,
-        PercentEq => 77,
-        PipeGt => 78,
+        KwWhile => 26,
+        KwReturn => 27,
+        KwBreak => 28,
+        KwContinue => 29,
+        KwIn => 30,
+        KwMatch => 31,
+        KwAsync => 32,
+        KwSpawn => 33,
+        KwImport => 34,
+        KwExport => 35,
+        KwFrom => 36,
+        KwAs => 37,
+        KwTrue => 38,
+        KwFalse => 39,
+        KwExtern => 40,
+        KwUnsafe => 41,
+        KwGuard => 42,
+        KwExtend => 43,
+        KwDefer => 44,
+        KwImpl => 45,
+        // Operators (46-78)
+        DotDot => 46,
+        DotDotEq => 47,
+        Plus => 48,
+        Minus => 49,
+        Star => 50,
+        Slash => 51,
+        Percent => 52,
+        EqEq => 53,
+        NotEq => 54,
+        Lt => 55,
+        Gt => 56,
+        LtEq => 57,
+        GtEq => 58,
+        AndAnd => 59,
+        OrOr => 60,
+        Not => 61,
+        Question => 62,
+        QuestionQuestion => 63,
+        QuestionDot => 64,
+        Caret => 65,
+        Pipe => 66,
+        Amp => 67,
+        Shl => 68,
+        Shr => 69,
+        Tilde => 70,
+        Arrow => 71,
+        FatArrow => 72,
+        Assign => 73,
+        PlusEq => 74,
+        MinusEq => 75,
+        StarEq => 76,
+        SlashEq => 77,
+        PercentEq => 78,
+        PipeGt => 79,
         // Unicode math operators (79-86)
-        Sum => 79,
-        Product => 80,
-        Sqrt => 81,
-        InUni => 82,
-        NotInUni => 83,
-        SubsetUni => 84,
-        ApproxUni => 85,
-        Adjoint => 86,
+        Sum => 80,
+        Product => 81,
+        Sqrt => 82,
+        InUni => 83,
+        NotInUni => 84,
+        SubsetUni => 85,
+        ApproxUni => 86,
+        Adjoint => 87,
         // Delimiters (87-97)
-        LParen => 87,
-        RParen => 88,
-        LBrace => 89,
-        RBrace => 90,
-        LBracket => 91,
-        RBracket => 92,
-        Colon => 93,
-        Comma => 94,
-        Dot => 95,
-        Semicolon => 96,
-        At => 97,
+        LParen => 88,
+        RParen => 89,
+        LBrace => 90,
+        RBrace => 91,
+        LBracket => 92,
+        RBracket => 93,
+        Colon => 94,
+        Comma => 95,
+        Dot => 96,
+        Semicolon => 97,
+        At => 98,
         // Layout (98-101)
-        Newline => 98,
-        Indent => 99,
-        Dedent => 100,
-        Eof => 101,
+        Newline => 99,
+        Indent => 100,
+        Dedent => 101,
+        Eof => 102,
     }
 
 // ----------------------------------------------------------------------------
-// is_keyword — port of TokenKind::is_keyword. Returns true for the 29
+// is_keyword — port of TokenKind::is_keyword. Returns true for the 30
 // keyword variants (KwFunc..KwImpl), false for everything else.
 // ----------------------------------------------------------------------------
 func is_keyword(kind: TokenKind) -> Bool:
     let n = token_kind_num(kind: kind)
-    return n >= 16 && n <= 44
+    return n >= 16 && n <= 45
 
 // ----------------------------------------------------------------------------
 // kind_label — short human-readable label for diagnostics / pretty-printing.
@@ -369,6 +371,7 @@ func kind_label(kind: TokenKind) -> String:
         KwIf => "KwIf",
         KwElse => "KwElse",
         KwFor => "KwFor",
+        KwWhile => "KwWhile",
         KwReturn => "KwReturn",
         KwBreak => "KwBreak",
         KwContinue => "KwContinue",
@@ -483,7 +486,7 @@ func main():
     // --- Identifier (15) ---
     print(token_kind_num(kind: Ident("foo")))
 
-    // --- Keywords 16-44 ---
+    // --- Keywords 16-45 ---
     print(token_kind_num(kind: KwFunc))
     print(token_kind_num(kind: KwLet))
     print(token_kind_num(kind: KwMut))
@@ -494,6 +497,7 @@ func main():
     print(token_kind_num(kind: KwIf))
     print(token_kind_num(kind: KwElse))
     print(token_kind_num(kind: KwFor))
+    print(token_kind_num(kind: KwWhile))
     print(token_kind_num(kind: KwReturn))
     print(token_kind_num(kind: KwBreak))
     print(token_kind_num(kind: KwContinue))
