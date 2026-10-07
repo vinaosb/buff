@@ -1275,7 +1275,7 @@ Evidence: `.sisyphus/evidence/task-46-tiling.txt`.
 
 ### Public API surface (re-exported from `buff_lang_runtime` crate root)
 ```rust
-// Pure helpers â€” unit-testable without a GPU.
+// Pure helpers — unit-testable without a GPU.
 pub fn tile_ranges(total_len: usize, max_tile: usize) -> Vec<(usize, usize)>;
 pub fn max_elements_per_tile(vram_budget_bytes: u64, bytes_per_element: u64) -> usize;
 pub fn vram_budget_from_device(device: &wgpu::Device) -> u64;
@@ -1321,9 +1321,9 @@ max_elements_per_tile(vram_budget_bytes, bytes_per_element)
   limit. (`max_storage_buffer_binding_size` is u32, always
   `<= max_buffer_size` in practice; the min is defensive for future
   wgpu versions.)
-- **Edge cases**: `bytes_per_element == 0` â†’ 0 (avoid div-by-zero);
-  `vram < 3*bpe` â†’ 0 (can't fit one element â†’ caller falls back to CPU);
-  `3 * bpe` overflow â†’ 0 (saturating_mul prevents wrong small result).
+- **Edge cases**: `bytes_per_element == 0` → 0 (avoid div-by-zero);
+  `vram < 3*bpe` → 0 (can't fit one element → caller falls back to CPU);
+  `3 * bpe` overflow → 0 (saturating_mul prevents wrong small result).
 
 ### tile_ranges behavior (documented edge cases)
 ```
@@ -1334,33 +1334,33 @@ otherwise               -> ceil(total_len/max_tile) tiles, last is partial
 ```
 QA case: `tile_ranges(250, 100) -> [(0,100),(100,200),(200,250)]` (3 tiles).
 
-### `max_tile == 0` semantics â€” IMPORTANT (different per API level)
+### `max_tile == 0` semantics — IMPORTANT (different per API level)
 - **`tile_ranges` / `dispatch_tiled` / `TiledDispatcher`**: `0` means
-  "no tiling" â€” a single tile covers the whole input. Caller's manual
+  "no tiling" — a single tile covers the whole input. Caller's manual
   opt-out.
 - **`dispatch_map_with_tiling`**: `0` means "VRAM budget too small to
-  fit one element â€” CPU fallback". This is because
+  fit one element — CPU fallback". This is because
   `max_elements_per_tile()` returns 0 precisely in that case.
 - The two conventions coexist because they serve different callers:
   low-level helper vs high-level entry. Documented in the module-level
   rustdoc.
 
 ### CPU fallback decision tree (`dispatch_map_with_tiling`)
-1. `input.is_empty()` â†’ return empty Vec (no work).
-2. `gpu_backend == None` â†’ run `cpu_oracle(input)` (no GPU adapter).
-3. `max_tile_elements == 0` â†’ run `cpu_oracle(input)` (can't fit one
+1. `input.is_empty()` → return empty Vec (no work).
+2. `gpu_backend == None` → run `cpu_oracle(input)` (no GPU adapter).
+3. `max_tile_elements == 0` → run `cpu_oracle(input)` (can't fit one
    element through VRAM budget formula).
-4. `dispatch_tiled(...)` succeeds â†’ return GPU output.
-5. `dispatch_tiled(...)` errors â†’ run `cpu_oracle(input)` (defensive â€”
+4. `dispatch_tiled(...)` succeeds → return GPU output.
+5. `dispatch_tiled(...)` errors → run `cpu_oracle(input)` (defensive —
    includes `GpuUnavailable`, `GpuInit`, etc).
 
 The CPU oracle is typically T38b's `cpu_fallback_map` (sequential,
 deterministic) or T39's `CpuDispatcher::par_map` (parallel, rayon).
-Both return `Vec<f32>` directly (infallible) â€” so the high-level entry
+Both return `Vec<f32>` directly (infallible) — so the high-level entry
 can promise to always return a value: GPU failure is invisible to the
 caller. This is the contract the T46 task spec demands.
 
-### Files changed (all under buff-lang-runtime/ â€” no other crate touched)
+### Files changed (all under buff-lang-runtime/ — no other crate touched)
 1. `crates/buff-lang-runtime/src/tiling.rs` (NEW, ~430 lines).
    - `tile_ranges` pure helper (~30 lines + rustdoc).
    - `max_elements_per_tile` pure helper (~25 lines + rustdoc).
@@ -1369,42 +1369,42 @@ caller. This is the contract the T46 task spec demands.
    - `TiledDispatcher` struct + impl (~50 lines + rustdoc).
    - `dispatch_map_with_tiling` high-level entry (~45 lines + rustdoc).
    - 11 inline unit tests (`#[cfg(test)] mod tests`).
-2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED â€” +1 module decl,
+2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED — +1 module decl,
    +1 re-export block with 6 items, +6 doc lines in crate-level docs).
 3. `crates/buff-lang-runtime/tests/tiling_tests.rs` (NEW, ~370 lines,
    22 integration tests). All test names contain `tiling` so the QA
    filter `cargo test -p buff-lang-runtime tiling` matches the whole
    suite (inline + integration + doctests).
-4. `crates/buff-lang-runtime/Cargo.toml`: **NO CHANGE** â€” all required
+4. `crates/buff-lang-runtime/Cargo.toml`: **NO CHANGE** — all required
    deps (`wgpu`, `bytemuck`, `pollster`) already in `[dependencies]`
    from T38; `buff-lang-ast` + `buff-lang-codegen-wgsl` + `insta` already
    in `[dev-dependencies]` from T38b. T46 added ZERO new deps.
-5. `.sisyphus/evidence/task-46-tiling.txt` (NEW â€” raw cargo test output
+5. `.sisyphus/evidence/task-46-tiling.txt` (NEW — raw cargo test output
    proving the QA roundtrip ran on the real GPU + 4-gate summary).
 
 ### Test coverage matrix (38 NEW test points)
 - **tile_ranges** (11 inline + 6 integration = 17 tests):
-  QA 250/100 â†’ 3 tiles; empty input â†’ empty; input â‰¤ max â†’ 1 tile;
+  QA 250/100 → 3 tiles; empty input → empty; input â‰¤ max → 1 tile;
   exact multiple (200/100, 300/100); max_tile=0 disables tiling;
   max_tile=1 yields N tiles; singleton input.
 - **max_elements_per_tile** (4 inline + 2 integration = 6 tests):
-  basic formula (1200/12=100, 2400/24=100); 4 GiB budget â†’
-  357_913_941 elements; budget-too-small (11 bytes < 12 â†’ 0);
-  zero budget â†’ 0; zero bpe â†’ 0; exactly fits one element (12/12=1).
+  basic formula (1200/12=100, 2400/24=100); 4 GiB budget →
+  357_913_941 elements; budget-too-small (11 bytes < 12 → 0);
+  zero budget → 0; zero bpe → 0; exactly fits one element (12/12=1).
 - **dispatch_tiled via MockGpuBackend** (6 integration):
-  QA 250/100 â†’ 3 recorded dispatches + output == CPU oracle;
+  QA 250/100 → 3 recorded dispatches + output == CPU oracle;
   input-order preservation across tiles (per-tile offset encoding);
   per-tile input lengths (100/100/50 for 250@100); single tile when
-  input fits; empty input â†’ no dispatch.
+  input fits; empty input → no dispatch.
 - **TiledDispatcher struct API** (2 integration):
   dispatch produces same output as free fn; accessors
   (`max_tile_elements()`, `backend()`).
 - **dispatch_map_with_tiling CPU fallback** (5 integration):
-  `None` backend â†’ CPU; `max_tile=0` â†’ CPU even with backend; empty
-  input â†’ empty Vec; GPU error (`GpuUnavailable` from unavailable
-  context) â†’ CPU fallback fires; happy path (mock backend + max_tile>0)
+  `None` backend → CPU; `max_tile=0` → CPU even with backend; empty
+  input → empty Vec; GPU error (`GpuUnavailable` from unavailable
+  context) → CPU fallback fires; happy path (mock backend + max_tile>0)
   uses GPU path.
-- **Real-GPU tiled dispatch** (3 integration â€” ALL RAN on this host):
+- **Real-GPU tiled dispatch** (3 integration — ALL RAN on this host):
   250 elements at max_tile=100 via WgpuBackend matches CPU oracle;
   1000 elements at max_tile=100 (10 tiles) == single dispatch; high-level
   `dispatch_map_with_tiling` with real GPU produces oracle output.
@@ -1413,17 +1413,17 @@ caller. This is the contract the T46 task spec demands.
   `dispatch_map_with_tiling` CPU-only example; `TiledDispatcher` +
   `vram_budget_from_device` are `ignore`-tagged (they reference types
   across module boundaries that confuse the doctest runner on some
-  toolchains â€” same pattern as T38b's MockGpuBackend doctests).
+  toolchains — same pattern as T38b's MockGpuBackend doctests).
 
 ### Determinism + no-unwrap contract
 - **Tiles processed sequentially in input order**: `for (start, end) in
   ranges { output.extend(backend.dispatch_map(shader, &input[start..end])?); }`
   No interior reordering, no hashing, no threads.
-- **Pre-allocated output**: `Vec::with_capacity(input.len())` â€” zero
+- **Pre-allocated output**: `Vec::with_capacity(input.len())` — zero
   reallocations as tiles append.
 - **NO `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!`** in non-test
   code. `usize::try_from(...).unwrap_or(usize::MAX)` is `unwrap_or`
-  (not `unwrap`) â€” handles 32-bit platform u64â†’usize overflow soundly.
+  (not `unwrap`) — handles 32-bit platform u64→usize overflow soundly.
 - **No HashMap/HashSet** anywhere in the module.
 
 ### Conventions honored
@@ -1440,12 +1440,12 @@ caller. This is the contract the T46 task spec demands.
 - 4 spaces only. No tabs. No trailing whitespace.
 
 ### wgpu 26 API specifics (verified)
-- **`device.limits()` returns `wgpu::Limits` by value** â€” copying the
+- **`device.limits()` returns `wgpu::Limits` by value** — copying the
   fields we need (`max_storage_buffer_binding_size: u32`,
   `max_buffer_size: u64`) is cheap.
-- **`max_storage_buffer_binding_size` is `u32`** in wgpu 26 â€” cast via
+- **`max_storage_buffer_binding_size` is `u32`** in wgpu 26 — cast via
   `u64::from(...)` (zero-cost widening).
-- **`max_buffer_size` is `u64`** in wgpu 26 â€” direct assignment to `u64`
+- **`max_buffer_size` is `u64`** in wgpu 26 — direct assignment to `u64`
   local works without any cast.
 - Both fields are `Copy` (lifted from `Limits` which is `Clone + Copy`).
 
@@ -1459,17 +1459,17 @@ caller. This is the contract the T46 task spec demands.
 
 ### Gotchas / lessons for T47
 1. **T47 (cold-start pooling) can reuse `vram_budget_from_device`**
-   verbatim â€” the formula `max_elements_per_tile(vram, bpe) = vram / (3*bpe)`
+   verbatim — the formula `max_elements_per_tile(vram, bpe) = vram / (3*bpe)`
    is stable. T47 will likely add buffer-pool reuse (keep the three
    per-tile buffers alive across dispatches instead of recreating them).
    The factor of 3 stays the same.
-2. **`GpuBackend` trait has no `has_device()` method** â€” the high-level
+2. **`GpuBackend` trait has no `has_device()` method** — the high-level
    `dispatch_map_with_tiling` therefore decides GPU vs CPU by ATTEMPTING
    the dispatch and catching errors. This is more robust than pre-checking
    (the backend could fail mid-dispatch anyway). T49 (`@prefer` hints)
    may want to add `has_device()` to the trait for explicit hint-driven
-   routing â€” currently the routing is purely reactive.
-3. **`MockGpuBackend` never errors** â€” to test the CPU-fallback-on-error
+   routing — currently the routing is purely reactive.
+3. **`MockGpuBackend` never errors** — to test the CPU-fallback-on-error
    path, use `WgpuBackend::from_context(GpuContext::unavailable())`
    which always returns `Err(GpuUnavailable)` from `dispatch_map`. This
    is the same trick T45's `unavailable_backend()` helper uses.
@@ -1482,30 +1482,30 @@ caller. This is the contract the T46 task spec demands.
    `|input| cpu_dispatcher.par_map(input.to_vec(), |x| x * 2.0)` for
    T39's parallel CPU path, or `|input| cpu_fallback_map(input, |x|
    x * 2.0)` for T38b's sequential oracle).
-6. **rustfmt wraps long `assert_eq!` macro args past 100 cols** â€”
+6. **rustfmt wraps long `assert_eq!` macro args past 100 cols** —
    pre-emptively break them across lines. The `tile_ranges(300, 100)`
    test assertion does this.
 7. **`u64::from(limits.max_storage_buffer_binding_size)`** avoids
    `as u64` which would trigger `clippy::unnecessary_cast` if the field
    were already u64. Reflexive `From<u32> for u64` is the idiomatic
    zero-cost widening.
-8. **No MSVC env vars needed for `cargo check`** â€” only `cargo test`
+8. **No MSVC env vars needed for `cargo check`** — only `cargo test`
    and `cargo clippy --all-targets` need them (link step requires
    `msvcrt.lib`). Same convention as T38-T45.
 
 ### What's deferred (correctly out of scope for T46)
 - T47: cold-start pooling (pre-warm device at startup, pipeline cache
   reuse across dispatches). Currently `dispatch_tiled` recreates the
-  shader+pipeline per tile via T45's `WgpuBackend::dispatch_map` â€”
+  shader+pipeline per tile via T45's `WgpuBackend::dispatch_map` —
   acceptable for correctness, suboptimal for throughput. T47 will
   likely add a per-backend pipeline cache keyed by shader source hash.
 - T48: recursion detection (CPU-only marking for recursive functions).
 - T49: `@prefer(gpu)` / `@prefer(cpu)` hints. Will layer an override
   on top of `dispatch_map_with_tiling`'s decision tree.
 - Reductions/scans with cross-tile combining (post-v1.0).
-- Multi-GPU dispatch (one tile per GPU, run in parallel) â€” post-v1.0.
+- Multi-GPU dispatch (one tile per GPU, run in parallel) — post-v1.0.
 
-### MSVC env vars (REQUIRED for test/clippy/build â€” NOT for cargo check)
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for cargo check)
 Same as T38/T39/T40/T42/T43/T44/T38b/T45. Exact strings used for this task:
 ```powershell
 $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
@@ -2018,7 +2018,7 @@ VRAM unknown=None=assumes-fits) and produced 2048 floats matching the
 CPU oracle within 1e-4 tolerance. Verified `decide_with_prefer` chose
 `DispatchKind::GpuCompute` for this case.
 
-Evidence: `.sisyphus/evidence/task-49-hints.txt` â€” raw cargo test output
+Evidence: `.sisyphus/evidence/task-49-hints.txt` — raw cargo test output
 including the QA test
 `hints_qa_prefer_gpu_with_10_elements_routes_to_cpu ... ok` and the
 real-GPU test `hints_dispatch_with_prefer_real_gpu_large_input_matches_cpu_oracle ... ok`.
@@ -2028,15 +2028,15 @@ real-GPU test `hints_dispatch_with_prefer_real_gpu_large_input_matches_cpu_oracl
 The empirical GPU-dispatch-overhead break-even point. Below this
 `element_count`, the cost-model override kicks in and the dispatch
 routes through T40's `decide` as if no hint were present (so
-`@prefer(gpu)` + 10 elements â†’ SingleThread, which IS a CPU path).
+`@prefer(gpu)` + 10 elements → SingleThread, which IS a CPU path).
 Above it, the hint is honored subject to GPU availability + VRAM.
 
 **Why 1024**: A single wgpu compute dispatch costs roughly:
-  - create_shader_module    â‰ˆ 50-200 Âµs  (first time only â€” T47 caches)
+  - create_shader_module    â‰ˆ 50-200 Âµs  (first time only — T47 caches)
   - create_buffer_init      â‰ˆ 10-50 Âµs   (input storage upload)
   - create_buffer           â‰ˆ 5-20 Âµs    (output + staging)
-  - create_pipeline_layout  â‰ˆ 20-100 Âµs  (first time only â€” T47 caches)
-  - create_compute_pipeline â‰ˆ 100-500 Âµs (first time only â€” T47 caches)
+  - create_pipeline_layout  â‰ˆ 20-100 Âµs  (first time only — T47 caches)
+  - create_compute_pipeline â‰ˆ 100-500 Âµs (first time only — T47 caches)
   - queue.submit            â‰ˆ 10-50 Âµs
   - device.poll(Wait)       â‰ˆ 50-200 Âµs
   - map_async + readback    â‰ˆ 30-100 Âµs
@@ -2044,20 +2044,20 @@ Above it, the hint is honored subject to GPU availability + VRAM.
 
 On the CPU side, a sequential f32 element-wise map runs at ~1 ns per
 element on a modern desktop CPU (cache-resident, branch-free). 1024
-elements is ~1 Âµs of CPU work â€” well under even the warm GPU dispatch
+elements is ~1 Âµs of CPU work — well under even the warm GPU dispatch
 cost. Above ~1024 elements the GPU starts winning because:
   1. PCIe upload time amortizes (one upload, many invocations).
   2. GPU per-element throughput (hundreds of GFLOPs) overtakes CPU's
      ~4 GFLOPs per core.
   3. Dispatch overhead becomes a small fraction of total time.
 
-1024 is a **defensible lower bound** â€” below it the CPU is essentially
+1024 is a **defensible lower bound** — below it the CPU is essentially
 always faster. Picking 1024 (rather than 10_000 or 100_000) errs on
 the side of honoring the user's `@prefer(gpu)` hint; they wouldn't
 write the hint if they didn't want GPU dispatch when remotely viable.
 
 The QA test `hints_qa_prefer_gpu_with_10_elements_routes_to_cpu`
-relies on this constant being strictly greater than 10 â€” generous
+relies on this constant being strictly greater than 10 — generous
 margin.
 
 ### "Multi-version codegen" interpretation (v1.0 runtime scope)
@@ -2093,7 +2093,7 @@ pub enum Prefer {
 }
 
 impl Prefer {
-    pub fn is_accelerator(self) -> bool;  // Gpu/Npu â†’ true; None â†’ false
+    pub fn is_accelerator(self) -> bool;  // Gpu/Npu → true; None → false
 }
 
 // Pure primitive: AST-agnostic prefer matcher. Reads a (name, args)
@@ -2111,7 +2111,7 @@ pub fn decide_with_prefer(
 ) -> DispatchKind;
 
 // Top-level dispatch entry that runs the chosen path end-to-end.
-// Always returns Vec<f32> â€” GPU errors are masked by the CPU oracle.
+// Always returns Vec<f32> — GPU errors are masked by the CPU oracle.
 pub fn dispatch_with_prefer<F>(
     prefer: Prefer,
     gpu_backend: Option<&dyn GpuBackend>,
@@ -2126,7 +2126,7 @@ pub fn dispatch_with_prefer<F>(
 
 | prefer         | element_count                  | gpu_available | fits VRAM | result              |
 |----------------|--------------------------------|---------------|-----------|---------------------|
-| None           | (any â€” pure delegation)        | (any)         | (any)     | T40 `decide(...)`   |
+| None           | (any — pure delegation)        | (any)         | (any)     | T40 `decide(...)`   |
 | Gpu/Npu        | < PREFER_GPU_MIN_ELEMENTS      | (ignored)     | (ignored) | T40 `decide(...)`   |
 | Gpu/Npu        | >= PREFER_GPU_MIN_ELEMENTS     | true          | yes       | GpuCompute          |
 | Gpu/Npu        | >= PREFER_GPU_MIN_ELEMENTS     | true          | no        | T40 `decide(...)`   |
@@ -2136,7 +2136,7 @@ pub fn dispatch_with_prefer<F>(
 backend is post-v1.0; @prefer(npu) is interpreted as "prefer
 accelerator"). Documented in the module-level rustdoc + tests.
 
-### Files changed (buff-lang-runtime only â€” no other crate source touched)
+### Files changed (buff-lang-runtime only — no other crate source touched)
 1. `crates/buff-lang-runtime/src/hints.rs` (NEW, ~470 lines):
    - `Prefer` enum (None/Gpu/Npu) with Default = None.
    - `PREFER_GPU_MIN_ELEMENTS = 1024` const with thorough rustdoc
@@ -2147,13 +2147,13 @@ accelerator"). Documented in the module-level rustdoc + tests.
    - `decide_with_prefer(...)` pure dispatch decision.
    - `dispatch_with_prefer(...)` end-to-end dispatch entry.
    - 6 inline unit tests covering Prefer defaults, accelerator
-     classification, QA case (10 elements â†’ SingleThread), large-data
+     classification, QA case (10 elements → SingleThread), large-data
      GPU choice, Prefer::None parity with T40's decide, and
      prefer_from_name_args matching.
-2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED â€” +1 module decl
+2. `crates/buff-lang-runtime/src/lib.rs` (MODIFIED — +1 module decl
    `pub mod hints;`, +1 re-export line with 5 items, +12 doc lines
    describing T49's surface in the crate-level docs).
-3. `crates/buff-lang-runtime/src/threshold.rs` (MODIFIED â€” promoted
+3. `crates/buff-lang-runtime/src/threshold.rs` (MODIFIED — promoted
    `fits_vram` from private `fn` to `pub(crate) fn` so `hints::decide_with_prefer`
    can reuse the exact overflow-aware VRAM check without duplicating
    logic. T40's existing API surface unchanged; only visibility widened.)
@@ -2164,35 +2164,35 @@ accelerator"). Documented in the module-level rustdoc + tests.
 5. `crates/buff-lang-runtime/Cargo.toml`: **NO CHANGE**. All required
    deps already in `[dependencies]` from T38-T47; `buff-lang-ast` +
    `buff-lang-codegen-wgsl` + `insta` already in `[dev-dependencies]`
-   from T38b â€” used by the AST-bridge test and the real-GPU end-to-end
+   from T38b — used by the AST-bridge test and the real-GPU end-to-end
    test that uses `generate_wgsl`.
-6. `.sisyphus/evidence/task-49-hints.txt` (NEW â€” raw cargo test output
+6. `.sisyphus/evidence/task-49-hints.txt` (NEW — raw cargo test output
    + QA summary + 4-gate summary).
 
 ### Test coverage matrix (27 NEW test points)
-- **QA case (1 integration)**: `@prefer(gpu)` + 10 elements â†’
+- **QA case (1 integration)**: `@prefer(gpu)` + 10 elements →
   SingleThread (cost override). Verified assert_eq + assert_ne.
-- **Large data + GPU available (1)**: 100_000 elements â†’ GpuCompute.
-- **No GPU graceful fallback (1)**: 100_000 elements + no GPU â†’
+- **Large data + GPU available (1)**: 100_000 elements → GpuCompute.
+- **No GPU graceful fallback (1)**: 100_000 elements + no GPU →
   CpuParallel.
 - **Prefer::None parity (1)**: sweeps 8 input tuples across all three
   T40 bands + edge cases; asserts `decide_with_prefer(count, None, ...) == decide(count, ...)`
   byte-for-byte.
 - **NPU parity with GPU (1)**: 6 input tuples; asserts
   `decide_with_prefer(count, Npu, ...) == decide_with_prefer(count, Gpu, ...)`.
-- **Boundary at PREFER_GPU_MIN_ELEMENTS (2)**: one below (1023 â†’
-  CpuParallel), at threshold (1024 + GPU â†’ GpuCompute).
-- **VRAM-aware decisions (2)**: data exceeds VRAM â†’ CPU; data fits
-  VRAM â†’ GpuCompute.
-- **Cost override at small data (2)**: 1 element â†’ SingleThread;
-  0 elements â†’ SingleThread.
+- **Boundary at PREFER_GPU_MIN_ELEMENTS (2)**: one below (1023 →
+  CpuParallel), at threshold (1024 + GPU → GpuCompute).
+- **VRAM-aware decisions (2)**: data exceeds VRAM → CPU; data fits
+  VRAM → GpuCompute.
+- **Cost override at small data (2)**: 1 element → SingleThread;
+  0 elements → SingleThread.
 - **prefer_from_name_args primitive (3)**: exact match for gpu/npu,
   rejects non-prefer attribute, multi-arg prefer is None (intentional).
 - **dispatch_with_prefer end-to-end (5)**: no-GPU runs CPU oracle;
   mock-GPU large input dispatches through backend; mock-GPU small
   input skips backend (cost override); empty input short-circuits;
   graceful fallback when GPU backend errors (unavailable WgpuBackend
-  + 2000 elements â†’ CPU oracle output).
+  + 2000 elements → CPU oracle output).
 - **AST attribute bridging (1)**: a dev-test-only `prefer_from_attributes`
   helper over `buff_lang_ast::Attribute` demonstrates the dev-dep-only
   bridge pattern. Tests gpu/npu/empty/test/multi-arg/first-match-wins.
@@ -2209,11 +2209,11 @@ accelerator"). Documented in the module-level rustdoc + tests.
   the exact overflow-aware VRAM check that T40 uses, to keep VRAM-edge
   behavior byte-identical to T40's `decide` (e.g. multiplication
   overflow handling). Re-implementing the logic would risk divergence.
-  The visibility widening is `pub(crate)` â€” NOT public â€” so T40's API
+  The visibility widening is `pub(crate)` — NOT public — so T40's API
   surface is unchanged for external callers.
 - **`Prefer::Npu` routed as Gpu in v1.0**: NPU codegen + dispatch is
   explicitly post-v1.0. The cleanest interpretation of `@prefer(npu)`
-  in v1.0 is "prefer accelerator" â€” try GPU if available + data large
+  in v1.0 is "prefer accelerator" — try GPU if available + data large
   enough, else CPU. The two variants produce identical decisions today
   and are distinguished only via `Prefer::is_accelerator()` for
   downstream telemetry. Documented in module-level rustdoc.
@@ -2223,8 +2223,8 @@ accelerator"). Documented in the module-level rustdoc + tests.
   non-test dependency graph just to read two string fields would pull
   AST + span + error into every runtime consumer for no architectural
   benefit. The pure primitive `prefer_from_name_args(name, args)`
-  lets any caller â€” including `buff-lang-types` (which already hosts
-  `has_prefer_gpu_attr` from T48) â€” translate an `Attribute` into a
+  lets any caller — including `buff-lang-types` (which already hosts
+  `has_prefer_gpu_attr` from T48) — translate an `Attribute` into a
   `Prefer` without coupling. The dev-test-only `prefer_from_attributes`
   helper in `tests/hints_tests.rs` demonstrates the pattern (1-line
   fold over `prefer_from_name_args`).
@@ -2248,7 +2248,7 @@ accelerator"). Documented in the module-level rustdoc + tests.
 - **T40 (threshold::decide)**: REUSED unchanged. `decide_with_prefer`
   delegates to `decide` for the `None` case AND for all hint-cannot-
   be-honored cases. `fits_vram` was promoted from private to
-  `pub(crate)` â€” visibility widening only, no behavior change.
+  `pub(crate)` — visibility widening only, no behavior change.
   T40's full suite (31 integration + inline) still passes unchanged.
 - **T45 (WgpuBackend)**: REUSED. `dispatch_with_prefer` accepts
   `Option<&dyn GpuBackend>` and calls `dispatch_map` when the decision
@@ -2260,7 +2260,7 @@ accelerator"). Documented in the module-level rustdoc + tests.
   inputs exceeding VRAM, `decide_with_prefer` returns CpuParallel
   (delegated to T40's `decide`), so the GPU path is never taken when
   the data can't fit. A future task could wire `dispatch_with_prefer`
-  through `dispatch_map_with_tiling` for tile-aware GPU dispatch â€”
+  through `dispatch_map_with_tiling` for tile-aware GPU dispatch —
   not needed for v1.0 scope since `decide_with_prefer` already filters
   out VRAM-exceeding cases pre-dispatch.
 - **T47 (ColdStartBackend)**: REUSABLE. `dispatch_with_prefer` accepts
@@ -2270,8 +2270,8 @@ accelerator"). Documented in the module-level rustdoc + tests.
   trait is the contract).
 - **T38b (MockGpuBackend + cpu_fallback_map)**: REUSED in tests. The
   mock records every dispatch so we can assert "large input +
-  Some(mock) â†’ exactly 1 recorded dispatch" and "small input +
-  Some(mock) â†’ 0 recorded dispatches (cost override)".
+  Some(mock) → exactly 1 recorded dispatch" and "small input +
+  Some(mock) → 0 recorded dispatches (cost override)".
 - **T44 (generate_wgsl)**: REUSED in the real-GPU end-to-end test.
   Generates the WGSL for `{x: Float => x * 2.0}` and feeds it through
   `dispatch_with_prefer` to exercise the real wgpu path.
@@ -2300,7 +2300,7 @@ accelerator"). Documented in the module-level rustdoc + tests.
    This is a NEW lint in Rust 1.95 (T47's docs passed before but now
    fail). Fix: indented both T47's list-item continuation lines AND
    my new T49 docs with 2 spaces. **Side effect: T47's crate-level
-   doc layout is slightly more indented** â€” purely cosmetic, no
+   doc layout is slightly more indented** — purely cosmetic, no
    behavior change. T47's own tests still pass unchanged.
 2. `unused_imports` on `crate::error::RuntimeError` in `hints.rs`:
    I imported it anticipating fallible dispatch, but `dispatch_with_prefer`
@@ -2314,12 +2314,12 @@ accelerator"). Documented in the module-level rustdoc + tests.
 - **`MockGpuBackend::recorded_dispatches()`** is the QA accessor that
   proves whether the GPU path was taken. Used in
   `hints_dispatch_with_prefer_with_mock_gpu_routes_through_backend`
-  (small input â†’ 0 recorded dispatches) and
+  (small input → 0 recorded dispatches) and
   `hints_dispatch_with_prefer_large_input_with_mock_gpu_dispatches_to_backend`
-  (large input â†’ 1 recorded dispatch).
+  (large input → 1 recorded dispatch).
 - **`WgpuBackend::from_context(GpuContext::unavailable())`** is the
   canonical way to construct a "no-GPU" backend for tests. Always
-  returns `Err(GpuUnavailable)` from `dispatch_map` â€” perfect for
+  returns `Err(GpuUnavailable)` from `dispatch_map` — perfect for
   testing the graceful-fallback path. Pattern lifted from T45/T46.
 - **`size_of::<f32>() == 4` is hard-coded as `BYTES_PER_F32`** in
   `dispatch_with_prefer`. When the runtime grows beyond f32-only
@@ -2342,7 +2342,7 @@ accelerator"). Documented in the module-level rustdoc + tests.
    fixed both T47's pattern AND its own docs. Future tasks writing
    crate-level rustdoc should indent list-item continuations by 2
    spaces (`//!   text`) from the start to avoid this.
-2. **`fits_vram` was private â€” `pub(crate)` is the right visibility
+2. **`fits_vram` was private — `pub(crate)` is the right visibility
    for sibling-module reuse**. The original T40 doc said "Kept private:
    callers should go through `decide`. Exposed as a separate fn so T49
    (hints) and T45 (GPU dispatch) can reuse the exact same overflow-
@@ -2351,10 +2351,10 @@ accelerator"). Documented in the module-level rustdoc + tests.
    only, not external callers".
 3. **`Prefer::default()` requires `#[derive(Default)]`** with
    `#[default]` on the `None` variant. Stable since Rust 1.62. Toolchain
-   pins 1.95 â€” no issue.
+   pins 1.95 — no issue.
 4. **`Option<&dyn GpuBackend>` is `Copy`** so `dispatch_with_prefer`
    doesn't need to take it by reference. Same for the `gpu_backend.is_some()`
-   check used as the `gpu_available` flag in `decide_with_prefer` â€”
+   check used as the `gpu_available` flag in `decide_with_prefer` —
    one source of truth, no chance of divergence.
 5. **`PREFER_GPU_MIN_ELEMENTS` value choice is pinned by tests**.
    Changing it would break the boundary tests
@@ -2376,21 +2376,21 @@ accelerator"). Documented in the module-level rustdoc + tests.
   is post-v1.0.
 - **Multi-arg `@prefer(gpu, force)`**: intentionally NOT matched.
   A future task could add a "force" mode that bypasses the cost-model
-  override (`PREFER_GPU_MIN_ELEMENTS` check) â€” would require extending
+  override (`PREFER_GPU_MIN_ELEMENTS` check) — would require extending
   `Prefer` or adding a separate `PreferMode` enum.
 - **Tile-aware dispatch_with_prefer**: `dispatch_with_prefer` does NOT
   perform tiling today; it dispatches the whole input in one shot.
   `decide_with_prefer` filters out VRAM-exceeding cases pre-dispatch
   (route to CPU), so the GPU path is never taken when data can't fit.
   A future task could route through T46's `dispatch_map_with_tiling`
-  for tile-aware GPU dispatch â€” useful when @prefer(gpu) is set AND
+  for tile-aware GPU dispatch — useful when @prefer(gpu) is set AND
   the input exceeds VRAM but the user still wants GPU acceleration
   via tiling.
 - **Commit**: per task instructions, did NOT commit. The commit
   message per the plan is: `feat(runtime): implement @prefer hints with multi-version codegen`.
 
-### MSVC env vars (REQUIRED for test/clippy/build â€” NOT for cargo check)
-Same as T38â€“T48. Exact strings used for this task:
+### MSVC env vars (REQUIRED for test/clippy/build — NOT for cargo check)
+Same as T38–T48. Exact strings used for this task:
 ```powershell
 $env:LIB="C:\BuildTools\VC\Tools\MSVC\14.44.35207\lib\onecore\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
 $env:INCLUDE="C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\winrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;C:\BuildTools\VC\Tools\MSVC\14.44.35207\include"

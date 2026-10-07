@@ -22,7 +22,7 @@
 //
 // MISMATCH FOUND (filed as T22 follow-up #3):
 //   - DataFrame.from_rows(headers, rows) is a constructor that takes
-//     TWO positional Vec<String> arguments. Buff convention Ã‚Â§11
+//     TWO positional Vec<String> arguments. Buff convention §11
 //     mandates named args for multi-arg calls. The Buff surface should
 //     expose it as DataFrame.from_rows(headers: [...], rows: [[...]]).
 //     Whether the T7 codegen lowering arm honors the named-arg call
@@ -31,7 +31,7 @@
 // MISMATCH FOUND (filed as T22 follow-up #4):
 //   - GroupBy.agg(col, op) takes a Rust enum `AggOp` (Sum / Mean / Min
 //     / Max / Count). There is no clear Buff syntax for enum variants
-//     today Ã¢â‚¬â€ examples use either a string ("mean") that the codegen
+//     today — examples use either a string ("mean") that the codegen
 //     parses into the enum, or AggOp.Mean dotted access. T7 AGENTS.md
 //     mentions a `parse("mean")` helper that suggests the string-form
 //     is the intended user-facing syntax; the AggOp.Mean dotted form

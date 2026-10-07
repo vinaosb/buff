@@ -244,7 +244,7 @@ fn msgpack_codegen_roundtrip_with_literal_calls_buff_msgpack_roundtrip() {
         src.contains("buff_msgpack::roundtrip"),
         "expected `buff_msgpack::roundtrip(` in: {src}"
     );
-    // roundtrip returns Option<Value> directly â€” NO .unwrap_or_default()
+    // roundtrip returns Option<Value> directly — NO .unwrap_or_default()
     // collapse on the codegen side (the runtime fn is already Option).
     assert!(
         !src.contains(".unwrap_or_default()"),

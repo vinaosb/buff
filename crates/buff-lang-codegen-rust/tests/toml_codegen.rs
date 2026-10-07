@@ -1,11 +1,11 @@
-//! T124e integration tests â€” `Toml` prelude namespace module codegen.
+//! T124e integration tests — `Toml` prelude namespace module codegen.
 //!
 //! Verifies that the Rust codegen:
 //! - Lowers `Toml.parse(s)` to
 //!   `toml::from_str::<std::collections::HashMap<String, toml::Value>>(s)`
-//!   `.unwrap_or_default()` (panic-free â€” empty Map on parse failure).
+//!   `.unwrap_or_default()` (panic-free — empty Map on parse failure).
 //! - Lowers `Toml.stringify(v)` to
-//!   `toml::to_string(&v).unwrap_or_default()` (panic-free â€” empty
+//!   `toml::to_string(&v).unwrap_or_default()` (panic-free — empty
 //!   String on serialization failure).
 //! - Records `toml` in `extern_crates` whenever the program uses `Toml`.
 //! - Emits the `toml::from_str` / `toml::to_string` fully-qualified
@@ -29,7 +29,7 @@
 //! # Why AST-constructed tests (not source-parsed)
 //!
 //! `Toml` is a prelude namespace (like `Log` / `DateTime`), so source
-//! parsing of `Toml.parse(...)` requires no new keyword / AST node â€”
+//! parsing of `Toml.parse(...)` requires no new keyword / AST node —
 //! the existing `MethodCall` shape handles it. We construct ASTs by
 //! hand here for the same reasons `regex_codegen.rs` (T124d) does:
 //! direct AST construction decouples the codegen-pinning snapshots
@@ -160,7 +160,7 @@ fn toml_codegen_parse_string_literal() {
         src.contains("std::collections::HashMap<String, toml::Value>"),
         "expected turbofish pinning `HashMap<String, toml::Value>` in: {src}"
     );
-    // unwrap_or_default (NOT bare unwrap) â€” panicking-generated-code rule.
+    // unwrap_or_default (NOT bare unwrap) — panicking-generated-code rule.
     assert!(
         src.contains(".unwrap_or_default()"),
         "expected `.unwrap_or_default()` (panic-free fallback) in: {src}"
@@ -175,7 +175,7 @@ fn toml_codegen_parse_string_literal() {
 
 #[test]
 fn toml_codegen_parse_via_ident_arg() {
-    // Toml.parse(my_string_var) â€” non-literal arg borrows via &.
+    // Toml.parse(my_string_var) — non-literal arg borrows via &.
     let src = codegen_one_expr_in(
         "f",
         toml_assoc_call("parse", vec![ident_expr("my_string_var")]),
@@ -195,7 +195,7 @@ fn toml_codegen_parse_via_ident_arg() {
 
 #[test]
 fn toml_codegen_stringify_ident_arg() {
-    // Toml.stringify(my_map_var) â€” the arg is borrowed via & so Rust's
+    // Toml.stringify(my_map_var) — the arg is borrowed via & so Rust's
     // serde-Serialize bound on `toml::to_string(&T)` is satisfied for
     // any Map<String, ?> value.
     let src = codegen_one_expr_in(
@@ -210,7 +210,7 @@ fn toml_codegen_stringify_ident_arg() {
         src.contains("&my_map_var"),
         "expected `&my_map_var` (Serialize requires &T) in: {src}"
     );
-    // unwrap_or_default (NOT bare unwrap) â€” panicking-generated-code rule.
+    // unwrap_or_default (NOT bare unwrap) — panicking-generated-code rule.
     assert!(
         src.contains(".unwrap_or_default()"),
         "expected `.unwrap_or_default()` (panic-free fallback) in: {src}"
@@ -220,7 +220,7 @@ fn toml_codegen_stringify_ident_arg() {
 
 #[test]
 fn toml_codegen_stringify_string_literal_arg() {
-    // Toml.stringify("foo") â€” string literals are valid Serialize values
+    // Toml.stringify("foo") — string literals are valid Serialize values
     // (str impls Serialize via toml). The generated code borrows via
     // `&"foo"` so the type-checker sees `&&'static str` which derefs to
     // `&str` for the Serialize bound.
@@ -307,7 +307,7 @@ fn toml_codegen_no_toml_extern_crate_when_unused() {
 
 #[test]
 fn toml_codegen_rejects_parse_with_wrong_arity() {
-    // Toml.parse() with no args â€” should error.
+    // Toml.parse() with no args — should error.
     let result = std::panic::catch_unwind(|| {
         let _ = codegen_one_expr_in("f", toml_assoc_call("parse", vec![]));
     });
@@ -319,7 +319,7 @@ fn toml_codegen_rejects_parse_with_wrong_arity() {
 
 #[test]
 fn toml_codegen_rejects_stringify_with_wrong_arity() {
-    // Toml.stringify() with no args â€” should error.
+    // Toml.stringify() with no args — should error.
     let result = std::panic::catch_unwind(|| {
         let _ = codegen_one_expr_in("f", toml_assoc_call("stringify", vec![]));
     });
@@ -330,7 +330,7 @@ fn toml_codegen_rejects_stringify_with_wrong_arity() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. insta snapshots â€” byte-stable codegen pinning.
+// 5. insta snapshots — byte-stable codegen pinning.
 // ---------------------------------------------------------------------------
 
 #[test]

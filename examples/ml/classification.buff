@@ -1,17 +1,17 @@
-// Buff ML â€” Binary Classification via Cross-Entropy
+// Buff ML — Binary Classification via Cross-Entropy
 //
 // Toy 2-D classification: synthetic Gaussian clusters at (0, 0) and (5, 5).
 // Architecture: Linear(2 -> 8) -> ReLU -> Linear(8 -> 2) -> Softmax
 // Loss: cross_entropy. Optimizer: Adam (lr=0.05).
 //
-// Codegen integration is deferred â€” this file documents the API and
+// Codegen integration is deferred — this file documents the API and
 // parses via `buff check`. Rust reference: cargo run -p buff-ml --example classification
 
 import Tensor from buff.tensor
 import { Model, Linear, ReLU, Softmax, Adam, Tape, cross_entropy } from buff.ml
 
 func main():
-    print("Buff ML â€” Binary Classification")
+    print("Buff ML — Binary Classification")
 
     // Synthetic 2-D points (2 classes, 5 points each).
     // Class 0 centered at (0, 0); class 1 centered at (5, 5).

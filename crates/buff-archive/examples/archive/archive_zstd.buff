@@ -3,7 +3,7 @@
 // Uses the pure-Rust `ruzstd` backend (NOT the canonical `zstd`
 // crate which wraps C libzstd). See archive_zip.buff for the wiring
 // map + crates/buff-archive/AGENTS.md "Pure-Rust deviation" note.
-// Format auto-detected from the output_path extension (`.tar.zst` â†’
+// Format auto-detected from the output_path extension (`.tar.zst` →
 // Zstd).
 
 from "archive" import Archive

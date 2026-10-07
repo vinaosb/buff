@@ -150,13 +150,13 @@ fn must_reparse(src: &str) {
 }
 
 // ===========================================================================
-// 1. Point.new â€” two-arg constructor (x: Float, y: Float).
+// 1. Point.new — two-arg constructor (x: Float, y: Float).
 // ===========================================================================
 
 #[test]
 fn point_codegen_new_with_literal_args() {
     // Point.new(1.0, 2.0) -> buff_geo::Point::new(1.0d, 2.0d).
-    // Infallible â€” no unwrap_or_default needed.
+    // Infallible — no unwrap_or_default needed.
     let src = codegen_one_expr_in(
         "f",
         ns_assoc_call("Point", "new", vec![float_expr(1.0), float_expr(2.0)]),
@@ -184,7 +184,7 @@ fn point_codegen_new_with_ident_args() {
 }
 
 // ===========================================================================
-// 2. point.distance_to â€” one-arg instance method returning Float.
+// 2. point.distance_to — one-arg instance method returning Float.
 // ===========================================================================
 
 #[test]
@@ -214,7 +214,7 @@ fn point_codegen_distance_to_lowers_correctly() {
 }
 
 // ===========================================================================
-// 3. Polygon.new + polygon.area â€” constructor + zero-arg instance method.
+// 3. Polygon.new + polygon.area — constructor + zero-arg instance method.
 // ===========================================================================
 
 #[test]
@@ -253,7 +253,7 @@ fn polygon_codegen_new_and_area_lowers_correctly() {
 }
 
 // ===========================================================================
-// 4. Point.x / Point.y â€” zero-arg instance methods returning Float.
+// 4. Point.x / Point.y — zero-arg instance methods returning Float.
 // ===========================================================================
 
 #[test]
@@ -284,7 +284,7 @@ fn point_codegen_x_and_y_lowers_correctly() {
 }
 
 // ===========================================================================
-// 5. LineString.length â€” zero-arg instance method returning Float.
+// 5. LineString.length — zero-arg instance method returning Float.
 // ===========================================================================
 
 #[test]
@@ -306,7 +306,7 @@ fn line_string_codegen_length_lowers_correctly() {
 }
 
 // ===========================================================================
-// 6. Polygon.contains / Polygon.intersects â€” bool-returning instance methods.
+// 6. Polygon.contains / Polygon.intersects — bool-returning instance methods.
 // ===========================================================================
 
 #[test]
@@ -457,7 +457,7 @@ fn geo_codegen_no_extern_crate_when_unused() {
 }
 
 // ===========================================================================
-// 8. Full program snapshot â€” pins the end-to-end codegen shape.
+// 8. Full program snapshot — pins the end-to-end codegen shape.
 // ===========================================================================
 
 #[test]

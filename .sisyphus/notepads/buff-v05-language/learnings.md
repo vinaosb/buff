@@ -3452,14 +3452,14 @@ suite only � full command integration is deferred (see DEFERRALS below).
 - cargo clippy --workspace --all-targets -- -D warnings ? exit 0
 - cargo fmt --all -- --check ? exit 0
 
-## T112 â€” `buff new` templates (--lib/--server/--gpu/--workspace)
+## T112 — `buff new` templates (--lib/--server/--gpu/--workspace)
 
 ### Status: COMPLETE (all green: check + FULL test --workspace + clippy -D warnings + fmt --check)
 
 ### Task
 Add template variants to `buff new` so users can scaffold different starter
 project layouts. Default (no flag) MUST stay the v0.1 binary behavior (no
-regression â€” existing scaffold_tests pass unchanged modulo the signature).
+regression — existing scaffold_tests pass unchanged modulo the signature).
 
 ### The TemplateKind enum (scaffold.rs)
 
@@ -3486,19 +3486,19 @@ which clippy -D warnings rejected.
 Chose 4 individual `bool` flags on the `New` clap variant
 (`--lib`/`--server`/`--gpu`/`--workspace`) over a `--template <KIND>` value
 option. Reasons:
-1. The QA case is literally `buff new mylib --lib` â€” individual flags match.
+1. The QA case is literally `buff new mylib --lib` — individual flags match.
 2. More ergonomic / discoverable (`--help` lists each template).
 3. clap derive `#[arg(long)] bool` is trivial; no custom value_parser needed.
 
 Mutual exclusion is enforced in `scaffold::template_from_flags(lib, server, gpu, workspace)`
 which returns `Result<TemplateKind, String>`:
-- 0 flags set â†’ `TemplateKind::Binary` (default, preserves v0.1).
-- exactly 1 flag â†’ the matching variant.
-- >1 flag â†’ `Err("at most one template flag may be set (...)")`.
+- 0 flags set → `TemplateKind::Binary` (default, preserves v0.1).
+- exactly 1 flag → the matching variant.
+- >1 flag → `Err("at most one template flag may be set (...)")`.
 
 Returns `Result<_, String>` (NOT anyhow) to match the existing
 `validate_project_name` pattern in scaffold.rs (the scaffold module stays
-decoupled from anyhow â€” it's the CLI layer that wraps via `anyhow::Error::msg`).
+decoupled from anyhow — it's the CLI layer that wraps via `anyhow::Error::msg`).
 
 ### Per-template file layout (files_for_template)
 
@@ -3525,7 +3525,7 @@ template-specific match, so they always come first.
 
 ### commands/new.rs::run refactor
 
-Signature changed: `run(name: &str) -> Result<()>` â†’ `run(name: &str, template: TemplateKind) -> Result<()>`.
+Signature changed: `run(name: &str) -> Result<()>` → `run(name: &str, template: TemplateKind) -> Result<()>`.
 Body went from 4 hand-written `fs::write` calls to a single loop over
 `files_for_template`:
 ```rust
@@ -3551,9 +3551,9 @@ Command::New { name, lib, server, gpu, workspace } => {
 }
 ```
 main.rs is still thin (the match arm is a few lines longer but no logic moved
-in â€” the flagâ†’template resolution is a single helper call).
+in — the flag→template resolution is a single helper call).
 
-### Tests (templates_tests.rs â€” 9 tests, all named `templates_*`)
+### Tests (templates_tests.rs — 9 tests, all named `templates_*`)
 
 NEW file `crates/buff-lang-cli/tests/templates_tests.rs`. Test fns contain the
 substring `templates` so `cargo test -p buff-lang-cli templates` filters
@@ -3561,28 +3561,28 @@ exactly this file. Follows the scaffold_tests.rs pattern (cwd_lock, unique_dir,
 cleanup, chdir into temp workdir).
 
 Test fns:
-- `templates_binary_default_creates_main_buff` â€” Binary: 4 v0.1 files, NO lib.buff.
-- `templates_lib_creates_lib_buff` â€” **QA case** (`buff new mylib --lib`):
+- `templates_binary_default_creates_main_buff` — Binary: 4 v0.1 files, NO lib.buff.
+- `templates_lib_creates_lib_buff` — **QA case** (`buff new mylib --lib`):
   asserts `src/lib.buff` exists, contains `export func`, NO `src/main.buff`.
-- `templates_server_creates_async_main` â€” asserts `async func` + `spawn` in main.buff.
-- `templates_gpu_creates_gpu_template` â€” asserts `@prefer(gpu)` hint in main.buff.
-- `templates_workspace_creates_workspace_layout` â€” asserts root buff.toml has
+- `templates_server_creates_async_main` — asserts `async func` + `spawn` in main.buff.
+- `templates_gpu_creates_gpu_template` — asserts `@prefer(gpu)` hint in main.buff.
+- `templates_workspace_creates_workspace_layout` — asserts root buff.toml has
   `[workspace]` + `members`; asserts all 4 member files exist; core=main,
   utils=lib.
-- `templates_flag_selector_defaults_to_binary` â€” template_from_flags(falseÃ—4) = Binary.
-- `templates_flag_selector_each_flag_maps_to_variant` â€” each single flag â†’ variant.
-- `templates_flag_selector_rejects_conflicting_flags` â€” 2+ flags â†’ Err.
-- `templates_all_variants_get_shared_root_files` â€” parameterized over all 5
+- `templates_flag_selector_defaults_to_binary` — template_from_flags(falseÃ—4) = Binary.
+- `templates_flag_selector_each_flag_maps_to_variant` — each single flag → variant.
+- `templates_flag_selector_rejects_conflicting_flags` — 2+ flags → Err.
+- `templates_all_variants_get_shared_root_files` — parameterized over all 5
   variants: each still creates buff.toml/.gitignore/README.md.
 
 Plus 6 inline `#[cfg(test)]` unit tests in scaffold.rs for the pure logic
 (template_from_flags, files_for_binary/lib/workspace shape).
 
-### Existing scaffold_tests.rs â€” NO regression
+### Existing scaffold_tests.rs — NO regression
 
-The signature change (`run(name)` â†’ `run(name, template)`) required updating
+The signature change (`run(name)` → `run(name, template)`) required updating
 4 call sites in `tests/scaffold_tests.rs` to pass `TemplateKind::Binary`. All
-4 were mechanical: `commands::new::run(x)` â†’ `commands::new::run(x, TemplateKind::Binary)`.
+4 were mechanical: `commands::new::run(x)` → `commands::new::run(x, TemplateKind::Binary)`.
 The import line gained `TemplateKind`: `use buff_lang_cli::scaffold::{self, TemplateKind};`.
 All 12 existing scaffold tests still pass (verified in full workspace run).
 
@@ -3595,7 +3595,7 @@ All 12 existing scaffold tests still pass (verified in full workspace run).
   valid Buff source; `buff run` on it is a v1.0 concern.
 - **Gpu template is a STARTER.** `@prefer(gpu)` is a documented hint in the
   README; real GPU dispatch (WGSL shader emission via codegen-wgsl + wgpu host)
-  arrives v1.0. The hint never breaks â€” the function falls back to CPU when no
+  arrives v1.0. The hint never breaks — the function falls back to CPU when no
   GPU is present.
 - **Workspace member resolution** is a v1.0 concern. The scaffold produces a
   structurally-correct `[workspace]` buff.toml with `members = [...]`, but the
@@ -3606,19 +3606,19 @@ All 12 existing scaffold tests still pass (verified in full workspace run).
   to accept templates is a trivial follow-up if needed (same template_from_flags
   helper would apply).
 
-### Verification (all GREEN â€” MSVC LIB env set for test/clippy)
+### Verification (all GREEN — MSVC LIB env set for test/clippy)
 
-- `cargo test -p buff-lang-cli templates` â†’ 9/9 pass (templates_tests.rs).
-- `cargo test --workspace` â†’ 103 test-result blocks, ALL `test result: ok`,
+- `cargo test -p buff-lang-cli templates` → 9/9 pass (templates_tests.rs).
+- `cargo test --workspace` → 103 test-result blocks, ALL `test result: ok`,
   **0** `test result: FAILED`, sum of "N failed" = **0**, 1475 tests pass.
   (The single "FAILED" string in output is the BUFF PROGRAM run by
-  `test_command.rs::test_fail` â€” an intentional failing `@test` the Rust test
+  `test_command.rs::test_fail` — an intentional failing `@test` the Rust test
   verifies gets detected; the Rust test itself passes. Pre-existing, unrelated
   to T112.)
-- `cargo check --workspace` â†’ exit 0, 0 warnings.
-- `cargo clippy --workspace --all-targets -- -D warnings` â†’ clean (after the
+- `cargo check --workspace` → exit 0, 0 warnings.
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean (after the
   `#[derive(Default)]` + `#[default]` fix).
-- `cargo fmt --all -- --check` â†’ clean.
+- `cargo fmt --all -- --check` → clean.
 
 ### Key design insights
 
@@ -3630,7 +3630,7 @@ All 12 existing scaffold tests still pass (verified in full workspace run).
 
 2. **`(&'static str, String)` lifetime split.** The path is a compile-time
    literal (cheap to hold as 'static), the content is freshly rendered (owns
-   its heap). This avoids `Cow<'static, str>` or lifetime gymnastics â€” the
+   its heap). This avoids `Cow<'static, str>` or lifetime gymnastics — the
    simplest type that works.
 
 3. **Default via `#[derive(Default)]` not manual impl.** Clippy's

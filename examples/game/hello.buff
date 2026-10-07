@@ -1,4 +1,4 @@
-// hello.buff â€” minimal game loop example (T16).
+// hello.buff — minimal game loop example (T16).
 //
 // Demonstrates the headless game loop: create a Game, add a scene
 // that prints "Hello, Buff Game!" on every update, and run for a

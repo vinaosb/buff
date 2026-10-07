@@ -21,12 +21,12 @@
 //
 // MISMATCH FOUND (fileed as T22 follow-up #2):
 //   - Tensor instance methods (matmul, as_slice, sum_all, shape, ...)
-//     are registered as namespace-only at the Type level Ã¢â‚¬â€ they all
+//     are registered as namespace-only at the Type level — they all
 //     return Type::Unknown at the Buff type-checker level (per
 //     crates/buff-tensor/AGENTS.md "INTEGRATION WITH BUFF LANGUAGE").
 //     Codegen lowering for these instance methods is DEFERRED to a
 //     coordinated sibling task that adds the Type::Tensor variant.
-//     Examples serve as documentation + parse-validation only Ã¢â‚¬â€ same
+//     Examples serve as documentation + parse-validation only — same
 //     status as examples/tensor/*.buff.
 //
 // Codegen status: documentation-only (Type::Tensor + Type::Web are
@@ -50,7 +50,7 @@ func main():
     // Expose the computed tensor via buff-web.
     let app = Web.new()
 
-    // GET / Ã¢â‚¬â€ full tensor as JSON.
+    // GET / — full tensor as JSON.
     app.get(path: "/", handler: { _req =>
         Response.json({
             "shape": c.shape(),
@@ -59,12 +59,12 @@ func main():
         })
     })
 
-    // GET /shape Ã¢â‚¬â€ just the per-axis dimensions (cheap probe).
+    // GET /shape — just the per-axis dimensions (cheap probe).
     app.get(path: "/shape", handler: { _req =>
         Response.json({ "shape": c.shape() })
     })
 
-    // GET /health Ã¢â‚¬â€ liveness probe.
+    // GET /health — liveness probe.
     app.get(path: "/health", handler: { _req =>
         Response.json({ "status": "ok" })
     })
