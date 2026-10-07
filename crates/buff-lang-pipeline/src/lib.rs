@@ -432,19 +432,14 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
         .map_err(|e| format_diagnostic_error("parse", &e.diagnostic, &source_file, file))?;
 
     // 4. Codegen (type inference is integrated inside RustCodegen).
-    let mut rust_source = generate_rust(&decls)
+    // Note: the codegen's lower_func tail-strip + prettyplease's
+    // `add_semi(Expr::Return)` jointly emit `return <expr>;` for
+    // `return`-terminated non-void fns — valid Rust (the return
+    // diverges), so no post-codegen textual fixup is needed here.
+    // (The former string-replace workaround that lived here was removed
+    // as redundant; see the comment at decl_lowering.rs's tail strip.)
+    let rust_source = generate_rust(&decls)
         .map_err(|e| format_diagnostic_error("codegen", &e.diagnostic, &source_file, file))?;
-
-    // Self-host codegen workaround: strip trailing semicolons on the last
-    // expression in functions with non-void return types. The codegen emits
-    // `expr;` (statement → `()`) instead of `expr` (tail expression → value).
-    // This simple fix scans for `;\n}` at function-body indentation level
-    // and removes the semicolon, making the expression the function's tail.
-    // TODO: move this fix into lower_func in the codegen (investigate why
-    // the lower_func tail-expression optimization isn't firing).
-    while rust_source.contains("    };\n}") {
-        rust_source = rust_source.replacen("    };\n}", "    }\n}", 1);
-    }
 
     // 5. Write the .rs file alongside the .buff source.
     let rust_file_path = file.with_extension("rs");
