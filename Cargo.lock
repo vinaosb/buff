@@ -915,7 +915,7 @@ version = "1.0.0"
 dependencies = [
  "crossbeam-channel",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -926,7 +926,7 @@ dependencies = [
  "insta",
  "ruzstd",
  "tar",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "zip 2.4.2",
 ]
 
@@ -942,7 +942,7 @@ dependencies = [
  "insta",
  "symphonia",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -954,7 +954,7 @@ dependencies = [
  "insta",
  "rand 0.9.5",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -968,7 +968,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "url",
 ]
 
@@ -978,7 +978,7 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "moka",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -989,7 +989,7 @@ dependencies = [
  "insta",
  "serenity",
  "teloxide",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
 ]
 
@@ -999,7 +999,7 @@ version = "1.0.0"
 dependencies = [
  "clap",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1010,7 +1010,7 @@ dependencies = [
  "insta",
  "notify",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1027,7 +1027,7 @@ dependencies = [
  "rsa",
  "sha2",
  "signature",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1037,7 +1037,7 @@ dependencies = [
  "buff-lang-error",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1056,7 +1056,7 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "sqlx",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
 ]
 
@@ -1077,7 +1077,7 @@ version = "1.0.0"
 dependencies = [
  "hecs",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1088,7 +1088,7 @@ dependencies = [
  "insta",
  "lettre",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1113,7 +1113,7 @@ dependencies = [
  "fake",
  "insta",
  "rand 0.8.7",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1121,7 +1121,7 @@ name = "buff-fsm"
 version = "1.0.0"
 dependencies = [
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1135,7 +1135,7 @@ dependencies = [
  "proptest",
  "quote",
  "syn 2.0.119",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1144,7 +1144,7 @@ version = "1.0.0"
 dependencies = [
  "buff-ecs",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1154,7 +1154,7 @@ dependencies = [
  "geo",
  "geo-types",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1165,7 +1165,7 @@ dependencies = [
  "insta",
  "reqwest 0.12.28",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1175,7 +1175,7 @@ dependencies = [
  "fluent-bundle",
  "insta",
  "intl-memoizer",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "unic-langid",
 ]
 
@@ -1185,7 +1185,7 @@ version = "1.0.0"
 dependencies = [
  "image",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1198,7 +1198,7 @@ dependencies = [
  "prettyplease",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "uuid 1.24.0",
 ]
@@ -1215,7 +1215,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "uuid 1.24.0",
  "zeromq",
@@ -1229,7 +1229,7 @@ dependencies = [
  "insta",
  "proptest",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1237,7 +1237,7 @@ name = "buff-lang-ast-rsx"
 version = "1.0.0"
 dependencies = [
  "buff-lang-error",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1247,7 +1247,7 @@ dependencies = [
  "buff-lang-ast-rsx",
  "buff-lang-error",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1310,7 +1310,7 @@ dependencies = [
  "sha2",
  "syn 2.0.119",
  "tar",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "toml",
  "tower 0.5.3",
@@ -1328,7 +1328,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1351,7 +1351,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "unicode-segmentation",
 ]
 
@@ -1362,7 +1362,7 @@ dependencies = [
  "buff-lang-ast",
  "buff-lang-error",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1374,7 +1374,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1384,7 +1384,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1399,7 +1399,7 @@ dependencies = [
  "buff-lang-error",
  "buff-lang-lexer",
  "buff-lang-parser",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1409,7 +1409,7 @@ dependencies = [
  "buff-lang-error",
  "insta",
  "proptest",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1421,7 +1421,7 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-types",
  "proptest",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1457,7 +1457,7 @@ dependencies = [
  "insta",
  "pollster",
  "rayon",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "wgpu",
 ]
@@ -1471,7 +1471,7 @@ dependencies = [
  "buff-lang-lexer",
  "buff-lang-parser",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1491,7 +1491,7 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "url",
 ]
 
@@ -1506,7 +1506,7 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1520,7 +1520,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1533,7 +1533,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1544,7 +1544,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1553,7 +1553,7 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "rust-stemmers",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "unicode-segmentation",
  "whatlang",
 ]
@@ -1581,7 +1581,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
 ]
 
@@ -1608,7 +1608,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.119",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "toml",
 ]
 
@@ -1621,7 +1621,7 @@ dependencies = [
  "prost-types",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1630,7 +1630,7 @@ version = "1.0.0"
 dependencies = [
  "crossbeam-channel",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
 ]
 
@@ -1639,7 +1639,7 @@ name = "buff-reactive"
 version = "1.0.0"
 dependencies = [
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1657,7 +1657,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "tower 0.5.3",
  "tower-http",
@@ -1680,7 +1680,7 @@ name = "buff-resilience"
 version = "1.0.0"
 dependencies = [
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1691,7 +1691,7 @@ dependencies = [
  "insta",
  "proptest",
  "rayon",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1702,7 +1702,7 @@ dependencies = [
  "insta",
  "reqwest 0.12.28",
  "scraper",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "url",
 ]
 
@@ -1712,7 +1712,7 @@ version = "1.0.0"
 dependencies = [
  "criterion",
  "insta",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "wide",
 ]
 
@@ -1723,7 +1723,7 @@ dependencies = [
  "handlebars",
  "insta",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1733,7 +1733,7 @@ dependencies = [
  "insta",
  "proptest",
  "rayon",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1755,7 +1755,7 @@ dependencies = [
  "insta",
  "regex",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "validator",
 ]
 
@@ -1767,7 +1767,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "tower 0.5.3",
 ]
@@ -1783,7 +1783,7 @@ dependencies = [
  "rand 0.8.7",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "url",
 ]
@@ -1794,7 +1794,7 @@ version = "1.0.0"
 dependencies = [
  "insta",
  "quick-xml 0.37.5",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1806,7 +1806,7 @@ dependencies = [
  "dirs 6.0.0",
  "notify",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "toml",
 ]
@@ -1828,7 +1828,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
 ]
 
