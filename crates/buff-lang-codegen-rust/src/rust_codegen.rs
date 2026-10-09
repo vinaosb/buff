@@ -2445,3 +2445,15 @@ mod tests {
         assert_eq!(first_path_segment_str(&syn_ty), "i32");
     }
 }
+
+/// T32/ITER-56B: run ONLY the extern-crate registration walkers over a
+/// program and return the dependency set - no codegen. This is the cheap
+/// companion for callers that already hold generated Rust (the T55
+/// cache-hit path) or that aggregate deps alongside
+/// [`generate_rust`](self::generate_rust).
+#[allow(clippy::items_after_test_module)] // appended at EOF (ITER-56B); relocating mid-file would shuffle ~2.4k lines for style only - mirrors the buff-lang-check lib.rs precedent.
+pub fn extern_crates_for(decls: &[Decl]) -> std::collections::BTreeSet<String> {
+    let mut codegen = RustCodegen::new();
+    codegen.register_extern_crates(decls);
+    codegen.extern_crates().clone()
+}

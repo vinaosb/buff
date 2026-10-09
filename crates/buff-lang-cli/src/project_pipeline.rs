@@ -237,6 +237,7 @@ pub fn cargo_build_project(
     mode: CargoMode<'_>,
     build_mode: BuildMode,
     target: Option<&str>,
+    cargo_target_dir: Option<&Path>,
 ) -> Result<()> {
     // Special-case: --target list prints and returns without invoking cargo.
     if target == Some(TARGET_LIST_KEYWORD) {
@@ -246,6 +247,11 @@ pub fn cargo_build_project(
 
     let mut cmd = Command::new("cargo");
     cmd.current_dir(project_dir);
+    // T32: shared target dir keeps single-file Cargo builds warm across
+    // invocations (first build cold, subsequent builds incremental).
+    if let Some(td) = cargo_target_dir {
+        cmd.env("CARGO_TARGET_DIR", td);
+    }
     match mode {
         CargoMode::Build => {
             cmd.arg("build");
@@ -410,6 +416,270 @@ pub fn render_extern_crates(project: &ParsedProject) -> String {
         out.push_str(&format!("{name} = \"*\"\n"));
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// T32 single-file Cargo-project linking (ITER-56B)
+// ---------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+
+/// Shared cargo target dir for single-file Cargo builds: warm cache
+/// across invocations (standard build-cache territory under the system
+/// temp dir; first build is cold, subsequent builds reuse artifacts).
+fn shared_cargo_target_dir() -> PathBuf {
+    std::env::temp_dir().join("buff-cargo-target")
+}
+
+/// Locate the Buff workspace root (T32): `BUFF_WORKSPACE_ROOT` override
+/// first, else walk up from the running executable looking for a
+/// `Cargo.toml` declaring `[workspace` with a sibling `crates/` dir.
+/// Single-file Cargo linking path-depends on workspace crates, so it
+/// only works from a checkout (or with the env override) - the crates
+/// are not on crates.io.
+pub fn discover_workspace_root() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("BUFF_WORKSPACE_ROOT") {
+        let p = PathBuf::from(p);
+        if p.join("Cargo.toml").is_file() {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?;
+    for _ in 0..6 {
+        let manifest = dir.join("Cargo.toml");
+        if manifest.is_file() {
+            if let Ok(text) = std::fs::read_to_string(&manifest) {
+                if text.contains("[workspace") && dir.join("crates").is_dir() {
+                    return Some(dir.to_path_buf());
+                }
+            }
+        }
+        dir = dir.parent()?;
+    }
+    None
+}
+
+/// Scan the workspace root's `[workspace.dependencies]` for version
+/// requirements (`name = "x.y"` or `name = { version = "x.y", ... }`).
+/// Hand-scanned: the root manifest is machine-formatted, and a TOML
+/// dependency for one read is not justified (conservative-pin
+/// philosophy).
+pub fn scan_workspace_dep_versions(ws_root: &Path) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let Ok(text) = std::fs::read_to_string(ws_root.join("Cargo.toml")) else {
+        return out;
+    };
+    let mut in_section = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_section = trimmed == "[workspace.dependencies]";
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((name, rest)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let name = name.trim().to_string();
+        let rest = rest.trim();
+        // Both `name = "x.y"` and `name = { version = "x.y", ... }`:
+        // take the first quoted string after `version` (or the first
+        // quoted string overall for the bare form).
+        let version = if rest.starts_with('{') {
+            let after = rest.split("version").nth(1).unwrap_or("");
+            after
+                .split_once('"')
+                .and_then(|(_, tail)| tail.split_once('"'))
+                .map(|(ver, _)| ver.to_string())
+        } else {
+            rest.split_once('"')
+                .and_then(|(_, tail)| tail.split_once('"'))
+                .map(|(ver, _)| ver.to_string())
+        };
+        if let Some(ver) = version {
+            if !name.is_empty() && !ver.is_empty() {
+                out.insert(name, ver);
+            }
+        }
+    }
+    out
+}
+
+/// Render `[dependencies]` for a single-file program's extern-crate
+/// set: `buff-*` crates become workspace PATH deps (forward slashes -
+/// Windows backslashes break TOML strings); external crates pin the
+/// workspace's version requirement. Unknown externals are a hard error
+/// - a clear manifest-time message beats a cargo resolution failure.
+pub fn render_extern_deps(
+    extern_crates: &BTreeSet<String>,
+    ws_root: &Path,
+) -> anyhow::Result<String> {
+    if extern_crates.is_empty() {
+        return Ok(String::new());
+    }
+    let versions = scan_workspace_dep_versions(ws_root);
+    let mut out = String::from("\n[dependencies]\n");
+    for name in extern_crates {
+        let crate_dir = ws_root.join("crates").join(name);
+        if name.starts_with("buff") && crate_dir.is_dir() {
+            let mut path = crate_dir.to_string_lossy().replace('\\', "/");
+            // Windows canonicalize() yields \\?\ (-> //?/ after the
+            // separator swap) extended-length paths that cargo rejects
+            // as path-dep URLs - strip the prefix.
+            if let Some(stripped) = path.strip_prefix("//?/") {
+                path = stripped.to_string();
+            }
+            out.push_str(&format!("{name} = {{ path = \"{path}\" }}\n"));
+        } else if let Some(v) = versions.get(name) {
+            out.push_str(&format!("{name} = \"{v}\"\n"));
+        } else {
+            anyhow::bail!(
+                "program needs crate `{name}` but it is neither a workspace \
+                 crate nor pinned in the workspace [workspace.dependencies]"
+            );
+        }
+    }
+    Ok(out)
+}
+
+/// T32 single-file Cargo linking: when a program's extern-crate set is
+/// non-empty, bare rustc cannot link it (E0433 - the accepted
+/// codegen-only boundary until now). Emit a temp Cargo project (path
+/// deps into the workspace + pinned external deps), build via cargo
+/// with the SHARED target dir (warm cache), and copy the binary to
+/// `output_exe` so callers keep their existing execute paths (panic
+/// translation, arg forwarding).
+pub fn build_single_via_cargo(
+    rust_file: &Path,
+    extern_crates: &BTreeSet<String>,
+    stem: &str,
+    output_exe: &Path,
+    build_mode: BuildMode,
+) -> anyhow::Result<()> {
+    let Some(ws_root) = discover_workspace_root() else {
+        anyhow::bail!(
+            "program needs external crates ({}) but no Buff workspace was \
+             found. Single-file Cargo linking requires a workspace checkout \
+             (or set BUFF_WORKSPACE_ROOT).",
+            extern_crates.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
+    };
+    let safe_stem: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let dir = std::env::temp_dir().join(format!(
+        "buff-single-cargo-{}-{}",
+        std::process::id(),
+        safe_stem
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let src_dir = dir.join("src");
+    std::fs::create_dir_all(&src_dir)
+        .with_context(|| format!("failed to create `{}`", src_dir.display()))?;
+    let main_rs = src_dir.join("main.rs");
+    std::fs::copy(rust_file, &main_rs).with_context(|| {
+        format!(
+            "failed to copy `{}` -> `{}`",
+            rust_file.display(),
+            main_rs.display()
+        )
+    })?;
+    let manifest = format!(
+        "[package]\nname = \"{safe_stem}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+         [[bin]]\nname = \"{safe_stem}\"\npath = \"src/main.rs\"\n{}",
+        render_extern_deps(extern_crates, &ws_root)?,
+    );
+    let manifest_path = dir.join("Cargo.toml");
+    std::fs::write(&manifest_path, &manifest)
+        .with_context(|| format!("failed to write `{}`", manifest_path.display()))?;
+
+    let shared_target = shared_cargo_target_dir();
+    cargo_build_project(
+        &dir,
+        CargoMode::Build,
+        build_mode,
+        None,
+        Some(&shared_target),
+    )?;
+
+    let profile = if build_mode.is_release() {
+        "release"
+    } else {
+        "debug"
+    };
+    let exe_name = if cfg!(windows) {
+        format!("{safe_stem}.exe")
+    } else {
+        safe_stem.clone()
+    };
+    let built = shared_target.join(profile).join(&exe_name);
+    std::fs::copy(&built, output_exe).with_context(|| {
+        format!(
+            "failed to copy `{}` -> `{}`",
+            built.display(),
+            output_exe.display()
+        )
+    })?;
+    eprintln!(
+        "  cargo: manifest {} (target: {})",
+        manifest_path.display(),
+        shared_target.display()
+    );
+    Ok(())
+}
+
+/// Route a compiled single-file program to the right exe producer:
+/// non-empty extern set -> T32 Cargo linking; empty -> the existing
+/// bare-rustc path (unchanged behavior for pure-stdlib programs).
+#[allow(clippy::too_many_arguments)] // mirrors compile_rust_to_exe_with_speed's layered params.
+pub fn link_single_exe(
+    compile_out: &crate::pipeline::CompileOutput,
+    output_exe: &Path,
+    buff_file: &Path,
+    mode: BuildMode,
+    sccache: bool,
+    linker: crate::pipeline::LinkerChoice,
+    debuginfo: crate::pipeline::DebugInfoChoice,
+    backend: crate::pipeline::BackendChoice,
+    target: Option<&str>,
+    detect_races: bool,
+) -> anyhow::Result<()> {
+    if !compile_out.extern_crates.is_empty() {
+        let stem = output_exe
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("buff_prog");
+        return build_single_via_cargo(
+            &compile_out.rust_file_path,
+            &compile_out.extern_crates,
+            stem,
+            output_exe,
+            mode,
+        );
+    }
+    crate::pipeline::compile_rust_to_exe_with_speed(
+        &compile_out.rust_file_path,
+        output_exe,
+        buff_file,
+        mode,
+        sccache,
+        linker,
+        debuginfo,
+        backend,
+        target,
+        detect_races,
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -646,6 +916,7 @@ mod tests {
             CargoMode::Build,
             BuildMode::Debug,
             Some(TARGET_LIST_KEYWORD),
+            None,
         )
         .expect("target list short-circuits");
         let _ = fs::remove_dir_all(&dir);

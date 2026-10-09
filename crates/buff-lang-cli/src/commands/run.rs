@@ -126,8 +126,8 @@ pub fn run(
         // LSP) thread a shared DB through.
         let mut db = crate::incremental::BuffDatabase::new();
         let compile_out = pipeline::compile_to_rust_incremental(file, &mut db)?;
-        pipeline::compile_rust_to_exe_with_speed(
-            &compile_out.rust_file_path,
+        crate::project_pipeline::link_single_exe(
+            &compile_out,
             &exe_stem,
             file,
             mode,
@@ -141,8 +141,8 @@ pub fn run(
         (compile_out.rust_file_path, None, String::new())
     } else {
         let compile_out = pipeline::compile_to_rust(file)?;
-        pipeline::compile_rust_to_exe_with_speed(
-            &compile_out.rust_file_path,
+        crate::project_pipeline::link_single_exe(
+            &compile_out,
             &exe_stem,
             file,
             mode,

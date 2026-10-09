@@ -26,8 +26,8 @@ use anyhow::{bail, Context, Result};
 
 use buff_lang_codegen_buffhtml::{self as buffhtml_codegen, CodegenResult, SpanMap};
 use buff_lang_codegen_rust::{
-    generate_multi_crate, generate_rust, module_ident_from_path, uses_multi_crate,
-    MultiCrateOutput, ParsedModule,
+    extern_crates_for, generate_multi_crate, generate_rust, module_ident_from_path,
+    uses_multi_crate, MultiCrateOutput, ParsedModule,
 };
 use buff_lang_error::{SourceFile, SourceId};
 use buff_lang_lexer::tokenize;
@@ -369,6 +369,9 @@ pub struct CompileOutput {
     pub rust_source: String,
     /// Path of the `.rs` file that was written (alongside the input `.buff`).
     pub rust_file_path: PathBuf,
+    /// Rust crates the generated program depends on (T32: drives
+    /// single-file Cargo linking; empty for pure-stdlib programs).
+    pub extern_crates: std::collections::BTreeSet<String>,
 }
 
 /// Run the front-end of the compiler: read → lex → parse → codegen → write.
@@ -430,9 +433,20 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
             let rust_file_path = file.with_extension("rs");
             std::fs::write(&rust_file_path, &cached)
                 .with_context(|| format!("failed to write `{}`", rust_file_path.display()))?;
+            // T32: the cache stores only the generated Rust; recompute
+            // the extern-crate set from source (cheap: lex + parse + the
+            // registration walkers - no syn/quote codegen). A parse
+            // failure here is impossible (the key hashes this exact
+            // source, which parsed fine before caching); default empty.
+            let extern_crates = tokenize(&source, SourceId(0))
+                .ok()
+                .and_then(|tokens| parse(&tokens, SourceId(0)).ok())
+                .map(|decls| extern_crates_for(&decls))
+                .unwrap_or_default();
             return Ok(CompileOutput {
                 rust_source: cached,
                 rust_file_path,
+                extern_crates,
             });
         }
     }
@@ -476,6 +490,7 @@ pub fn compile_to_rust_with_cache(file: &Path, use_cache: bool) -> Result<Compil
     Ok(CompileOutput {
         rust_source,
         rust_file_path,
+        extern_crates: extern_crates_for(&decls),
     })
 }
 
@@ -785,6 +800,8 @@ pub fn compile_to_rust_for_ext(file: &Path) -> Result<CompileOutput> {
             Ok(CompileOutput {
                 rust_source: out.rust_source,
                 rust_file_path: out.rust_file_path,
+                // .buffhtml programs have no Rust-crate dep tracking yet.
+                extern_crates: std::collections::BTreeSet::new(),
             })
         }
         _ => compile_to_rust(file),
