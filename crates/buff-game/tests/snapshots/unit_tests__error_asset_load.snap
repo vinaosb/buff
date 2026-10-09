@@ -1,0 +1,8 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: e1
+---
+AssetLoad {
+    path: "img.png",
+    reason: "decode failed",
+}

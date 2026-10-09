@@ -1,0 +1,18 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: cmd
+---
+Sprite {
+    texture_path: "hero.png",
+    transform: Transform {
+        position: (
+            10.0,
+            20.0,
+        ),
+        rotation: 0.0,
+        scale: (
+            1.0,
+            1.0,
+        ),
+    },
+}

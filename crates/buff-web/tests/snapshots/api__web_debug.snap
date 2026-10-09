@@ -1,6 +1,5 @@
 ---
 source: crates/buff-web/tests/api.rs
-assertion_line: 231
 expression: "format!(\"{app:?}\")"
 ---
 Web { route_count: 2, middleware_count: 1, bind_addr: None }

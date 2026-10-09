@@ -112,7 +112,22 @@ clap = { version = "4.5", features = ["derive", "string"] }
 anyhow = "1.0"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# ITER-22: `preserve_order` declared EXPLICITLY (insertion-order
+# serde_json::Map via IndexMap). handlebars 6 (T19 buff-template / T42
+# buff-email) ships `preserve_json_order` as a DEFAULT feature, which
+# enables `serde_json/preserve_order` — so any unified build graph that
+# includes handlebars (e.g. CI's `cargo test --workspace`) flips EVERY
+# serde_json user to insertion order via feature unification, while
+# per-crate `cargo test -p <crate>` runs resolved sorted (BTreeMap).
+# That build-context dependence made insta snapshots pass locally and
+# fail on CI (run 37904250121: buff-validate/buff-web order diffs).
+# Declaring the feature on the workspace pin makes serialization order
+# DETERMINISTIC AND CONTEXT-INDEPENDENT: every crate using
+# `serde_json.workspace = true` gets insertion order in every build.
+# handlebars' own default is unchanged and consistent with this. Map
+# iteration order is now part of the observable contract — snapshot
+# fixtures must be (re)generated under this mode.
+serde_json = { version = "1", features = ["preserve_order"] }
 # T51: `rmp-serde` 1.3 — pure-Rust MessagePack + serde integration.
 # API surface used: `rmp_serde::to_vec(&value)` for serialize,
 # `rmp_serde::from_slice::<serde_json::Value>(&bytes)` for deserialize.

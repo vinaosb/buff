@@ -1,0 +1,5 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: "Key::ArrowUp"
+---
+ArrowUp

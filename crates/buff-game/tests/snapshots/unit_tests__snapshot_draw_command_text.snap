@@ -1,0 +1,11 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: cmd
+---
+Text {
+    content: "Score: 42",
+    position: (
+        50.0,
+        10.0,
+    ),
+}

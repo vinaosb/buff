@@ -1,6 +1,5 @@
 ---
 source: crates/buff-web/tests/api.rs
-assertion_line: 263
 expression: body
 ---
-{"count":3,"ok":true}
+{"ok":true,"count":3}

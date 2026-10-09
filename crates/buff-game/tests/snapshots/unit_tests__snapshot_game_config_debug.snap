@@ -1,0 +1,13 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: cfg
+---
+GameConfig {
+    width: 1024,
+    height: 768,
+    title: "SnapshotGame",
+    max_frames: Some(
+        600,
+    ),
+    fixed_dt: 0.016666668,
+}
