@@ -15,7 +15,7 @@
 
 use buff_lang_ast::Decl;
 use buff_lang_error::SourceId;
-use buff_lang_lexer::tokenize;
+use buff_lang_lexer::{tokenize, TokenKind};
 use buff_lang_parser::parse;
 use proptest::prelude::*;
 
@@ -23,6 +23,18 @@ use proptest::prelude::*;
 fn parse_src(src: &str) -> Result<Vec<Decl>, String> {
     let tokens = tokenize(src, SourceId(0)).map_err(|e| format!("tokenize: {e:?}"))?;
     parse(&tokens, SourceId(0)).map_err(|e| format!("parse: {e:?}"))
+}
+
+/// True when `s` is usable as a user identifier — i.e. the LEXER itself does
+/// not recognize it as a reserved word. `TokenKind::from_keyword` is the
+/// lexer's single recognition point: it covers all 30 keywords AND the
+/// `and`/`or`/`not` word-operator aliases (BUG-4). Sourcing the filter from
+/// it keeps this provably complete — a stale hand-copied list here twice let
+/// a reserved-word draw fail these properties (ITER-51: an ubuntu flake on
+/// a missing keyword, then a macos flake on the `or` word-operator alias;
+/// the parser rightly rejects both as names).
+fn is_identifier(s: &str) -> bool {
+    TokenKind::from_keyword(s).is_none()
 }
 
 proptest! {
@@ -35,15 +47,9 @@ proptest! {
     fn prop_valid_identifiers_in_func_never_crash(
         name in "[a-zA-Z_][a-zA-Z0-9_]{0,20}"
     ) {
-        // Avoid keywords — they would be parse errors, which is fine, but
-        // the property is about non-keyword identifiers succeeding.
-        let keywords = [
-            "func", "let", "mut", "struct", "enum", "trait", "type", "if",
-            "else", "for", "return", "break", "continue", "in", "match",
-            "async", "spawn", "import", "export", "from", "as", "true",
-            "false", "extern", "unsafe",
-        ];
-        prop_assume!(!keywords.contains(&name.as_str()));
+        // Reserved words (keywords + word-operator aliases) are parse errors
+        // by design; the property is about real identifiers succeeding.
+        prop_assume!(is_identifier(&name));
 
         let src = format!("func {name}():\n    {name}\n");
         let result = parse_src(&src);
@@ -98,13 +104,7 @@ proptest! {
     /// the correct name.
     #[test]
     fn prop_func_definitions_parse(name in "[a-zA-Z_][a-zA-Z0-9_]{0,20}") {
-        let keywords = [
-            "func", "let", "mut", "struct", "enum", "trait", "type", "if",
-            "else", "for", "return", "break", "continue", "in", "match",
-            "async", "spawn", "import", "export", "from", "as", "true",
-            "false", "extern", "unsafe",
-        ];
-        prop_assume!(!keywords.contains(&name.as_str()));
+        prop_assume!(is_identifier(&name));
 
         let src = format!("func {name}():\n    42\n");
         let decls = parse_src(&src)
@@ -140,13 +140,7 @@ proptest! {
         var_name in "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
         value in 0i64..100_000,
     ) {
-        let keywords = [
-            "func", "let", "mut", "struct", "enum", "trait", "type", "if",
-            "else", "for", "return", "break", "continue", "in", "match",
-            "async", "spawn", "import", "export", "from", "as", "true",
-            "false", "extern", "unsafe",
-        ];
-        prop_assume!(!keywords.contains(&var_name.as_str()));
+        prop_assume!(is_identifier(&var_name));
 
         let src = format!("func f():\n    let {var_name} = {value}\n");
         let result = parse_src(&src);
@@ -156,6 +150,33 @@ proptest! {
             var_name,
             value,
             result.err()
+        );
+    }
+}
+
+/// ITER-51 regression: every word the lexer reserves — all 30 keywords plus
+/// the `and`/`or`/`not` word-operator aliases — must be REJECTED in the
+/// function-name position. The filter side (`is_identifier` above) is
+/// sourced from the same lexer function, so filter and pinned behavior
+/// cannot drift apart again.
+#[test]
+fn keyword_names_rejected_as_fn_names() {
+    let reserved: Vec<&str> = TokenKind::all_keywords()
+        .iter()
+        .copied()
+        .chain(["and", "or", "not"])
+        .collect();
+    for word in reserved {
+        assert!(TokenKind::from_keyword(word).is_some());
+        let fn_src = format!("func {word}():\n    42\n");
+        assert!(
+            parse_src(&fn_src).is_err(),
+            "reserved word {word:?} should not parse as a function name"
+        );
+        let let_src = format!("func f():\n    let {word} = 0\n");
+        assert!(
+            parse_src(&let_src).is_err(),
+            "reserved word {word:?} should not parse as a let-binding name"
         );
     }
 }
