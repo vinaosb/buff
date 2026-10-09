@@ -126,7 +126,7 @@ fn extract_client_ip(request: &Request) -> IpAddr {
             }
         }
     }
-    "127.0.0.1".parse::<IpAddr>().expect("valid IP")
+    IpAddr::from([127, 0, 0, 1])
 }
 
 #[cfg(test)]

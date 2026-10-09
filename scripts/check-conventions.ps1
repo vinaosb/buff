@@ -161,6 +161,14 @@ if ($violations.Count -gt 0) {
     exit 1
 }
 
+# ITER-54: unwrap/expect/panic ban beyond clippy's reach (cfg(test)-aware,
+# comment-aware, TokenStream::expect-aware, reviewed allowlist).
+& (Join-Path $PSScriptRoot "check-unwrap-ban.ps1")
+if ($LASTEXITCODE -ne 0) {
+    Write-Output "Conventions check FAILED: unwrap-ban violations (see above)"
+    exit 1
+}
+
 Write-Output ("Conventions check OK: " + $checked + " crates, 0 violations")
 Write-Output "  - all dependency entries use workspace = true"
 Write-Output "  - no [features]/[lints]/[profile.*] sections"
