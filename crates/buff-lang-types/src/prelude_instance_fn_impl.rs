@@ -214,6 +214,12 @@ pub enum PreludeInstanceFn {
     /// `Map.len` (mirrors `Format` shared between DateTime/Date/Time
     /// — dispatched on receiver type).
     Len,
+    /// `t.shape() -> Vector<Int>` (Tensor, T8). Zero args. Returns the
+    /// per-axis dimensions as a flat Vector. ITER-56 instance surface.
+    Shape,
+    /// `t.rank() -> Int` (Tensor, T8). Zero args. Number of dimensions.
+    /// ITER-56 instance surface.
+    Rank,
     /// `df.join(other, on) -> DataFrame`. Two args (DataFrame other,
     /// String on-column). Inner equi-join. Wraps
     /// `buff_dataframe::DataFrame::join(recv, other, on)
@@ -885,6 +891,8 @@ impl PreludeInstanceFn {
     pub const ALL: &'static [PreludeInstanceFn] = &[
         PreludeInstanceFn::Format,
         PreludeInstanceFn::Year,
+        PreludeInstanceFn::Shape,
+        PreludeInstanceFn::Rank,
         PreludeInstanceFn::Month,
         PreludeInstanceFn::Day,
         PreludeInstanceFn::Hour,
@@ -1211,6 +1219,8 @@ impl PreludeInstanceFn {
         match self {
             PreludeInstanceFn::Format => "format",
             PreludeInstanceFn::Year => "year",
+            PreludeInstanceFn::Shape => "shape",
+            PreludeInstanceFn::Rank => "rank",
             PreludeInstanceFn::Month => "month",
             PreludeInstanceFn::Day => "day",
             PreludeInstanceFn::Hour => "hour",

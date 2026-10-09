@@ -40,6 +40,16 @@ pub struct Shape {
     dims: Vec<usize>,
 }
 
+impl Default for Shape {
+    /// The minimal valid shape: rank-1, one element (`[1]`). Infallible
+    /// literal construction (same module as the private field) — backs
+    /// `Tensor::default()`'s panic-free fallback for the codegen
+    /// `unwrap_or_default()` lowering (ITER-56).
+    fn default() -> Self {
+        Self { dims: vec![1] }
+    }
+}
+
 impl Shape {
     /// Construct a shape from a dimension slice.
     ///

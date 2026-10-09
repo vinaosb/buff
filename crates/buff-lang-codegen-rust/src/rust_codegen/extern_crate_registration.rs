@@ -41,6 +41,14 @@ impl RustCodegen {
         if program_uses_chrono(decls) {
             self.extern_crates.insert("chrono".to_string());
         }
+        // T8/ITER-56: register `buff-tensor` when the program uses the
+        // Tensor prelude namespace (`Tensor.zeros/ones/from_vec(...)`).
+        // Generated code uses fully-qualified `buff_tensor::...` paths;
+        // the recorded name signals the (deferred, T32) Cargo-project
+        // pipeline. Mirrors the chrono registration pattern (T124b).
+        if super::extern_crate_detection::program_uses_namespace(decls, "Tensor") {
+            self.extern_crates.insert("buff-tensor".to_string());
+        }
         // T124c: register the `tracing` + `tracing-subscriber` crates as
         // external dependencies when the program references the prelude
         // `Log` module (`Log.debug/info/warn/error(...)`). Generated code

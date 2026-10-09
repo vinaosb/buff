@@ -50,6 +50,40 @@ impl RustCodegen {
             // frame, matching Buff's "no panicking generated code"
             // rule). Records `buff-dataframe` in extern_crates via
             // the narrow `program_uses_namespace("DataFrame")` walker.
+            // T8/ITER-56: Tensor constructors (Zeros/Ones/FromVec).
+            // Panic-free via `unwrap_or_default()` — Tensor::default()
+            // is the rank-1 scalar-zero fallback; shape-validation
+            // failures (rank > 4 cap) fall back to it instead of
+            // panicking in generated code. Buff list literals lower to
+            // Vec<i*>, so shape (and data for from_vec) is cast to the
+            // Tensor API's usize/f32 element types.
+            (T::Tensor, A::Zeros) | (T::Tensor, A::Ones) => {
+                let arg = one_arg(self)?;
+                let ctor = if matches!(pmethod, A::Zeros) {
+                    syn::Ident::new("zeros", proc_macro2::Span::call_site())
+                } else {
+                    syn::Ident::new("ones", proc_macro2::Span::call_site())
+                };
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_tensor::Tensor::#ctor(
+                        #arg.into_iter().map(|d| d as usize).collect::<Vec<usize>>()
+                    ).unwrap_or_default()
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Tensor constructor codegen parse: {e}"))
+                })
+            }
+            (T::Tensor, A::FromVec) => {
+                let (data, shape) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_tensor::Tensor::from_vec(
+                        #data.into_iter().map(|v| v as f32).collect::<Vec<f32>>(),
+                        #shape.into_iter().map(|d| d as usize).collect::<Vec<usize>>()
+                    ).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.from_vec codegen parse: {e}")))
+            }
             (T::DataFrame, A::FromCsv) => {
                 let arg = one_arg(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {
