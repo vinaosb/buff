@@ -899,6 +899,20 @@ fn parse_map_literal(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
 /// only changes what happens *after* a `{` is seen at primary position, and
 /// it tries the closure shape first.
 fn parse_brace_primary(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
+    // Empty braces `{}` parse as neither shape (a closure needs `params =>`,
+    // a map literal needs entries). Short-circuit with a diagnostic naming
+    // the designed empty-map form `{:}` instead of the misleading "expected
+    // closure parameter name" (ITER-53 gap A).
+    if matches!(stream.peek_second_kind(), Some(TokenKind::RBrace)) {
+        let span = stream
+            .peek()
+            .map(|t| t.span)
+            .unwrap_or_else(|| stream.eof_span());
+        return Err(ParseError::new(Diagnostic::error(
+            "empty `{}` is ambiguous: write `{:}` for an empty map literal",
+            span,
+        )));
+    }
     let saved = stream.save();
     // Try the closure shape first (historical default since T23).
     match parse_closure(stream) {

@@ -774,12 +774,21 @@ fn parse_return(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     let source_id = stream.source_id();
     let ret_tok = stream.expect(TokenKind::KwReturn)?;
     let start = ret_tok.span.start;
-    // No value if next is `}`, `;`, EOF, or any obvious statement terminator.
-    let terminates = matches!(
-        stream.peek_kind(),
-        None | Some(TokenKind::RBrace) | Some(TokenKind::Semicolon)
+    // Layout-sensitive: peek_kind skips Newline/Dedent, so a bare `return`
+    // at end of line would otherwise parse the NEXT line's statement as
+    // its value (ITER-48 harvest: pipeline_with_dataframe guard clauses
+    // swallowed the rest of the block). Check the RAW next token: any
+    // layout boundary, `}`, `;`, or EOF means no value.
+    let bare = matches!(
+        stream.peek_kind_raw(),
+        None | Some(TokenKind::Newline)
+            | Some(TokenKind::Indent)
+            | Some(TokenKind::Dedent)
+            | Some(TokenKind::RBrace)
+            | Some(TokenKind::Semicolon)
+            | Some(TokenKind::Eof)
     );
-    if terminates {
+    if bare {
         return Ok(Stmt::Return(None, ret_tok.span));
     }
     let expr = parse_expression(stream)?;
