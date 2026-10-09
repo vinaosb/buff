@@ -86,7 +86,8 @@ pub fn generate(
         items: build_file_items(&sanitized, rsx_macro, template.script.as_ref()),
     };
 
-    let raw = prettyplease::unparse(&file);
+    let unparsed = prettyplease::unparse(&file);
+    let raw = rewrite_comment_sentinels(&unparsed);
     let span_map = builder.finalize(&raw);
 
     Ok(CodegenResult {
@@ -519,14 +520,75 @@ fn first_anchor_text(expr_src: &str) -> String {
         .unwrap_or_else(|| expr_src.to_string())
 }
 
+/// Sentinel markers wrapping comment text while it travels through the
+/// syn/prettyplease pipeline. A Rust comment is not a token, so it cannot
+/// survive `TokenStream` → `prettyplease::unparse`; `lower_comment` emits
+/// the text as a string-literal sentinel and `rewrite_comment_sentinels`
+/// recovers it as a real `/* ... */` block comment after formatting.
+const COMMENT_SENTINEL_PREFIX: &str = "__BUFFHTML_COMMENT__(";
+const COMMENT_SENTINEL_SUFFIX: &str = ")__";
+
 fn lower_comment(c: &RsxComment) -> TokenStream {
     // Dioxus RSX comment: `{ /* text */ }` — a Rust block comment inside a
     // Rust expression block. The `rsx!` macro treats `{ expr }` as an
     // expression; `/* ... */` is a valid block comment (evaluates to `()`).
     // Guard against `*/` in the text (would close the comment early).
     let safe = c.text.replace("*/", "* /");
-    let full = format!("{{ /* {} */ }}", safe);
-    full.parse().unwrap_or_else(|_| quote! { { /* */ } })
+    let marked = format!("{COMMENT_SENTINEL_PREFIX}{safe}{COMMENT_SENTINEL_SUFFIX}");
+    let lit = proc_macro2::Literal::string(&marked);
+    quote! { { #lit }, }
+}
+
+/// Rewrite emitted comment sentinels into real `/* ... */` block comments
+/// (see [`COMMENT_SENTINEL_PREFIX`]).
+///
+/// Runs once over the prettyplease output. A literal that merely looks like
+/// a sentinel is validated by re-parsing through `syn` and left untouched
+/// when it does not carry the exact marker shape.
+fn rewrite_comment_sentinels(src: &str) -> String {
+    let opener = format!("\"{COMMENT_SENTINEL_PREFIX}");
+    let closer = format!("{COMMENT_SENTINEL_SUFFIX}\"");
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(start) = rest.find(&opener) {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + 1..];
+        let literal_end = tail
+            .find(&closer)
+            .map(|end_rel| start + 1 + end_rel + closer.len());
+        match literal_end {
+            Some(end) => {
+                if let Some(comment) = sentinel_comment_text(&rest[start..end]) {
+                    out.push_str("/* ");
+                    out.push_str(&comment);
+                    out.push_str(" */");
+                    rest = &rest[end..];
+                    continue;
+                }
+                out.push('"');
+                rest = tail;
+            }
+            None => {
+                out.push('"');
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Parse `literal_src` as a Rust string literal; return the wrapped comment
+/// text when it carries the sentinel markers, `None` otherwise.
+fn sentinel_comment_text(literal_src: &str) -> Option<String> {
+    match syn::parse_str::<syn::Lit>(literal_src) {
+        Ok(syn::Lit::Str(lit)) => lit
+            .value()
+            .strip_prefix(COMMENT_SENTINEL_PREFIX)
+            .and_then(|v| v.strip_suffix(COMMENT_SENTINEL_SUFFIX))
+            .map(str::to_string),
+        _ => None,
+    }
 }
 
 fn lower_slot(s: &RsxSlot) -> TokenStream {

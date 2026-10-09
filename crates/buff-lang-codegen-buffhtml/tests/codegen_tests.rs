@@ -549,6 +549,27 @@ fn comment_does_not_affect_surrounding_elements() {
     );
 }
 
+#[test]
+fn comment_inside_nested_element_is_preserved() {
+    // Comments nested several elements deep must survive lowering.
+    let src = gen("<div><section><!-- deep --></section></div>");
+    assert!(
+        src.contains("/* deep */"),
+        "expected `/* deep */` in:\n{src}"
+    );
+}
+
+#[test]
+fn buff_comment_with_quotes_round_trips() {
+    // Quote characters inside a comment must survive the sentinel
+    // escape/unescape round-trip intact.
+    let src = gen("<div>{# say \"hi\" #}</div>");
+    assert!(
+        src.contains("/* say \"hi\" */"),
+        "expected `/* say \"hi\" */` in:\n{src}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // T134 — component interface declaration + lifecycle hooks.
 // ---------------------------------------------------------------------------

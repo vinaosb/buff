@@ -1053,28 +1053,53 @@ impl<'src> LexerState<'src> {
 
     /// `{# comment #}` Buff directive comment (any `{#...}` that is not
     /// `{#each` / `{#if`).
+    ///
+    /// Terminated by `#}` (preferred) or — when it appears first — a plain
+    /// unmatched `}` (`{# comment }` lenient single-line form).
     fn scan_buff_comment(&mut self, brace_start: usize) -> Result<(), BuffHtmlParseError> {
-        // Find `#}` terminator.
+        match self.find_buff_comment_end(brace_start) {
+            Some((body_end, term_len)) => {
+                let body = self.src[brace_start + 1..body_end]
+                    .trim_start_matches('#')
+                    .trim()
+                    .to_string();
+                self.pos = body_end + term_len;
+                self.tokens.push(BuffHtmlToken::new(
+                    BuffHtmlTokenKind::BuffComment(body),
+                    self.span(brace_start, self.pos),
+                ));
+                Ok(())
+            }
+            None => Err(BuffHtmlParseError::lex(
+                "unterminated Buff comment (missing `#}` or `}`)",
+                self.span(brace_start, self.bytes.len()),
+            )),
+        }
+    }
+
+    /// Nearest Buff-comment terminator after `brace_start` as
+    /// `(body_end, terminator_len)`: `#}` (len 2) or the first unmatched
+    /// `}` at brace depth zero (len 1).
+    fn find_buff_comment_end(&self, brace_start: usize) -> Option<(usize, usize)> {
+        let mut depth: i32 = 0;
         let mut p = brace_start + 1;
-        while p + 1 < self.bytes.len() && !(self.bytes[p] == b'#' && self.bytes[p + 1] == b'}') {
+        while p < self.bytes.len() {
+            match self.bytes[p] {
+                b'#' if p + 1 < self.bytes.len() && self.bytes[p + 1] == b'}' => {
+                    return Some((p, 2));
+                }
+                b'{' => depth += 1,
+                b'}' => {
+                    if depth == 0 {
+                        return Some((p, 1));
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
             p += 1;
         }
-        if p + 1 >= self.bytes.len() {
-            return Err(BuffHtmlParseError::lex(
-                "unterminated Buff comment (missing `#}`)",
-                self.span(brace_start, self.bytes.len()),
-            ));
-        }
-        let body = self.src[brace_start + 1..p]
-            .trim_start_matches('#')
-            .trim()
-            .to_string();
-        self.pos = p + 2; // consume `#}`
-        self.tokens.push(BuffHtmlToken::new(
-            BuffHtmlTokenKind::BuffComment(body),
-            self.span(brace_start, self.pos),
-        ));
-        Ok(())
+        None
     }
 
     // ----- small byte-scanner helpers ------------------------------------
