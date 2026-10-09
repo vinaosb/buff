@@ -17,24 +17,27 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Once;
 use std::thread;
 
-static NEXT_PORT: AtomicU16 = AtomicU16::new(2525);
+static SMTP_PORT: AtomicU16 = AtomicU16::new(0);
 static INIT: Once = Once::new();
 
 fn mock_smtp_port() -> u16 {
     INIT.call_once(|| {
-        let port = NEXT_PORT.fetch_add(1, Ordering::SeqCst);
-        thread::spawn(move || run_mock_smtp(port));
-    });
-    NEXT_PORT.load(Ordering::SeqCst)
-}
-
-fn run_mock_smtp(port: u16) {
-    let listener = TcpListener::bind(("127.0.0.1", port)).expect("mock smtp bind");
-    for mut s in listener.incoming().flatten() {
+        // Bind BEFORE returning (the listener is moved into the accept
+        // thread afterwards) so the port is guaranteed to be listening
+        // when the first client dials. An OS-assigned port also avoids
+        // fixed-port collisions on shared CI runners.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("mock smtp bind");
+        let port = listener.local_addr().expect("mock smtp local addr").port();
+        SMTP_PORT.store(port, Ordering::SeqCst);
         thread::spawn(move || {
-            let _ = handle_mock_smtp(&mut s);
+            for mut s in listener.incoming().flatten() {
+                thread::spawn(move || {
+                    let _ = handle_mock_smtp(&mut s);
+                });
+            }
         });
-    }
+    });
+    SMTP_PORT.load(Ordering::SeqCst)
 }
 
 fn handle_mock_smtp(s: &mut TcpStream) -> std::io::Result<()> {
@@ -47,7 +50,14 @@ fn handle_mock_smtp(s: &mut TcpStream) -> std::io::Result<()> {
         }
         let line = String::from_utf8_lossy(&buf[..n]);
         let upper = line.to_ascii_uppercase();
-        if upper.starts_with("DATA") {
+        if upper.starts_with("EHLO") {
+            // Multiline reply advertising AUTH PLAIN: lettre refuses to
+            // authenticate (and errors the send) when the server
+            // advertises no AUTH mechanism.
+            s.write_all(b"250-mock.smtp greets you\r\n250 AUTH PLAIN\r\n")?;
+        } else if upper.starts_with("AUTH") {
+            s.write_all(b"235 2.7.0 Accepted\r\n")?;
+        } else if upper.starts_with("DATA") {
             s.write_all(b"354 End data with <CR><LF>.<CR><LF>\r\n")?;
             let mut accumulated = Vec::new();
             loop {
