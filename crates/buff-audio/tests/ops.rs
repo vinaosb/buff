@@ -166,9 +166,11 @@ fn save_load_round_trip_preserves_samples() {
 
     let original = AudioBuffer::from_samples(samples.clone(), 44100, 1).expect("ok");
 
-    let tmp = NamedTempFile::new().expect("tmp create");
+    // `from_path` dispatches on the file extension; the temp file must end
+    // in ".wav" so the round trip exercises the hound WAV reader/writer
+    // instead of the symphonia fallback (which decodes only partial frames).
+    let tmp = NamedTempFile::with_suffix(".wav").expect("tmp create");
     let path = tmp.path().to_path_buf();
-    tmp.close().expect("tmp close");
 
     original.save(&path).expect("save");
     let reloaded = AudioBuffer::from_path(&path).expect("reload");
@@ -187,8 +189,6 @@ fn save_load_round_trip_preserves_samples() {
         max_diff < 1e-6,
         "f32 WAV round-trip should be lossless, got max_diff={max_diff}"
     );
-
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
