@@ -20,14 +20,11 @@
 //   deferred to the coordinated sibling task that lands the Type variants
 //   + lowering arms (mirrors examples/integration/pipeline_with_dataframe.buff).
 
-import Source from buff.pipeline
-import Sink from buff.pipeline
-import DataFrame from buff.dataframe
-from "./data_loader.buff" import species_to_code
-from "./model.buff" import new_model, train_model
+import { species_to_code } from "./data_loader.buff"
+import { new_model, train_model } from "./model.buff"
 
-const PIPELINE_CHUNK_SIZE = 16
-const PIPELINE_BATCH_SIZE = 8
+// Module constants (no top-level `const` keyword — declared per-func):
+//   PIPELINE_CHUNK_SIZE = 16, PIPELINE_BATCH_SIZE = 8.
 
 // ---------------------------------------------------------------------------
 // Streaming ETL.
@@ -39,13 +36,12 @@ const PIPELINE_BATCH_SIZE = 8
 // The filter drops malformed rows (fewer than 5 fields: 4 features + species).
 // The batch stage groups PIPELINE_BATCH_SIZE rows per batch.
 export func stream_and_collect(path):
+    let chunk_size = 16
+    let batch_size = 8
     let batches = Source.from_csv(
         path: path,
-        chunk_size: PIPELINE_CHUNK_SIZE
-    )
-        .filter(predicate: { row => row.len() >= 5 })
-        .batch(size: PIPELINE_BATCH_SIZE)
-        .run()
+        chunk_size: chunk_size
+    ).filter(predicate: { row => row.len() >= 5 }).batch(size: batch_size).run()
     print("[pipeline] collected ${batches.len()} batches")
     return batches
 
@@ -142,11 +138,8 @@ export func run_pipeline_demo(path):
     // examples/integration/pipeline_with_dataframe.buff.
     let batches = Source.from_csv(
         path: path,
-        chunk_size: PIPELINE_CHUNK_SIZE
-    )
-        .filter(predicate: { row => row.len() >= 5 })
-        .batch(size: PIPELINE_BATCH_SIZE)
-        .run()
+        chunk_size: 16
+    ).filter(predicate: { row => row.len() >= 5 }).batch(size: 8).run()
 
     let mut total_rows = 0
     for batch in batches:

@@ -246,7 +246,7 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/error_handling.buff`](./examples/error_handling.buff) | `Result`, `?` propagation, builtin `Error` | ✅ v0.5 (runs) |
 | [`examples/prelude_demo.buff`](./examples/prelude_demo.buff) | Minimal `print(1+2)` prelude smoke test | ✅ v0.1 (runs) |
 | [`examples/minimal_console.buff`](./examples/minimal_console.buff) | Smallest-possible binary (`buff build --minimal`) | ✅ v1.19 (T60) |
-| [`examples/minimal_http.buff`](./examples/minimal_http.buff) | Async fn → tokio feature-gating under `--minimal` | ✅ v1.19 (T60) |
+| [`examples/minimal_http.buff`](./examples/minimal_http.buff) | Async fn → tokio feature-gating under `--minimal` | 🔶 v1.19 (codegen-only¹) |
 | [`examples/minimal_compute.buff`](./examples/minimal_compute.buff) | CPU-bound compute (no GPU/rayon) under `--minimal` | ✅ v1.19 (T60) |
 | [`examples/while_loop.buff`](./examples/while_loop.buff) | `while cond:` loop with mutable accumulators (BUG-9 fix) | ✅ v1.26 (runs) |
 | [`examples/word_operators.buff`](./examples/word_operators.buff) | `and` / `or` / `not` word operators as `&&` / `||` / `!` aliases (BUG-4 fix) | ✅ v1.26 (runs) |
@@ -257,7 +257,7 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (codegen-deferred³) |
 | [`examples/tensor/matmul.buff`](./examples/tensor/matmul.buff) | 2-D matmul (v1.14) | 🔶 v1.14 (codegen-deferred³) |
 | [`examples/pipeline/simple.buff`](./examples/pipeline/simple.buff) | `Source.from_csv` → filter → `Sink.to_csv` DAG (v1.22) | 🔶 v1.22 (codegen-deferred³) |
-| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Vector.zeros`, `Matrix.identity` linalg (v1.22) | 🔶 v1.22 (codegen-deferred³) |
+| [`examples/science/hello.buff`](./examples/science/hello.buff) | `Tensor.from_vec`, `determinant()` / `inverse()` linalg (v1.22) | 🔶 v1.22 (codegen-deferred³) |
 | [`examples/ml/hello.buff`](./examples/ml/hello.buff) | `Linear.new`, `mse_loss`, `SGD.new` training (v1.22) | 🔶 v1.22 (codegen-deferred³) |
 | [`examples/game/hello.buff`](./examples/game/hello.buff) | Game loop, `Window.new`, `Renderer` (v1.22) | 🔶 v1.22 (codegen-deferred³) |
 | [`examples/integration/`](./examples/integration/) | T22 multi-framework integration (dataframe+tensor+pipeline+reactive+web) | 🔶 v1.23 (codegen-deferred³) |
@@ -269,10 +269,12 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 > ¹ async needs the external `tokio` crate (T32 deferred Cargo-project wiring);
 > ² modules need multi-file linking — `import`/`export` parse and the module
 > graph resolves (T29), but the CLI compiles one file at a time.
-> ³ **Framework examples (v1.14–v1.23)** — parse cleanly and pass `buff check`,
-> but end-to-end `buff run` execution is **codegen-deferred**. The `Type::{Tensor,
-> DataFrame, Pipeline, ML, Science, Game, …}` variants and their codegen lowering
-> arms are a coordinated sibling task tracked in
+> ³ **Framework examples (v1.14–v1.23)** — as of the ITER-48 examples sweep,
+> all 🔶 rows above parse cleanly and pass `buff check`. End-to-end `buff run`
+> execution remains **codegen-deferred**: the prelude-type lowering arms
+> (`Tensor.zeros` / `Tensor.from_vec`, framework imports, `Pipeline` /
+> `Source` / `DataFrame` / `Web` value resolution) are a coordinated sibling
+> task tracked in
 > [`.sisyphus/decisions/api-compat-v20.md`](./.sisyphus/decisions/api-compat-v20.md).
 > These are **known limitations** (not failures) — CI reports them as warnings.
 > See [`.sisyphus/notepads/buff-v05-language/issues.md`](./.sisyphus/notepads/buff-v05-language/issues.md)

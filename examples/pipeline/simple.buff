@@ -16,10 +16,6 @@
 //   - Parallel: tokio tasks (NOT rayon — reserved for CSV parsing)
 
 func main():
-    let result = Pipeline.new()
-        .source([1, 2, 3, 4, 5])
-        .map({ x => x * 2 })
-        .filter({ x => x > 4 })
-        .run()
+    let result = Pipeline.new().source([1, 2, 3, 4, 5]).map({ x => x * 2 }).filter({ x => x > 4 }).run()
     print(result)
     // Expected output: [6, 8, 10]

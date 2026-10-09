@@ -36,8 +36,8 @@
 // Codegen status: documentation-only (Type::Signal + Type::Web are
 // both forward-declared; buff run cannot execute this end-to-end).
 
-import Signal from buff.reactive
-from "buff/web" import Web, Request, Response
+// Signal, Web, Request, and Response are framework surface referenced
+// directly below (documentation-only until the codegen lowering lands).
 
 func main():
     print("T22 integration: Reactive -> Web")
@@ -75,8 +75,8 @@ func main():
     })
 
     print("reactive_to_web listening on http://0.0.0.0:8080")
-    print("  GET  /count      -> { count: N }")
-    print("  POST /increment  -> { count: N+1, incremented: true }")
-    print("  POST /reset      -> { count: 0, reset: true }")
-    print("  GET  /health     -> { status: 'ok' }")
+    print("  GET  /count      -> JSON object with the current count")
+    print("  POST /increment  -> JSON object with count and incremented")
+    print("  POST /reset      -> JSON object with count set to zero")
+    print("  GET  /health     -> JSON object with status ok")
     app.listen(port: 8080)

@@ -19,8 +19,7 @@
 //   patterns in examples/integration/*.buff) but cannot execute end-to-end
 //   via `buff run` until the codegen layer lands.
 
-import DataFrame from buff.dataframe
-import JSON from buff.json
+// DataFrame and JSON are implicit prelude types (no import needed).
 
 // ---------------------------------------------------------------------------
 // T22-FU1 WORKAROUND -- DataFrame has no native to_json().
@@ -32,24 +31,30 @@ import JSON from buff.json
 // exactly as examples/integration/dataframe_to_json.buff demonstrates.
 // ---------------------------------------------------------------------------
 
+// Read the value of column `col` in row `i`, dispatching on Series.kind().
+func series_value(df, col, i):
+    let series = df.get_column(col)
+    let kind = series.kind()
+    if kind == "int":
+        return series.as_int_slice()[i]
+    else if kind == "float":
+        return series.as_float_slice()[i]
+    else if kind == "bool":
+        return series.as_bool_slice()[i]
+    return series.as_string_slice()[i]
+
 // Build a JSON-shaped array of row objects from a DataFrame.
 // Dispatches on Series.kind() ("int" / "float" / "bool" / "string").
 export func rows_to_json(df):
     let columns = df.column_names()
     let array = []
     for i in range(0, df.len()):
-        let obj = {}
+        let c0 = columns[0]
+        let obj = {c0: series_value(df, c0, i)}
         for col in columns:
-            let series = df.get_column(col)
-            let kind = series.kind()
-            if kind == "int":
-                obj[col] = series.as_int_slice()[i]
-            else if kind == "float":
-                obj[col] = series.as_float_slice()[i]
-            else if kind == "bool":
-                obj[col] = series.as_bool_slice()[i]
-            else:
-                obj[col] = series.as_string_slice()[i]
+            if col == c0:
+                continue
+            obj[col] = series_value(df, col, i)
         array.push(obj)
     return array
 
@@ -62,11 +67,9 @@ export func rows_to_json(df):
 export func species_to_code(name):
     if name == "setosa":
         return 0
-    else if name == "versicolor":
+    if name == "versicolor":
         return 1
-    else if name == "virginica":
-        return 2
-    return 1
+    return 2
 
 export func code_to_species(code):
     // Clamp + round to the nearest class label.
@@ -78,7 +81,7 @@ export func code_to_species(code):
     let idx = int(n + 0.5)
     if idx == 0:
         return "setosa"
-    else if idx == 1:
+    if idx == 1:
         return "versicolor"
     return "virginica"
 

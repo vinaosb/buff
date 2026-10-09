@@ -8,20 +8,20 @@
 // this file documents the intended Buff API and parses via `buff check`.
 // Run the Rust reference impl via: cargo run -p buff-ml --example linear_regression
 
-import Tensor from buff.tensor
-import { Model, Linear, SGD, Tape, mse_loss } from buff.ml
+// Tensor is an implicit prelude type (no import needed).
+import { Model, Linear, SGD, Tape, mse_loss } from "buff/ml"
 
 func main():
     print("Buff ML — Linear Regression")
 
     // Synthetic data: y = 2x + 3
     let x = Tensor.from_vec(
-        vec![-2.0, -1.0, 0.0, 1.0, 2.0],
-        vec![5, 1]
+        [-2.0, -1.0, 0.0, 1.0, 2.0],
+        [5, 1]
     )
     let y = Tensor.from_vec(
-        vec![-1.0, 1.0, 3.0, 5.0, 7.0],
-        vec![5, 1]
+        [-1.0, 1.0, 3.0, 5.0, 7.0],
+        [5, 1]
     )
 
     // Model: single Linear(1 -> 1)
