@@ -65,7 +65,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use fluent_bundle::concurrent::FluentBundle as ConcurrentBundle;
-use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
+use fluent_bundle::{FluentArgs, FluentError, FluentResource, FluentValue};
 use unic_langid::LanguageIdentifier;
 
 /// Maximum number of warnings retained for [`I18n::warnings`]. Older
@@ -162,13 +162,15 @@ impl I18n {
 
     /// Add a Fluent `.ftl` resource for the given locale. Subsequent
     /// `add_resource` calls for the same locale append to the existing
-    /// bundle's resource set. Message-id collisions across resources
-    /// for the SAME locale resolve to the LAST-added definition
-    /// (Fluent's `add_resource_overriding` semantics — matches how
-    /// `fluent-rs` users compose multi-file catalogs); cross-locale
-    /// duplicate ids are independent.
+    /// bundle's resource set. Message-id collisions (a new message
+    /// whose identifier is already registered for that locale, or a
+    /// duplicate identifier within the same `.ftl` source) are
+    /// REJECTED with [`I18nError::Duplicate`] — the previously-loaded
+    /// definition wins and the caller sees the conflict instead of
+    /// silently losing translations. Cross-locale duplicate ids are
+    /// independent.
     ///
-    /// Wraps `FluentResource::try_new` + `FluentBundle::add_resource_overriding`.
+    /// Wraps `FluentResource::try_new` + `FluentBundle::add_resource`.
     /// Body wrapped in `catch_unwind` per FFI guide R6.
     pub fn add_resource(&self, locale: &str, ftl: &str) -> Result<(), I18nError> {
         let result = catch_unwind(AssertUnwindSafe(|| -> Result<(), I18nError> {
@@ -181,7 +183,16 @@ impl I18n {
                 .bundles
                 .entry(locale_key)
                 .or_insert_with(|| ConcurrentBundle::new_concurrent(vec![langid.clone()]));
-            bundle.add_resource_overriding(resource);
+            if let Err(errors) = bundle.add_resource(resource) {
+                let ids: Vec<String> = errors
+                    .iter()
+                    .filter_map(|err| match err {
+                        FluentError::Overriding { id, .. } => Some(id.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                return Err(I18nError::Duplicate(ids.join(", ")));
+            }
             Ok(())
         }));
         match result {
@@ -410,14 +421,15 @@ fn format_parser_errors<D: std::fmt::Display>(errs: &[D]) -> String {
 }
 
 /// Convert a `BTreeMap<String, String>` of named args into a
-/// `FluentArgs` instance ready for `format_pattern`. Every value is
-/// treated as a string (the simplest Buff-visible surface; future
-/// versions may surface an `i64` / `f64` arg path for Fluent's
-/// pluralization rules to distinguish [one] vs [other]).
+/// `FluentArgs` instance ready for `format_pattern`. Numeric-looking
+/// values are converted to `FluentValue::Number` (via
+/// `FluentValue::try_number`) so Fluent's pluralization rules can
+/// distinguish [one] vs [other]; every other value is treated as a
+/// string.
 fn build_args(args: &BTreeMap<String, String>) -> FluentArgs<'_> {
     let mut fluent_args = FluentArgs::new();
     for (k, v) in args {
-        fluent_args.set(k.as_str(), FluentValue::String(v.as_str().into()));
+        fluent_args.set(k.as_str(), FluentValue::try_number(v.as_str()));
     }
     fluent_args
 }
