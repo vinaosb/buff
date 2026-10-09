@@ -24,9 +24,7 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 }
 
 fn temp_root() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("buff-templates-tests-{}", std::process::id()));
-    let _ = fs::create_dir_all(&dir);
-    dir
+    support::temp_root("buff-templates-tests")
 }
 
 fn unique_dir(label: &str) -> PathBuf {
@@ -299,3 +297,4 @@ fn templates_all_variants_get_shared_root_files() {
         cleanup(&workdir);
     }
 }
+mod support;

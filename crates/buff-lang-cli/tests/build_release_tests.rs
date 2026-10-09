@@ -226,6 +226,7 @@ fn run_release_flag_defaults_false_when_omitted_build_release() {
 
 /// Helper: unique temp dir for this test binary.
 fn temp_root() -> PathBuf {
+    support::sweep_stale_roots("buff-lang-cli-build-release-tests", support::MAX_ROOT_AGE);
     let dir = std::env::temp_dir().join(format!(
         "buff-lang-cli-build-release-tests-{}",
         std::process::id()
@@ -293,3 +294,4 @@ fn build_command_with_release_false_compiles_in_debug_build_release() {
     let _ = fs::remove_file(&rs_path);
     let _ = fs::remove_file(&exe);
 }
+mod support;

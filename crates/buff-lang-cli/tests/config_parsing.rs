@@ -21,6 +21,7 @@ use buff_lang_cli::config::{validate_project_layout, BuffConfig, ConfigError};
 // ---------------------------------------------------------------------------
 
 fn temp_dir(unique: &str) -> PathBuf {
+    support::sweep_stale_roots("buff-lang-cli-config-parsing", support::MAX_ROOT_AGE);
     let dir = std::env::temp_dir().join(format!(
         "buff-lang-cli-config-parsing-{}-{}",
         std::process::id(),
@@ -253,3 +254,4 @@ fn config_parsing_validate_layout_missing_tests_warns_or_errs() {
     }
     cleanup(&dir);
 }
+mod support;

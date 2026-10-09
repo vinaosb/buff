@@ -12,9 +12,7 @@ use buff_lang_cli::commands;
 use buff_lang_cli::pipeline;
 
 fn temp_root() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("buff-lang-cli-run-tests-{}", std::process::id()));
-    let _ = fs::create_dir_all(&dir);
-    dir
+    support::temp_root("buff-lang-cli-run-tests")
 }
 
 fn write_fixture(name: &str, contents: &str) -> PathBuf {
@@ -205,3 +203,4 @@ fn test_run_args_passed_to_program() {
 
     result.expect("passing args should not break `buff run`");
 }
+mod support;

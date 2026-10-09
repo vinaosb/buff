@@ -105,6 +105,7 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn copy_to_unique_temp(name: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
     let pid = std::process::id();
+    support::sweep_stale_roots("buff-v05-examples", support::MAX_ROOT_AGE);
     let dir = std::env::temp_dir()
         .join("buff-v05-examples")
         .join(format!("{name}-{pid}-{id}"));
@@ -340,3 +341,4 @@ fn test_v05_modules_all_examples_are_nonempty() {
         assert!(len > 0, "modules/{name} is empty");
     }
 }
+mod support;

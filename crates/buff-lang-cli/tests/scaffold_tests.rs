@@ -67,9 +67,7 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 
 /// Per-test working directory root: `<temp>/buff-scaffold-tests-<pid>/`.
 fn temp_root() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("buff-scaffold-tests-{}", std::process::id()));
-    let _ = fs::create_dir_all(&dir);
-    dir
+    support::temp_root("buff-scaffold-tests")
 }
 
 /// Unique subdir under [`temp_root`] so parallel tests don't collide.
@@ -423,3 +421,4 @@ fn test_new_generated_project_runs() {
 
     result.expect("generated `buff new` project should run end-to-end");
 }
+mod support;

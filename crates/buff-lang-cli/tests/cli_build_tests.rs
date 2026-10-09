@@ -48,8 +48,7 @@ fn build_with_defaults(
 
 /// Helper: create a unique temp dir for this test binary's fixtures.
 fn temp_root() -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("buff-lang-cli-build-tests-{}", std::process::id()));
+    let dir = support::temp_root("buff-lang-cli-build-tests");
     let _ = fs::create_dir_all(&dir);
     dir
 }
@@ -279,3 +278,4 @@ fn test_build_command_with_explicit_output_path() {
     cleanup(&rs_path);
     let _ = fs::remove_file(&actual_out);
 }
+mod support;

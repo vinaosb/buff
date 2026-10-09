@@ -36,6 +36,7 @@ fn unique_fixture(name: &str, contents: &str) -> PathBuf {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
+    support::sweep_stale_roots("buff-t55-compile-speed-tests", support::MAX_ROOT_AGE);
     let dir = std::env::temp_dir().join(format!(
         "buff-t55-compile-speed-tests-{}-{}",
         std::process::id(),
@@ -298,3 +299,4 @@ fn bench_report_table_row_format_is_well_formed() {
         );
     }
 }
+mod support;

@@ -58,6 +58,7 @@ impl CwdGuard {
             .chars()
             .map(|c| if c.is_alphanumeric() { c } else { '_' })
             .collect();
+        support::sweep_stale_roots("buff-t61-cold-start-tests", support::MAX_ROOT_AGE);
         let dir = std::env::temp_dir().join(format!(
             "buff-t61-cold-start-tests-{}-{}-{}",
             label,
@@ -256,6 +257,7 @@ fn buff_binary_exists_and_runs_under_threshold_smoke() {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
+    support::sweep_stale_roots("buff-t61-smoke", support::MAX_ROOT_AGE);
     let dir = std::env::temp_dir().join(format!(
         "buff-t61-smoke-{}-{}",
         std::process::id(),
@@ -323,3 +325,4 @@ fn fixture_stats() -> RunStats {
     ];
     RunStats::compute(&samples).expect("non-empty samples")
 }
+mod support;

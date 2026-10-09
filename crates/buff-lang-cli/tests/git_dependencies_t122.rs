@@ -50,7 +50,7 @@ fn temp_root() -> PathBuf {
     if let Some(p) = guard.as_ref() {
         return p.clone();
     }
-    let dir = std::env::temp_dir().join(format!("buff-t122-{}", std::process::id()));
+    let dir = support::temp_root("buff-t122");
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
     *guard = Some(dir.clone());
@@ -393,3 +393,4 @@ fn add_with_branch_qualifier() {
     cleanup(&project);
     cleanup(repo.parent().expect("repo parent"));
 }
+mod support;
