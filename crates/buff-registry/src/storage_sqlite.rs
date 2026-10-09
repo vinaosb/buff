@@ -717,15 +717,13 @@ impl crate::storage::Storage for SqliteStorage {
 
 impl Default for SqliteStorage {
     fn default() -> Self {
-        Self::open_in_memory().unwrap_or_else(|_| {
-            // Should never fail for in-memory SQLite, but panic-free:
-            // create a SqliteStorage with a lazily-failing connection.
-            // In practice this path is unreachable — open_in_memory
-            // only fails on OOM or SQLite init failure.
-            let conn =
-                Connection::open_in_memory().expect("in-memory SQLite must succeed in default()");
-            Self::init(conn).expect("in-memory SQLite init must succeed in default()")
-        })
+        // Default is a test/dev convenience (production callers use
+        // `open`/`open_in_memory` and handle the Result). In-memory
+        // open+init cannot fail outside OOM/SQLite-init corruption, so a
+        // single documented expect is the honest shape — allowlisted in
+        // scripts/check-unwrap-ban.ps1.
+        Self::open_in_memory()
+            .expect("in-memory SQLite storage init (use SqliteStorage::open in production)")
     }
 }
 
