@@ -30,6 +30,58 @@ impl RustCodegen {
     ) -> Result<SynExpr, CodegenError> {
         use buff_lang_types::PreludeInstanceFn as M;
         match pmethod {
+            // T8/ITER-56: Tensor instance queries. Buff surface is
+            // Int (i64) / Vector<Int>; the Rust layer is usize /
+            // Vec<usize>, so the emissions cast. shape() returns the
+            // per-axis dims as a flat Vector.
+            M::Shape => {
+                if !args.is_empty() {
+                    return Err(self
+                        .unsupported(&format!("shape() takes no arguments, got {}", args.len())));
+                }
+                if !matches!(recv_ty, Type::Tensor) {
+                    return Err(self.unsupported("shape() is only recognised on Tensor receivers"));
+                }
+                let shape_call = method_call_no_args(recv, "shape");
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #shape_call.as_slice().iter().map(|d| *d as i64).collect::<Vec<i64>>()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.shape codegen parse: {e}")))
+            }
+            M::Rank => {
+                if !args.is_empty() {
+                    return Err(
+                        self.unsupported(&format!("rank() takes no arguments, got {}", args.len()))
+                    );
+                }
+                if !matches!(recv_ty, Type::Tensor) {
+                    return Err(self.unsupported("rank() is only recognised on Tensor receivers"));
+                }
+                let rank_call = method_call_no_args(recv, "rank");
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #rank_call as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.rank codegen parse: {e}")))
+            }
+            // Tensor len is gated BEFORE the shared Len arms below: the
+            // shared fallback rejects receivers outside its allowlist,
+            // and Tensor's usize return needs the i64 cast matching the
+            // Buff surface's registered Int return.
+            M::Len if matches!(recv_ty, Type::Tensor) => {
+                if !args.is_empty() {
+                    return Err(
+                        self.unsupported(&format!("len() takes no arguments, got {}", args.len()))
+                    );
+                }
+                let len_call = method_call_no_args(recv, "len");
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #len_call as i64
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.len codegen parse: {e}")))
+            }
             M::Format => {
                 if args.len() != 1 {
                     return Err(self.unsupported(&format!(

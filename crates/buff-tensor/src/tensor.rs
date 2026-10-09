@@ -182,6 +182,23 @@ impl<T: Clone> TensorCore<T> {
     }
 }
 
+impl Default for Tensor {
+    /// Rank-1 scalar-zero fallback. Backs the panic-free
+    /// `unwrap_or_default()` codegen lowering for the T8 Tensor
+    /// constructors: shape-validation failures fall back to this
+    /// instead of panicking in generated code. Fully infallible —
+    /// literal construction with [`Shape::default`] (the rank-1
+    /// single-element shape), so no `expect` is needed and the crate's
+    /// `forbid(clippy::expect_used)` stays intact.
+    fn default() -> Self {
+        Self {
+            data: vec![0.0],
+            shape: Shape::default(),
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl Tensor {
     /// Construct a tensor of `shape` filled with `0.0`.
     ///

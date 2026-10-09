@@ -107,7 +107,6 @@ const DEFERRED_TYPES: &[&str] = &[
     "Spectrum",
     "StemAlgorithm",
     "Supervisor",
-    "Tensor",
     "Time",
     "Window",
     "World",
@@ -115,10 +114,11 @@ const DEFERRED_TYPES: &[&str] = &[
 
 /// Deliberately-unlowered assoc fns, each with the tracking decision doc.
 /// A variant listed here type-checks (`buff check` passes) but lowers to
-/// "unsupported" - the api-compat v2.0 coordinated backlog: Tensor
-/// construction (Zeros/Ones/FromVec), DSP windows (Blackman/Hamming/
-/// Hann), metrics (Counter/Gauge/Histogram), OAuth (AuthorizationUrl/
-/// ExchangeCode), RBAC (Enforce), misc (Bootstrap/Filled/Span).
+/// "unsupported" - the api-compat v2.0 coordinated backlog: DSP windows
+/// (Blackman/Hamming/Hann), metrics (Counter/Gauge/Histogram), OAuth
+/// (AuthorizationUrl/ExchangeCode), RBAC (Enforce), misc
+/// (Bootstrap/Filled/Span). Tensor construction (Zeros/Ones/FromVec)
+/// landed in ITER-56.
 const DEFERRED_ASSOC_FNS: &[&str] = &[
     "AuthorizationUrl",
     "Blackman",
@@ -127,14 +127,11 @@ const DEFERRED_ASSOC_FNS: &[&str] = &[
     "Enforce",
     "ExchangeCode",
     "Filled",
-    "FromVec",
     "Gauge",
     "Hamming",
     "Hann",
     "Histogram",
-    "Ones",
     "Span",
-    "Zeros",
 ];
 
 #[test]

@@ -935,6 +935,18 @@ pub fn instance_fn_return_type(
         // Format → String. Applies to every datetime-family type except
         // Duration and Instant (neither has a strftime-style rendering).
         (Type::DateTime, PreludeInstanceFn::Format) => Some(Type::String),
+        // T8/ITER-56: Tensor instance queries. shape() returns the
+        // per-axis dims as Vector<Int>; rank()/len() are Int (usize at
+        // the Rust layer, i64 on the Buff surface).
+        (Type::Tensor, PreludeInstanceFn::Shape) => Some(Type::Vector(Box::new(Type::Int {
+            width: crate::ty::IntWidth::W64,
+        }))),
+        (Type::Tensor, PreludeInstanceFn::Rank) => Some(Type::Int {
+            width: crate::ty::IntWidth::W64,
+        }),
+        (Type::Tensor, PreludeInstanceFn::Len) => Some(Type::Int {
+            width: crate::ty::IntWidth::W64,
+        }),
         (Type::Date, PreludeInstanceFn::Format) => Some(Type::String),
         (Type::Time, PreludeInstanceFn::Format) => Some(Type::String),
 
