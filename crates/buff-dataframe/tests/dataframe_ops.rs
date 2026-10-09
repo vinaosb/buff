@@ -127,7 +127,17 @@ fn filter_by_predicate() {
 fn filter_by_numeric_predicate() {
     let df = fixture_users();
     let seniors = df.filter(|r| r.get_int("age").unwrap_or(0) >= 60).unwrap();
-    assert_eq!(seniors.len(), 3);
+    // Hand-trace of the fixture ages [36, 41, 85, 55, 70] against `>= 60`:
+    // only Grace (85) and Dennis (70) qualify, so exactly 2 rows survive.
+    assert_eq!(seniors.len(), 2);
+    assert_eq!(
+        seniors
+            .get_column("name")
+            .unwrap()
+            .as_string_slice()
+            .unwrap(),
+        &["Grace".to_string(), "Dennis".to_string()]
+    );
 }
 
 #[test]
