@@ -3,6 +3,12 @@ name = "buff-lang-cli"
 version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+# BUG-15 (ITER-29): build script declares an 8 MB main-thread stack for the
+# `buff` PE binaries (MSVC targets) — parity with the 8 MB stacks Linux/macOS
+# grant implicitly. Without it, clap's derive-generated
+# `augment_subcommands` (~983 KB debug stack frame) overflows the 1 MB MSVC
+# default on every invocation. See build.rs for the full analysis.
+build = "build.rs"
 
 [[bin]]
 name = "buff"
