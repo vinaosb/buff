@@ -357,6 +357,68 @@ fn test_infer_if_else_diff_types_error() {
     assert!(err.diagnostic.message.contains("different types"));
 }
 
+// ITER-36: Unknown is "no evidence", not a mismatch. A branch the local
+// inferencer cannot resolve (user fn call, prelude assoc fn like
+// `Char.to_int`, cross-function return) infers to Unknown; the branch
+// comparison must defer to the KNOWN side instead of erroring — same
+// permissive-Unknown policy as the if-CONDITION check above (P1.6) and
+// `promote_binary`. Surfaced by self-host/lexer/lexer.buff `digit_value`.
+
+fn unknown_call(name: &str) -> Expr {
+    Expr::FuncCall {
+        callee: Box::new(ident(name)),
+        args: vec![int_lit(1)],
+        span: sp(),
+    }
+}
+
+#[test]
+fn test_infer_if_else_unknown_then_yields_known_else_type() {
+    let mut inf = TypeInferencer::new();
+    let e = if_expr(
+        bool_lit(true),
+        block(vec![expr_stmt(unknown_call("mystery_helper"))]),
+        Some(block(vec![expr_stmt(int_lit(2))])),
+    );
+    assert_eq!(inf.infer_expr(&e).unwrap(), Type::int_default());
+}
+
+#[test]
+fn test_infer_if_else_unknown_else_yields_known_then_type() {
+    let mut inf = TypeInferencer::new();
+    let e = if_expr(
+        bool_lit(true),
+        block(vec![expr_stmt(int_lit(2))]),
+        Some(block(vec![expr_stmt(unknown_call("mystery_helper"))])),
+    );
+    assert_eq!(inf.infer_expr(&e).unwrap(), Type::int_default());
+}
+
+#[test]
+fn test_infer_if_else_unknown_both_sides_is_unknown() {
+    let mut inf = TypeInferencer::new();
+    let e = if_expr(
+        bool_lit(true),
+        block(vec![expr_stmt(unknown_call("a_helper"))]),
+        Some(block(vec![expr_stmt(unknown_call("b_helper"))])),
+    );
+    assert_eq!(inf.infer_expr(&e).unwrap(), Type::Unknown);
+}
+
+#[test]
+fn test_infer_if_else_unknown_defers_to_any_known_side() {
+    // Unknown pairs with a NON-numeric known side too — the deferral is
+    // shape-agnostic (absence of evidence never fabricates a mismatch).
+    // The both-known mismatch case stays an error (test above).
+    let mut inf = TypeInferencer::new();
+    let e = if_expr(
+        bool_lit(true),
+        block(vec![expr_stmt(unknown_call("mystery_helper"))]),
+        Some(block(vec![expr_stmt(str_lit("a"))])),
+    );
+    assert_eq!(inf.infer_expr(&e).unwrap(), Type::string());
+}
+
 #[test]
 fn test_infer_if_cond_not_bool_error() {
     let mut inf = TypeInferencer::new();

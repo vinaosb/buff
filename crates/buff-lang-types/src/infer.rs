@@ -1278,16 +1278,27 @@ impl TypeInferencer {
         let then_ty = self.infer_block_tail(then_block)?;
         if let Some(else_b) = else_block {
             let else_ty = self.infer_block_tail(else_b)?;
-            if then_ty != else_ty {
-                return Err(TypeError::new(
+            // ITER-36: extend the P1.6 permissive-Unknown policy to the
+            // branch RESULT comparison. A branch the local inferencer
+            // cannot resolve (user fn call, prelude assoc fn such as
+            // `Char.to_int`, cross-function return) infers to `Unknown` —
+            // absence of evidence, NOT a mismatch. Defer to the known
+            // side; only two KNOWN, different types are a real error
+            // (mirrors `promote_binary`'s Unknown-suppression and the
+            // condition check above).
+            if then_ty == else_ty || else_ty == Type::Unknown {
+                Ok(then_ty)
+            } else if then_ty == Type::Unknown {
+                Ok(else_ty)
+            } else {
+                Err(TypeError::new(
                     Diagnostic::error(
                         format!("if/else branches have different types: {then_ty} vs {else_ty}"),
                         span,
                     )
                     .with_code(ErrorCode::IfBranchTypeMismatch),
-                ));
+                ))
             }
-            Ok(then_ty)
         } else {
             Ok(Type::Void)
         }

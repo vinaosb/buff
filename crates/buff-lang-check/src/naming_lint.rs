@@ -424,6 +424,18 @@ fn lint_mistakes_expr(
                 }
                 return;
             }
+            // ITER-36: skip built-in Result/Option constructors. `Ok(x)` /
+            // `Err(e)` / `Some(x)` / `None()` are language surface (the
+            // inferencer special-cases them — see `buff_lang_types::infer`
+            // T28/T30), not unknown functions. Without this skip the
+            // Levenshtein suggester flags every top-level `return Ok(..)`
+            // via the `Ok` ≈ prelude-type `OS` near-match.
+            if matches!(name.as_str(), "Ok" | "Err" | "Some" | "None") {
+                for a in args {
+                    lint_mistakes_expr(a, candidates, defined_funcs, out);
+                }
+                return;
+            }
             // Check 1: PascalCase variant of a lowercase prelude fn.
             // e.g. `Print` -> `print`. Only suggest when the lowercase
             // form is a real prelude fn.
@@ -601,5 +613,54 @@ mod tests {
     #[test]
     fn pascal_case_rejects_hyphen() {
         assert!(!is_pascal_case("Foo-Bar"));
+    }
+
+    // -- lint_common_mistakes: built-in constructor calls (ITER-36) --
+
+    #[test]
+    fn common_mistakes_skips_ok_result_constructor() {
+        // `Ok(x)` is the Result constructor (infer.rs T30), not an unknown
+        // function. Its 2-letter shape used to trip the Levenshtein
+        // suggester (`Ok` ≈ prelude type `OS`) and warn on every
+        // top-level `return Ok(..)` (e.g. self-host/lexer/string_interp.buff).
+        let report = crate::check_source("func f(x: Int) -> Result<Int, Error>:\n    return Ok(x)");
+        let unknown_fn: Vec<&Diagnostic> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unknown function"))
+            .collect();
+        assert!(
+            unknown_fn.is_empty(),
+            "bare `Ok(..)` must not warn as unknown function: {unknown_fn:#?}"
+        );
+    }
+
+    #[test]
+    fn common_mistakes_skips_err_some_none_constructors() {
+        let src = "func g(x: Int) -> Result<Int, Error>:\n    return Err(x)\n\nfunc h() -> Int:\n    let s = Some(3)\n    return 1";
+        let report = crate::check_source(src);
+        let unknown_fn: Vec<&Diagnostic> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unknown function"))
+            .collect();
+        assert!(
+            unknown_fn.is_empty(),
+            "`Err(..)`/`Some(..)` constructors must not warn: {unknown_fn:#?}"
+        );
+    }
+
+    #[test]
+    fn common_mistakes_still_flags_real_unknown_functions() {
+        // A genuinely unknown callee must keep warning — the constructor
+        // skip must not swallow real typos.
+        let report = crate::check_source("func f():\n    printlnn(\"x\")");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("unknown function")),
+            "typo'd prelude call must still warn"
+        );
     }
 }

@@ -144,6 +144,40 @@ impl<'a> TokenStream<'a> {
         None
     }
 
+    /// Peek at the next significant token, crossing `Newline` tokens but
+    /// NEVER crossing a `Dedent` (or `Indent`) boundary (ITER-36).
+    ///
+    /// Unlike [`Self::peek_kind`] — which transparently skips ALL layout
+    /// tokens — this stops at the first `Dedent`/`Indent` and returns ITS
+    /// kind (so a caller comparing against a keyword gets `false` when a
+    /// layout boundary intervenes).
+    ///
+    /// Purpose: dangling-`else` attachment. When the last statement of an
+    /// `if`/`else if` arm is itself a layout block, the lexer emits TWO or
+    /// more `Dedent` tokens in a row (one per closed level) before an
+    /// `else`/`else if` that belongs to the OUTER chain. [`parse_if_expr`]
+    /// must not skip those leftover `Dedent`s and "steal" the outer `else`
+    /// — see `tests/dedent_else_chain.rs`.
+    ///
+    /// `Newline` stays transparent so the brace form
+    /// `if c { .. }` + newline + `else { .. }` keeps attaching.
+    pub fn peek_kind_before_dedent(&self) -> Option<&TokenKind> {
+        // Pending split tokens are significant tokens (never layout), so
+        // they always win here just like in `peek`.
+        if let Some(tok) = self.pending_split.front() {
+            return Some(&tok.kind);
+        }
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::Newline => i += 1,
+                TokenKind::Eof => return None,
+                _ => return Some(&self.tokens[i].kind),
+            }
+        }
+        None
+    }
+
     /// Advance past the current significant token and return an *owned*
     /// clone of it. Returns `None` at EOF.
     ///

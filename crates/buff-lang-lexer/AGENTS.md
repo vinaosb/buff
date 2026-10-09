@@ -27,6 +27,7 @@ src/
 
 - **HAND-ROLLED, not logos.** `logos` was removed from `[workspace.dependencies]` at commit 9af2f5c (it was never actually used — kept only as a v0.1 placeholder). Do not switch back without a plan to also fix the parser's chumsky issue (same root cause — see root AGENTS.md NOTES).
 - **Offside rule** (Python/Haskell-style): indentation level defines blocks. `indent.rs` synthesizes synthetic `Indent` / `Dedent` tokens. Tabs are REJECTED — 4 spaces only.
+- **Dedent emission invariants (ITER-36 audit)**: (1) a multi-level dedent emits ONE `Dedent` per closed block level, back-to-back, before the dedented line's first significant token — the parser (`parse_block`) consumes exactly one per block and MUST be able to see the leftovers; (2) comment-only and blank lines NEVER change the indent stack; (3) lines inside brackets (`paren_depth > 0` in `lexer.rs`) emit no `Indent`/`Dedent`; (4) `finalize()` drains the stack at EOF. Changing any of these re-opens the ITER-36 else-steal bug class (see `crates/buff-lang-parser/tests/dedent_else_chain.rs`).
 - **String interpolation** is lexed here, not parsed: `"hello {name}!"` produces a sequence of tokens the parser assembles. See `string_interp.rs`.
 - **Entry point**: `tokenize(source: &str) -> Result<Vec<Token>, LexerError>`.
 - **Tests**: `tests/lexer_tests.rs` (insta snapshots of token streams) + `tests/proptest_template.rs` (proptest fuzzing — lexer must NEVER panic on arbitrary input). Snapshots in `tests/snapshots/`.
