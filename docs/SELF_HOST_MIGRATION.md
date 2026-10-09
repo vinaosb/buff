@@ -5,11 +5,15 @@
 **Roadmap reference:** `.sisyphus/plans/self-host-completion-roadmap.md` (P5.10)
 
 > **FREEZE (W5/T30):** self-host corpus reflects v1.39 keyword/grammar
-> surface; frozen pending v1.40 self-host milestone (DR-014). 52/58
-> CI-glob files pass `buff check` as of this freeze; the 6 remaining
-> failures are catalogued in
-> `.sisyphus/evidence/task-29-corpus-diagnosis.txt` (4 blocked by a
-> parser dedent bug, 2 by semantic naming choices).
+> surface; frozen pending v1.40 self-host milestone (DR-014). 54/58
+> CI-glob files pass `buff check` (verified locally and in CI at
+> 3b98e5f, ITER-45); the 4 remaining failures are naming-lint
+> warnings only — Rust-mirroring identifiers (`Path_`/`Exists_` in
+> types/prelude_instance_fn_impl, `None_` in codegen/race_analysis,
+> `BTreeMap_String_*` in codegen/dependency_detection and
+> codegen/passes) flagged by the PascalCase lint — not type or parser
+> errors. The parser dedent bug that previously blocked 4 files was
+> fixed in PR #119 (ITER-36).
 
 ---
 
