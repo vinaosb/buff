@@ -238,16 +238,17 @@ pub fn roundtrip(value: &serde_json::Value) -> Option<serde_json::Value> {
 /// Convert a `serde_json::Value` into a protobuf `Struct`.
 ///
 /// Objects map 1:1 to `Struct { fields }`. All other JSON shapes
-/// (arrays / scalars) are wrapped in a single-field `Struct` under the
-/// magic key `"_value"` so they survive the `Struct`-typed wire format
-/// (protobuf's `Value` message is never a top-level message). The
-/// inverse is [`struct_to_value`].
+/// (arrays / scalars) — plus EMPTY objects — are wrapped in a
+/// single-field `Struct` under the magic key `"_value"` so they
+/// survive the `Struct`-typed wire format (protobuf's `Value` message
+/// is never a top-level message, and a field-less `Struct` would
+/// encode to zero bytes). The inverse is [`struct_to_value`].
 fn value_to_struct(value: &serde_json::Value) -> Result<prost_types::Struct, ProtobufError> {
     // prost 0.13: `prost_types::Struct::fields` is a `BTreeMap<String, Value>`
     // (not HashMap). Use BTreeMap directly so we hand off the exact type.
     let mut fields = std::collections::BTreeMap::new();
     match value {
-        serde_json::Value::Object(map) => {
+        serde_json::Value::Object(map) if !map.is_empty() => {
             for (k, v) in map {
                 fields.insert(k.clone(), json_to_proto_value(v)?);
             }
@@ -319,18 +320,44 @@ fn struct_to_value(structured: &prost_types::Struct) -> Result<serde_json::Value
     Ok(serde_json::Value::Object(map))
 }
 
+/// Largest f64 that still fits in `i64` (`2^63`; `i64::MAX` itself is
+/// not exactly representable as f64, so the bound is exclusive).
+const I64_MAX_AS_F64: f64 = 9_223_372_036_854_775_808.0;
+
+/// Whole-number `f64` → `i64`, for integer-preserving decode.
+///
+/// protobuf's canonical JSON mapping prints whole `number_value`
+/// doubles without a decimal point; mirroring it here keeps JSON
+/// integers intact across a roundtrip (`42` → f64 wire → `42`, not
+/// `42.0`). Values outside the `i64` range (or with a fractional part)
+/// stay floats.
+fn whole_f64_to_i64(f: f64) -> Option<i64> {
+    if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f < I64_MAX_AS_F64 {
+        Some(f as i64)
+    } else {
+        None
+    }
+}
+
 /// Convert a protobuf `Value` back into a `serde_json::Value`.
 ///
-/// Numbers come back as f64; we try `serde_json::Number::from_f64`
-/// (which returns `None` for NaN/Inf, but we rejected those at encode
-/// time so this is a defensive fallback).
+/// Numbers arrive as f64 (protobuf `number_value` is a double, so the
+/// wire cannot distinguish int from float). Whole values within the
+/// `i64` range are emitted as JSON integers (matching protobuf's
+/// canonical JSON mapping); everything else uses
+/// `serde_json::Number::from_f64` (which returns `None` for NaN/Inf,
+/// but we rejected those at encode time so this is a defensive
+/// fallback).
 fn proto_value_to_json(value: &prost_types::Value) -> Result<serde_json::Value, ProtobufError> {
     use prost_types::value::Kind;
     match &value.kind {
         None => Ok(serde_json::Value::Null),
         Some(Kind::NullValue(_)) => Ok(serde_json::Value::Null),
         Some(Kind::NumberValue(f)) => {
-            let n = serde_json::Number::from_f64(*f).unwrap_or_else(|| serde_json::Number::from(0));
+            let n = whole_f64_to_i64(*f)
+                .map(serde_json::Number::from)
+                .or_else(|| serde_json::Number::from_f64(*f))
+                .unwrap_or_else(|| serde_json::Number::from(0));
             Ok(serde_json::Value::Number(n))
         }
         Some(Kind::StringValue(s)) => Ok(serde_json::Value::String(s.clone())),
