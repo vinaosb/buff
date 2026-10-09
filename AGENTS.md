@@ -136,7 +136,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **Derive defaults**: `Debug, Clone, PartialEq` (+ `Eq, Hash` when used in maps/sets).
 - **Errors**: `thiserror::Error` derive; map to `buff_lang_error::*Error` variants. ErrorCodes (E10xx lex / E11xx parse / E12xx type / E13xx codegen) are STABLE FOREVER — never renumber/reuse/silently-remove.
 - **Tests in per-crate `tests/`** (not src). Inline `#[cfg(test)]` ok for unit smoke tests.
-- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy $CI_CRATES --all-targets -- -D warnings` over the CI_CRATES allow-list).
+- **No `[features]`, `[lints]`, `[profile.*]` sections** in any Cargo.toml. No crate-level `#![deny(...)]` / `#![forbid(unsafe_code)]` (CI enforces via `cargo clippy $CI_CRATES --all-targets -- -D warnings` over the CI_CRATES full-workspace list).
 - **Conservative pin philosophy**: pin to long-standing stable majors (rand 0.9, chrono 0.4, rustyline 15, dirs 5, zeromq 0.4). rand was migrated from 0.8→0.9 in T36 (v1.25 tech-debt batch) — 0.9 is now the stable surface. Documented inline in root Cargo.toml.
 - **Pure-Rust preference**: reqwest uses `rustls-tls` (NOT native-tls); zeromq (NOT zmq which links C libzmq); no diesel/libpq/S3 SDK in registry. Matches the "no C library, no Docker" hard rule from T126/T127 task specs.
 
@@ -227,7 +227,7 @@ cd editors/vscode && npm run build
 ## NOTES
 
 - **Toolchain mismatch**: `rust-toolchain.toml` pins `1.95.0`, but `.github/workflows/ci.yml` uses `dtolnay/rust-toolchain@master` with `toolchain: 1.95.0`. CI MAY diverge from local on dtolnay action master bumps.
-- **CI hard gates** (post-W2 ci.yml): `cargo fmt --check --all`, `cargo clippy $CI_CRATES --all-targets -- -D warnings` (explicit allow-list incl. the `buff-lang-check`/`buff-lang-fmt`/`buff-lang-pipeline` extraction crates), `cargo-deny`, the golden-output harness (`buff-validation` fails on stdout mismatch), `equivalence-check`, and Docker image build; `cargo-audit` gates PRs via security.yml. `self-host-check` is count-only (reports pass/fail counts, never fails). Tests are `continue-on-error` (advisory). CONTRIBUTING.md documents this gate-for-gate.
+- **CI hard gates** (post-W2 ci.yml): `cargo fmt --check --all`, `cargo clippy $CI_CRATES --all-targets -- -D warnings` (FULL workspace since ITER-32 — all crates in `cargo metadata --no-deps`; single source of truth in ci.yml), `cargo-deny`, the golden-output harness (`buff-validation` fails on stdout mismatch), `equivalence-check`, and Docker image build; `cargo-audit` gates PRs via security.yml. `self-host-check` is count-only (reports pass/fail counts, never fails). Tests are `continue-on-error` (advisory). CONTRIBUTING.md documents this gate-for-gate.
 - **CI OS matrix**: only the advisory `test-core` job runs on 3 OSes (ubuntu/windows/macos); all other jobs run on ubuntu-latest.
 - **`crates-io/` is empty** — reserved for future crates.io publishing workflow.
 - **`buff.lock`** is gitignored — Buff's future lockfile (not yet generated).

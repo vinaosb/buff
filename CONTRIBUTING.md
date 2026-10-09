@@ -87,7 +87,7 @@ cargo test -p <crates you touched>
 | Job | What actually runs |
 |---|---|
 | `cargo fmt` | `cargo fmt --check --all` |
-| `cargo clippy` | `cargo clippy $CI_CRATES --all-targets -- -D warnings`. `CI_CRATES` (defined in ci.yml) is an explicit allow-list: the compiler crates (including the `buff-lang-check` / `buff-lang-fmt` / `buff-lang-pipeline` extraction crates), the tooling crates, and the framework crates that are already warning-clean. Framework MVPs with pre-existing drift are excluded from the list. |
+| `cargo clippy` | `cargo clippy $CI_CRATES --all-targets -- -D warnings`. `CI_CRATES` (defined in ci.yml) covers the FULL workspace — every crate in `cargo metadata --no-deps`. The list is spelled out explicitly (not `--workspace`) to keep the gate legible and per-crate auditable; adding a crate means fixing its warnings first. |
 | `cargo deny` | `cargo-deny` bans + licenses check over the workspace (enforces the "no C library" rule; documented exceptions in `deny.toml`) |
 | `buff check + run` | Builds the CLI, then runs the golden-output harness over `examples/*.buff.expected` — any stdout mismatch fails the build (`exit 1`). `buff check` failures on examples without golden files are warnings only. |
 | `Docker image build` | Builds `docker/builder.Dockerfile` via buildx |

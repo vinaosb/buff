@@ -48,7 +48,7 @@ fn mk_fuzz_func(name: &str, param_ty: &str, param_count: usize) -> FuncDecl {
 #[test]
 fn passing_property_holds_for_int_range_invariant() {
     let s = Strategy::int(0, 100);
-    let summary = run(&s, 256, |n| n >= 0 && n <= 100).expect("valid run");
+    let summary = run(&s, 256, |n| (0..=100).contains(&n)).expect("valid run");
     assert!(summary.passed());
     assert_eq!(summary.iterations, 256);
 }
@@ -88,14 +88,14 @@ fn bool_strategy_generates_zero_or_one() {
 #[test]
 fn string_strategy_generates_lengths_in_range() {
     let s = Strategy::string(64);
-    let summary = run(&s, 64, |len| len >= 0 && len <= 64).expect("valid run");
+    let summary = run(&s, 64, |len| (0..=64).contains(&len)).expect("valid run");
     assert!(summary.passed());
 }
 
 #[test]
 fn bytes_strategy_generates_lengths_in_range() {
     let s = Strategy::bytes(128);
-    let summary = run(&s, 64, |len| len >= 0 && len <= 128).expect("valid run");
+    let summary = run(&s, 64, |len| (0..=128).contains(&len)).expect("valid run");
     assert!(summary.passed());
 }
 

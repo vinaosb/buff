@@ -100,21 +100,21 @@ fn run_rejects_invalid_strategy() {
 #[test]
 fn run_records_iteration_count_for_passing_property() {
     let s = Strategy::int(0, 100);
-    let summary = run(&s, 64, |n| n >= 0 && n <= 100).expect("valid run");
+    let summary = run(&s, 64, |n| (0..=100).contains(&n)).expect("valid run");
     assert_eq!(summary.iterations, 64);
 }
 
 #[test]
 fn run_summary_passed_is_true_for_passing_property() {
     let s = Strategy::int(0, 100);
-    let summary = run(&s, 64, |n| n >= 0 && n <= 100).expect("valid run");
+    let summary = run(&s, 64, |n| (0..=100).contains(&n)).expect("valid run");
     assert!(summary.passed());
 }
 
 #[test]
 fn run_summary_failed_count_is_zero_for_passing_property() {
     let s = Strategy::int(0, 100);
-    let summary = run(&s, 64, |n| n >= 0 && n <= 100).expect("valid run");
+    let summary = run(&s, 64, |n| (0..=100).contains(&n)).expect("valid run");
     assert_eq!(summary.failed_count(), 0);
 }
 
