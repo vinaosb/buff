@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-27 (v1.39 real-use-cases launch; v1.25 launch-readiness refresh; originally v0.1 → v1.0 → v1.9 → v1.24 → v1.39)
-**Commit:** d478b9a (`main`, v1.39 real-use-cases launch — 5 use-case batches + golden harness + CI/pages; v1.0-v1.39 shipped)
-**Branch:** `fix/iter23-db-pool`main`` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.39.0; v0.1-dev preserved as historical marker)
+**Commit:** 6bc40d3 (`main`, v1.39 real-use-cases launch — 5 use-case batches + golden harness + CI/pages; v1.0-v1.39 shipped)
+**Branch:** `fix/iter27-email-buffup`main`` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.39.0; v0.1-dev preserved as historical marker)
 
 ## OVERVIEW
 

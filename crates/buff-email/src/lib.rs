@@ -294,29 +294,51 @@ pub struct SmtpClient {
 }
 
 impl SmtpClient {
-    /// Construct a new SMTP client configured for STARTTLS on the
-    /// given host / port with the given username / password.
+    /// Construct a new SMTP client configured for opportunistic
+    /// STARTTLS on the given host / port with the given username /
+    /// password.
     ///
-    /// Wraps `lettre::SmtpTransport::relay(host)?` (which enables
-    /// STARTTLS with certificate validation via rustls + webpki-roots)
-    /// followed by `.port(port).credentials(creds).build()`. The
-    /// underlying TLS is pure-Rust rustls — NOT native-tls.
+    /// Wraps `lettre::SmtpTransport::builder_dangerous(host)` with
+    /// `Tls::Opportunistic(TlsParameters)` (upgrade via STARTTLS when
+    /// the server advertises it — the standard port-587 mailtrap /
+    /// Gmail / SES / Office365 pattern — stay plaintext otherwise,
+    /// e.g. local relays), followed by
+    /// `.port(port).credentials(creds).build()`. The underlying TLS
+    /// is pure-Rust rustls — NOT native-tls.
+    ///
+    /// NOTE: lettre 0.11's `SmtpTransport::relay()` is implicit-TLS
+    /// SMTPS on port 465 (`Tls::Wrapper`) and `starttls_relay()` is
+    /// `Tls::Required` (hard-fails against servers that don't
+    /// advertise STARTTLS), so neither matches the documented
+    /// opportunistic STARTTLS-on-587 behavior this type promises.
     ///
     /// Returns [`EmailError::InvalidRelay`] if the relay hostname is
-    /// rejected by lettre (typically an empty string or invalid DNS
-    /// syntax). DOES NOT perform a network round-trip at construction
-    /// time — the first TCP+TLS handshake happens at the first
-    /// [`SmtpClient::send`] call.
+    /// empty (validated explicitly — lettre accepts an empty host and
+    /// only fails at connect time) or rejected by lettre's TLS
+    /// parameters (invalid DNS syntax). DOES NOT perform a network
+    /// round-trip at construction time — the first TCP handshake
+    /// happens at the first [`SmtpClient::send`] call.
     pub fn new(host: &str, port: u16, username: &str, password: &str) -> Result<Self, EmailError> {
         let host_owned = host.to_string();
         let user_owned = username.to_string();
         let pass_owned = password.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
             use lettre::transport::smtp::authentication::Credentials;
+            use lettre::transport::smtp::client::{Tls, TlsParameters};
+
+            if host_owned.trim().is_empty() {
+                return Err(EmailError::InvalidRelay(
+                    "relay hostname must not be empty".to_string(),
+                ));
+            }
+
             let creds = Credentials::new(user_owned, pass_owned);
-            let transport = lettre::SmtpTransport::relay(&host_owned)
-                .map_err(|e| EmailError::InvalidRelay(e.to_string()))?
+            let transport = lettre::SmtpTransport::builder_dangerous(&host_owned)
                 .port(port)
+                .tls(Tls::Opportunistic(
+                    TlsParameters::new(host_owned.clone())
+                        .map_err(|e| EmailError::InvalidRelay(e.to_string()))?,
+                ))
                 .credentials(creds)
                 .build();
             Ok(SmtpClient { transport })

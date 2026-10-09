@@ -150,6 +150,20 @@ async fn install_downloads_and_extracts() {
             .body(tarball.clone());
     });
 
+    // The install flow fetches a `.sha256` sidecar next to the tarball
+    // and refuses to unpack unless the digest matches. Serve the
+    // sidecar for the exact tarball built above — without this mock
+    // the checksum fetch hits httpmock's default 404 and install
+    // fails with `HttpStatus(404)` mid-verification.
+    let sha = buffup::github::sha256_digest(&tarball);
+    server.mock(|when, then| {
+        when.method(Method::GET)
+            .path(format!("{tarball_path_on_server}.sha256"));
+        then.status(200)
+            .header("content-type", "text/plain")
+            .body(format!("{sha}  {bin_name}"));
+    });
+
     install::run("1.0.0".to_string(), false)
         .await
         .expect("install");
