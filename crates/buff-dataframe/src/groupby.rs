@@ -47,10 +47,13 @@ impl GroupBy {
         let series = match self.parent.get_column(col) {
             Some(s) => s,
             None => {
-                return DataFrame::from_rows(
+                let mut columns = BTreeMap::new();
+                columns.insert(self.key_column.clone(), Series::String(Vec::new()));
+                columns.insert(col.to_string(), Series::String(Vec::new()));
+                return DataFrame::from_parts(
+                    columns,
                     vec![self.key_column.clone(), col.to_string()],
-                    Vec::new(),
-                )
+                );
             }
         };
         let mut key_col: Vec<String> = Vec::with_capacity(self.groups.len());
@@ -60,14 +63,14 @@ impl GroupBy {
             let val = aggregate(series, indices, op);
             val_col.push(val);
         }
-        DataFrame::from_rows(
-            vec![self.key_column.clone(), col.to_string()],
-            key_col
-                .into_iter()
-                .zip(val_col)
-                .map(|(k, v)| vec![k, v])
-                .collect(),
-        )
+        // Build with explicit String series: routing through
+        // `DataFrame::from_rows` would re-infer numeric-looking sums as
+        // Int/Float, defeating the documented String-coerced aggregation
+        // contract (users re-coerce via `as_int_slice()` etc).
+        let mut columns = BTreeMap::new();
+        columns.insert(self.key_column.clone(), Series::String(key_col));
+        columns.insert(col.to_string(), Series::String(val_col));
+        DataFrame::from_parts(columns, vec![self.key_column.clone(), col.to_string()])
     }
 
     pub fn len(&self) -> usize {
