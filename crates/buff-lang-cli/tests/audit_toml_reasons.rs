@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[test]
 fn audit_toml_parses_and_every_ignored_id_has_comment_above() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let audit_path = manifest.join("../../audit.toml");
+    let audit_path = manifest.join("../../.cargo/audit.toml");
     let raw = std::fs::read_to_string(&audit_path)
         .unwrap_or_else(|e| panic!("must read {}: {e}", audit_path.display()));
 
