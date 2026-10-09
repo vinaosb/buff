@@ -310,11 +310,24 @@ mod advisory_db {
         /// the manifest text. Cargo.lock uses the hyphen form in
         /// `name-version` checksum lines; buff.toml uses the
         /// `name = "version"` form — both are covered.
+        ///
+        /// Cargo.lock ALSO splits the pair across two lines inside a
+        /// `[[package]]` block (`name = "chrono"` / `version =
+        /// "0.4.19"`), which none of the single-line patterns above
+        /// can match. Both lines must sit in the SAME block so a
+        /// `version = "0.4.19"` belonging to a different package
+        /// cannot satisfy `name = "chrono"`.
         pub fn matches_text(&self, text: &str) -> bool {
             let hyphen = format!("{}-{}", self.package, self.vuln_version);
             let eq = format!("{}\"{}\"", self.package, self.vuln_version);
             let eq_spaced = format!("{} = \"{}\"", self.package, self.vuln_version);
-            text.contains(&hyphen) || text.contains(&eq) || text.contains(&eq_spaced)
+            if text.contains(&hyphen) || text.contains(&eq) || text.contains(&eq_spaced) {
+                return true;
+            }
+            let name_line = format!("name = \"{}\"", self.package);
+            let version_line = format!("version = \"{}\"", self.vuln_version);
+            text.split("[[package]]")
+                .any(|block| block.contains(&name_line) && block.contains(&version_line))
         }
     }
 

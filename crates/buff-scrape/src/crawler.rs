@@ -214,9 +214,16 @@ fn resolve_against(seed: &str, href: &str) -> Option<String> {
 }
 
 fn crawl_bfs(crawler: &Crawler, seed: &str, max_pages: usize) -> Result<Vec<String>, ScrapeError> {
+    // Normalize the seed through `url::Url` so the recorded URL matches
+    // the canonical form (e.g. a bare `http://host:port` seed gains the
+    // trailing `/` its empty path renders as). Raw seeds would otherwise
+    // be reported verbatim while every discovered link is normalized.
+    let normalized_seed = url::Url::parse(seed)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| seed.to_string());
     let mut visited: BTreeSet<String> = BTreeSet::new();
     let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
-    queue.push_back(seed.to_string());
+    queue.push_back(normalized_seed.clone());
     let mut order: Vec<String> = Vec::with_capacity(max_pages);
     while let Some(url) = queue.pop_front() {
         if order.len() >= max_pages {
@@ -236,7 +243,7 @@ fn crawl_bfs(crawler: &Crawler, seed: &str, max_pages: usize) -> Result<Vec<Stri
                         Some(r) => r,
                         None => continue,
                     };
-                    if is_same_origin(seed, &resolved) && !visited.contains(&resolved) {
+                    if is_same_origin(&normalized_seed, &resolved) && !visited.contains(&resolved) {
                         queue.push_back(resolved);
                     }
                 }
@@ -254,11 +261,11 @@ fn robots_allowed(crawler: &Crawler, url: &str) -> bool {
         Ok(u) => u,
         Err(_) => return true,
     };
-    let host = match parsed_seed.host_str() {
-        Some(h) => h,
-        None => return true,
-    };
-    let robots_url = format!("{}://{}/robots.txt", parsed_seed.scheme(), host);
+    // `host_str()` drops an explicit port, which would send the robots
+    // request to the scheme's default port (connection-refused on any
+    // custom-port host → silent fail-open). The origin's ASCII
+    // serialization keeps scheme + host + non-default port together.
+    let robots_url = format!("{}/robots.txt", parsed_seed.origin().ascii_serialization());
     let parsed_target = match url::Url::parse(url) {
         Ok(u) => u,
         Err(_) => return true,
