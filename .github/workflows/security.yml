@@ -20,21 +20,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: 1.95.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
-        # W5/T31 finding: a root-level audit.toml is NOT auto-honored by
-        # bare `cargo audit` on CI (PR #81: RUSTSEC-2026-0258 fired as a
-        # fatal error despite being listed in audit.toml's ignore array).
-        # The CLI flag is load-bearing; audit.toml remains the documented
-        # per-ID rationale surface (enforced by the audit_toml_reasons
-        # test), but the ignore itself must ALSO be passed here until
-        # cargo-audit config discovery is solved (.cargo/audit.toml or
-        # explicit --config).
-        run: cargo audit --ignore RUSTSEC-2026-0258
+        # ITER-35: audit.toml moved from repo root to .cargo/audit.toml —
+        # the location bare `cargo audit` actually reads (W5/T31 finding,
+        # PR #81: RUSTSEC-2026-0258 fired despite being in the root file's
+        # ignore array). All advisory ignores now apply from that single
+        # source of truth, so no CLI --ignore flags are needed here.
+        # Per-ID rationale remains enforced by the audit_toml_reasons test.
+        run: cargo audit
         continue-on-error: false
       - name: Upload audit report
         if: always()
@@ -53,7 +51,7 @@ jobs:
       contents: write  # softprops/action-gh-release attaches the SBOM to the release
     steps:
       - uses: actions/checkout@v4 # v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: 1.95.0
       - name: Install cargo-cyclonedx
