@@ -10,17 +10,18 @@ HTML templating for the Buff language. Pure-Rust MVP wrapping the [`handlebars`]
 buff-template/
 ├── Cargo.toml            # handlebars + serde_json + thiserror + insta deps
 ├── src/
-│   ├── lib.rs            # Template (main surface, ~120 LOC)
-│   └── error.rs          # TemplateError enum (~30 LOC)
+│   ├── lib.rs            # Template (main surface, ~140 LOC)
+│   ├── control_flow.rs   # {% if/else/endif %} + {% for/endfor %} → handlebars blocks (ITER-07)
+│   └── error.rs          # TemplateError enum (~20 LOC)
 ├── examples/
 │   ├── hello_template.rs       # basic variable substitution
 │   └── loop_template.rs        # loop + conditional
 └── tests/
-    ├── api.rs            # 15 unit tests (constructors, render, errors)
-    └── render.rs         # 10 render-focused tests (nested, escaping, helpers)
+    ├── api.rs            # 17 unit tests (constructors, render, errors, control-flow)
+    └── render.rs         # 8 render-focused tests (nested, escaping, helpers)
 ```
 
-Total: ~400 LOC (well under the 1500 LOC T19 cap).
+Total: ~450 LOC (well under the 1500 LOC T19 cap).
 
 ## WHERE TO LOOK
 

@@ -38,6 +38,8 @@ pub mod error;
 
 pub use error::TemplateError;
 
+mod control_flow;
+
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// A compiled HTML template, ready to render with a context.
@@ -58,17 +60,22 @@ impl Template {
     /// Compile a template from a source string.
     ///
     /// The source uses handlebars syntax: `{{ variable }}`,
-    /// `{% if cond %}...{% endif %}`, `{% for item in list %}...{% endfor %}`.
+    /// `{% if cond %}...{% else %}...{% endif %}`,
+    /// `{% for item in list %}...{% endfor %}`.
     ///
-    /// Wraps `handlebars::Handlebars::register_template_string`. The body
-    /// is wrapped in `catch_unwind` per T4 FFI guide R6 so a panic in the
-    /// parser becomes a stable `Err(TemplateError::Panic)` instead of
+    /// `{% %}` control tags are first rewritten to their handlebars block
+    /// equivalents by the `control_flow` module (unknown or malformed tags
+    /// fail with `TemplateError::Parse`); everything else is handled by
+    /// handlebars directly. Wraps `handlebars::Handlebars::register_template_string`.
+    /// The body is wrapped in `catch_unwind` per T4 FFI guide R6 so a panic
+    /// in the parser becomes a stable `Err(TemplateError::Panic)` instead of
     /// process abort.
     pub fn from_string(source: &str) -> Result<Self, TemplateError> {
         let source_owned = source.to_string();
         let result = catch_unwind(AssertUnwindSafe(|| {
+            let translated = control_flow::translate_control_flow(&source_owned)?;
             let mut hb = handlebars::Handlebars::new();
-            hb.register_template_string("__buff_template_main", &source_owned)
+            hb.register_template_string("__buff_template_main", &translated)
                 .map_err(|e| TemplateError::Parse(e.to_string()))?;
             Ok(Template { inner: hb })
         }));

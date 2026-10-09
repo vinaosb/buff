@@ -75,6 +75,42 @@ fn render_with_conditional_false() {
 }
 
 #[test]
+fn render_with_nested_if_and_loop() {
+    let t = Template::from_string(
+        "{% if show %}{% for item in items %}[{{item}}]{% endfor %}{% endif %}",
+    )
+    .expect("compile nested");
+    let out = t
+        .render(r#"{"show": true, "items": ["a", "b"]}"#)
+        .expect("render nested shown");
+    assert_eq!(out, "[a][b]");
+    let out_hidden = t
+        .render(r#"{"show": false, "items": ["a", "b"]}"#)
+        .expect("render nested hidden");
+    assert_eq!(out_hidden, "");
+}
+
+#[test]
+fn render_with_empty_collection_loop() {
+    let t = Template::from_string("{% for item in items %}{{item}} {% endfor %}")
+        .expect("compile empty loop");
+    let out = t.render(r#"{"items": []}"#).expect("render empty items");
+    assert_eq!(out, "");
+}
+
+#[test]
+fn from_string_rejects_unknown_control_tag() {
+    let err = Template::from_string("Hello {% upper name %}!").unwrap_err();
+    assert!(matches!(err, TemplateError::Parse(_)));
+}
+
+#[test]
+fn from_string_rejects_unclosed_control_tag() {
+    let err = Template::from_string("Hello {% if ok").unwrap_err();
+    assert!(matches!(err, TemplateError::Parse(_)));
+}
+
+#[test]
 fn render_rejects_invalid_context_json() {
     let t = Template::from_string("Hello {{name}}!").expect("compile");
     let err = t.render("not json").unwrap_err();
