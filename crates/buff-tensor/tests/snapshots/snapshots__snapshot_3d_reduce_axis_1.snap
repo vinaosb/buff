@@ -1,0 +1,6 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 102
+expression: "format!(\"input shape={:?} reduce(1) shape={:?} reduce(1) data={:?}\",\nt.shape().as_slice(), r.shape().as_slice(), r.as_slice(),)"
+---
+input shape=[2, 2, 2] reduce(1) shape=[2, 2] reduce(1) data=[4.0, 6.0, 12.0, 14.0]

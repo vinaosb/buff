@@ -1,0 +1,36 @@
+---
+source: crates/buff-validate/tests/core.rs
+assertion_line: 316
+expression: "serde_json::to_string_pretty(&schema).unwrap_or_default()"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "age": {
+      "maximum": 150,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "email": {
+      "format": "email",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "type": "string"
+    },
+    "zip": {
+      "pattern": "^[0-9]{5}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "age",
+    "email",
+    "name",
+    "zip"
+  ],
+  "type": "object"
+}

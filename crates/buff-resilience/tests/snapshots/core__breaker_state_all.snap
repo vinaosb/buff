@@ -1,0 +1,6 @@
+---
+source: crates/buff-resilience/tests/core.rs
+assertion_line: 324
+expression: "format!(\"{:?}|{:?}|{:?}\", BreakerState::Closed, BreakerState::Open,\nBreakerState::HalfOpen)"
+---
+Closed|Open|HalfOpen

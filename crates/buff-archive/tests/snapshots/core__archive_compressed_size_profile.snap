@@ -1,0 +1,8 @@
+---
+source: crates/buff-archive/tests/core.rs
+assertion_line: 404
+expression: "format!(\"gz/repetitive: {:.3}\\nzstd/repetitive: {:.3}\\nzstd/incompressible: {:.3}\\n\",\ngz_rep.len() as f64 / repetitive.len() as f64, zstd_rep.len() as f64 /\nrepetitive.len() as f64, zstd_incomp.len() as f64 / incompressible.len() as\nf64,)"
+---
+gz/repetitive: 0.006
+zstd/repetitive: 0.010
+zstd/incompressible: 0.075

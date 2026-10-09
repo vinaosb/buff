@@ -1,0 +1,6 @@
+---
+source: crates/buff-simd/tests/core.rs
+assertion_line: 174
+expression: "format!(\"{s}\")"
+---
+Simd(1.5, -2.5, 3, 4.25)

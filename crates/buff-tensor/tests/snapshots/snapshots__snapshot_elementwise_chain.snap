@@ -1,0 +1,6 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 117
+expression: "format!(\"result shape={:?} result data={:?}\", result.shape().as_slice(),\nresult.as_slice(),)"
+---
+result shape=[2, 2] result data=[1.1, 2.2, 3.3, 4.4]

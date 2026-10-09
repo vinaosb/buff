@@ -1,0 +1,16 @@
+---
+source: crates/buff-cli/tests/core.rs
+assertion_line: 224
+expression: app.help_text()
+---
+snap about
+
+Usage: snap [OPTIONS] [path]
+
+Arguments:
+  [path]  input path
+
+Options:
+  -v, --verbose      verbose mode
+  -n, --name <name>  set name
+  -h, --help         Print help

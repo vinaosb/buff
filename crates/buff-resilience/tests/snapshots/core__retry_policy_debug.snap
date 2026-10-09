@@ -1,0 +1,6 @@
+---
+source: crates/buff-resilience/tests/core.rs
+assertion_line: 338
+expression: "format!(\"{policy:?}\")"
+---
+RetryPolicy { max_attempts: 5, initial_delay: 100ms, backoff_factor: 2.5 }

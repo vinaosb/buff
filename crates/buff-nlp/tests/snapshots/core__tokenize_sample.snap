@@ -1,0 +1,6 @@
+---
+source: crates/buff-nlp/tests/core.rs
+assertion_line: 232
+expression: "tokens.join(\"|\")"
+---
+Hello|world|Foo|bar|baz

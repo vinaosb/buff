@@ -1,0 +1,6 @@
+---
+source: crates/buff-geo/tests/core.rs
+assertion_line: 292
+expression: "format!(\"area={:.4}\", poly.area())"
+---
+area=100.0000

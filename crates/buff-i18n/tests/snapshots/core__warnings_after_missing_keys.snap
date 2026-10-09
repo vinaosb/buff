@@ -1,0 +1,7 @@
+---
+source: crates/buff-i18n/tests/core.rs
+assertion_line: 281
+expression: warnings
+---
+missing translation: missing-key-b (locale: en)
+missing translation: missing-key-a (locale: en)

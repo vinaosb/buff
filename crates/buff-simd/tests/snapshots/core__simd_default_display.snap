@@ -1,0 +1,6 @@
+---
+source: crates/buff-simd/tests/core.rs
+assertion_line: 180
+expression: "format!(\"{s}\")"
+---
+Simd(0, 0, 0, 0)

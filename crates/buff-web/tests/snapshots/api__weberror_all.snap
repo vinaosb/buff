@@ -1,0 +1,12 @@
+---
+source: crates/buff-web/tests/api.rs
+assertion_line: 275
+expression: "format!(\"{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\", io_err, addr_err, path_err, body_err,\njson_err, rt_err, panic_err)"
+---
+web I/O error: x
+invalid bind address: bad
+invalid route path: nope
+request body is not valid UTF-8
+JSON error: syntax
+failed to create tokio runtime
+internal error: web operation panicked

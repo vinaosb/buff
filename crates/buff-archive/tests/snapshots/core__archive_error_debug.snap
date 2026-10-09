@@ -1,0 +1,8 @@
+---
+source: crates/buff-archive/tests/core.rs
+assertion_line: 345
+expression: "format!(\"{err1}\\n{err2}\\n{err3}\")"
+---
+archive operation called with empty input
+format Zip does not support byte-stream operations; use compress_dir / extract instead
+cannot detect archive format from path /tmp/foo.bin; expected .zip / .tar / .gz / .zst

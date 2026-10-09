@@ -1,0 +1,6 @@
+---
+source: crates/buff-i18n/tests/core.rs
+assertion_line: 249
+expression: "format!(\"{i18n}\")"
+---
+I18n(current: en, fallback: en, locales: 0)

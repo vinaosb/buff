@@ -1,0 +1,6 @@
+---
+source: crates/buff-resilience/tests/core.rs
+assertion_line: 344
+expression: "format!(\"{to:?}\")"
+---
+Timeout { duration: 7s }

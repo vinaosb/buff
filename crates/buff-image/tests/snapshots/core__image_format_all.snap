@@ -1,0 +1,6 @@
+---
+source: crates/buff-image/tests/core.rs
+assertion_line: 254
+expression: "format!(\"{:?}|{:?}|{:?}|{:?}|{:?}|{:?}\", ImageFormat::Png, ImageFormat::Jpeg,\nImageFormat::Gif, ImageFormat::Bmp, ImageFormat::WebP, ImageFormat::Unknown)"
+---
+Png|Jpeg|Gif|Bmp|WebP|Unknown

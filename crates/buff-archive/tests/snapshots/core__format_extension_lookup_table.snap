@@ -1,0 +1,14 @@
+---
+source: crates/buff-archive/tests/core.rs
+assertion_line: 355
+expression: table
+---
+zip -> Some(Zip)
+tar -> Some(Tar)
+gz -> Some(Gz)
+gzip -> Some(Gz)
+zst -> Some(Zstd)
+zstd -> Some(Zstd)
+rar -> None
+7z -> None
+ -> None

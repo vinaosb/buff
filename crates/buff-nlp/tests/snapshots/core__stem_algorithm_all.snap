@@ -1,0 +1,6 @@
+---
+source: crates/buff-nlp/tests/core.rs
+assertion_line: 226
+expression: all
+---
+arabic|danish|dutch|english|finnish|french|german|greek|hungarian|italian|norwegian|portuguese|romanian|russian|spanish|swedish|tamil|turkish

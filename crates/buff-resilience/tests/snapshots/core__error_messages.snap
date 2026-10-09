@@ -1,0 +1,10 @@
+---
+source: crates/buff-resilience/tests/core.rs
+assertion_line: 316
+expression: "format!(\"{exhausted}\\n{circuit}\\n{rate}\\n{to:?}\\n{panic_err}\")"
+---
+retry exhausted after 3 attempt(s); last error: upstream timeout
+circuit breaker is open (failure_count=5, threshold=5)
+rate limit exceeded (10 req/s)
+Timeout(250ms)
+internal error: resilience operation panicked

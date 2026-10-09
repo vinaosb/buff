@@ -1,0 +1,6 @@
+---
+source: crates/buff-nlp/tests/core.rs
+assertion_line: 200
+expression: "format!(\"{lang}\")"
+---
+Português (por)

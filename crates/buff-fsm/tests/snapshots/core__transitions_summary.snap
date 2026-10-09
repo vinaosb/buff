@@ -1,0 +1,8 @@
+---
+source: crates/buff-fsm/tests/core.rs
+assertion_line: 331
+expression: "rendered.join(\"\\n\")"
+---
+green --tick--> yellow [guard=false, action=false]
+yellow --tick--> red [guard=false, action=false]
+red --tick--> green [guard=false, action=false]

@@ -1,0 +1,6 @@
+---
+source: crates/buff-geo/tests/core.rs
+assertion_line: 258
+expression: "format!(\"{ls}\")"
+---
+LineString(3 points)
