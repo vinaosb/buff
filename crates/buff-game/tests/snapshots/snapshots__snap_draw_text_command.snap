@@ -1,0 +1,5 @@
+---
+source: crates/buff-game/tests/snapshots.rs
+expression: "format!(\"{cmd:?}\")"
+---
+Text { content: "Hello World", position: (10.0, 20.0) }

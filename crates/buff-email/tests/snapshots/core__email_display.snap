@@ -1,0 +1,5 @@
+---
+source: crates/buff-email/tests/core.rs
+expression: "format!(\"{email}\")"
+---
+Email(from=from@buff.dev, to=to@buff.dev, subject="Welcome", attachments=1)

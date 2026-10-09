@@ -1,0 +1,15 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: t
+---
+Transform {
+    position: (
+        100.0,
+        200.0,
+    ),
+    rotation: 0.7853982,
+    scale: (
+        1.0,
+        1.0,
+    ),
+}

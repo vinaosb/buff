@@ -1,0 +1,6 @@
+---
+source: crates/buff-http-client/tests/core.rs
+expression: "format!(\"{err1}\\n{err2}\")"
+---
+internal error: HTTP client panicked
+HTTP error: connection refused

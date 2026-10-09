@@ -1,0 +1,5 @@
+---
+source: crates/buff-email/tests/core.rs
+expression: "format!(\"{client:?}\")"
+---
+SmtpClient { transport: "lettre::SmtpTransport" }

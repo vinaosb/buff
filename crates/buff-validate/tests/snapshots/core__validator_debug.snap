@@ -1,6 +1,5 @@
 ---
 source: crates/buff-validate/tests/core.rs
-assertion_line: 325
 expression: "format!(\"{v}\")"
 ---
 Validator(2 rule(s))
