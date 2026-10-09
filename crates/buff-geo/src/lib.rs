@@ -99,7 +99,12 @@ impl Point {
         }
         let cx = self.0.x();
         let cy = self.0.y();
-        const N: usize = 32;
+        // 64 segments keeps the inscribed-polygon area deficit vs the exact
+        // circle area under 0.5 for typical radii: the inscribed regular N-gon
+        // has area N/2 * r^2 * sin(2*pi/N), so at r=5 the deficit is
+        // pi*25 - 400*sin(pi/16) ~= 0.126 (32 segments gave ~0.5037, just
+        // missing the 0.5 circle-area tolerance).
+        const N: usize = 64;
         let mut coords: Vec<geo_types::Coord<f64>> = Vec::with_capacity(N + 1);
         for i in 0..N {
             let theta = 2.0 * std::f64::consts::PI * (i as f64) / (N as f64);
