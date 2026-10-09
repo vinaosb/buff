@@ -15,7 +15,8 @@ src/
 │   └── expr_postfix.rs  # Postfix expression parsing (calls, indexing, etc.)
 ├── stmt.rs      # Statement parser + block / func_decl / if / params / type_ref helpers
 ├── stmt/        # Statement sub-parsers
-│   └── stmt_decl.rs     # Declaration statement parsing (struct, enum, trait, impl)
+│   ├── stmt_decl.rs     # Decl-parser module root (ITER-52 split): mod decls + flat re-exports
+│   └── stmt_decl/       # Decl parsers by family (func, aggregates, trait_impl, import_export, extern_abi, shared)
 └── parser.rs    # Top-level parse() returning Vec<Decl>
 ```
 
