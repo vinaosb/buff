@@ -252,6 +252,7 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 | [`examples/word_operators.buff`](./examples/word_operators.buff) | `and` / `or` / `not` word operators as `&&` / `||` / `!` aliases (BUG-4 fix) | ✅ v1.26 (runs) |
 | [`examples/match_layout.buff`](./examples/match_layout.buff) | Layout `match x:` with colon-block arms + multi-statement bodies (BUG-11 fix) | ✅ v1.26 (runs) |
 | [`examples/multistmt_lambda.buff`](./examples/multistmt_lambda.buff) | Multi-statement lambda bodies (BUG-13 fix) | ✅ v1.26 (runs) |
+| [`examples/const_demo.buff`](./examples/const_demo.buff) | Top-level `const` declarations, keyword #31 (ITER-53C) | ✅ v1.26 (runs) |
 | [`examples/async_demo.buff`](./examples/async_demo.buff) | `async func`, `spawn`, `.result()` (no `await`) | 🔶 v0.5 (codegen-only¹) |
 | [`examples/modules/`](./examples/modules/) | `import` / `export` multi-file program | 🔶 v0.5 (codegen-only²) |
 | [`examples/tensor/hello.buff`](./examples/tensor/hello.buff) | `Tensor.zeros`, `shape()`, `rank()` (v1.14) | 🔶 v1.14 (codegen-deferred³) |
@@ -290,8 +291,8 @@ To build the LSP server: `cargo build --release -p buff-lsp`. To install the ext
 - Braces `{ }` reserved for data: struct literals, maps, lambdas, interpolation
 - Statically typed with aggressive inference — types rarely written
 
-**Reserved keywords (30):**
-`func let mut struct enum trait type if else for while return break continue in
+**Reserved keywords (31):**
+`func let mut struct enum trait type if else for while return break continue const in
 match async spawn import export from as true false extern unsafe guard extend
 defer impl`
 

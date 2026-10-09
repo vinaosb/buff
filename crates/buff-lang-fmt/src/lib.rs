@@ -903,6 +903,7 @@ fn decl_span(d: &Decl) -> Span {
         Decl::ExtendBlock(ext) => ext.span,
         Decl::ImplBlock(imp) => imp.span,
         Decl::ComptimeDecl(c) => c.span,
+        Decl::ConstDecl(c) => c.span,
     }
 }
 

@@ -141,5 +141,6 @@ fn decl_kind_and_name(d: &Decl) -> (&'static str, String) {
         Decl::ExtendBlock(_) => ("ExtendBlock", "<extend>".to_string()),
         Decl::ImplBlock(_) => ("ImplBlock", "<impl>".to_string()),
         Decl::ComptimeDecl(_) => ("ComptimeDecl", "<comptime>".to_string()),
+        Decl::ConstDecl(c) => ("ConstDecl", c.name.name.clone()),
     }
 }

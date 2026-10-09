@@ -33,6 +33,16 @@ impl<'a> Formatter<'a> {
                 self.raw("comptime:");
                 self.write_block_body(&c.body);
             }
+            Decl::ConstDecl(c) => {
+                self.write_indent();
+                let _ = write!(self.buf, "const {}", c.name.name);
+                if let Some(t) = &c.ty {
+                    self.raw(": ");
+                    self.write_typeref(t);
+                }
+                self.raw(" = ");
+                self.write_expr(&c.value);
+            }
             Decl::ExportDecl(e) => self.write_export(e),
             Decl::ReexportDecl(r) => {
                 self.write_indent();

@@ -197,6 +197,9 @@ fn lint_decl(decl: &Decl, out: &mut Vec<Diagnostic>) {
         // ITER-53B: comptime let-bindings are user-named — lint them like
         // function-body lets.
         Decl::ComptimeDecl(c) => lint_block(&c.body, out),
+        // ITER-53C: const names have no convention rule yet; the value is
+        // an expression (no body to walk).
+        Decl::ConstDecl(_) => {}
     }
 }
 

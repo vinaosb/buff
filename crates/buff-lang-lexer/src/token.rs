@@ -89,6 +89,7 @@ pub enum TokenKind {
     KwWhile,
     KwReturn,
     KwBreak,
+    KwConst,
     KwContinue,
     KwIn,
     KwMatch,
@@ -276,6 +277,7 @@ impl TokenKind {
             "while" => Some(Self::KwWhile),
             "return" => Some(Self::KwReturn),
             "break" => Some(Self::KwBreak),
+            "const" => Some(Self::KwConst),
             "continue" => Some(Self::KwContinue),
             "in" => Some(Self::KwIn),
             "match" => Some(Self::KwMatch),
@@ -328,6 +330,7 @@ impl TokenKind {
                 | Self::KwWhile
                 | Self::KwReturn
                 | Self::KwBreak
+                | Self::KwConst
                 | Self::KwContinue
                 | Self::KwIn
                 | Self::KwMatch
@@ -352,8 +355,9 @@ impl TokenKind {
     pub fn all_keywords() -> &'static [&'static str] {
         &[
             "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "while",
-            "return", "break", "continue", "in", "match", "async", "spawn", "import", "export",
-            "from", "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+            "return", "break", "continue", "const", "in", "match", "async", "spawn", "import",
+            "export", "from", "as", "true", "false", "extern", "unsafe", "guard", "extend",
+            "defer", "impl",
         ]
     }
 }
@@ -395,6 +399,7 @@ impl fmt::Display for TokenKind {
             Self::KwWhile => write!(f, "while"),
             Self::KwReturn => write!(f, "return"),
             Self::KwBreak => write!(f, "break"),
+            Self::KwConst => write!(f, "const"),
             Self::KwContinue => write!(f, "continue"),
             Self::KwIn => write!(f, "in"),
             Self::KwMatch => write!(f, "match"),

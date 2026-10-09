@@ -1,0 +1,12 @@
+// ITER-53C — top-level `const` declarations (keyword #31).
+// Run: `buff run examples/const_demo.buff`
+
+const max_users = 100
+const debug_mode: Bool = false
+
+func main():
+    if max_users > 50:
+        print("capacity OK")
+    if debug_mode:
+        print("debug")
+    print(max_users)

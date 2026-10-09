@@ -151,6 +151,10 @@ impl RustCodegen {
             // `generate()` (evaluated to multiple const items). Keep a
             // defensive arm for direct callers, mirroring ReexportDecl.
             Decl::ComptimeDecl { .. } => Err(self.unsupported("top-level comptime codegen")),
+            // ITER-53C: `const NAME[: Ty] = value` lowers to a single Rust
+            // const item. Type from the annotation, or the natural type of
+            // an Int/Bool literal.
+            Decl::ConstDecl(c) => self.lower_const_decl(c),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
             // T93: trait declarations lower to a Rust `syn::ItemTrait`.
             // Required methods (MethodSig) become bodyless trait method
@@ -250,6 +254,48 @@ impl RustCodegen {
     /// codegen time — Buff emits blanket `Clone + PartialEq + Debug`
     /// derives (plus `Hash` when safe); user-specified trait impls are a
     /// later task.
+    /// ITER-53C: `const NAME[: Ty] = value` -> a single Rust const item.
+    /// The type is the written annotation when present, else the natural
+    /// type of an Int/Bool literal (other values need an annotation).
+    pub(super) fn lower_const_decl(
+        &mut self,
+        c: &buff_lang_ast::ConstDecl,
+    ) -> Result<Item, CodegenError> {
+        use buff_lang_ast::{Expr, Literal};
+        let ident = ast_ident_to_syn(&c.name);
+        let ty = match &c.ty {
+            Some(t) => self.ast_typeref_to_syn(t)?,
+            None => {
+                let name = match &c.value {
+                    Expr::Literal(Literal::Int(_), _) => "i64",
+                    Expr::Literal(Literal::Bool(_), _) => "bool",
+                    _ => {
+                        return Err(self.unsupported(
+                            "const without a type annotation (only Int/Bool literals infer)",
+                        ))
+                    }
+                };
+                syn::Type::Path(syn::TypePath {
+                    qself: None,
+                    path: syn::Path::from(syn::Ident::new(name, proc_macro2::Span::call_site())),
+                })
+            }
+        };
+        let expr = self.lower_expr(&c.value)?;
+        Ok(Item::Const(syn::ItemConst {
+            attrs: Vec::new(),
+            vis: syn::Visibility::Inherited,
+            const_token: syn::token::Const::default(),
+            ident,
+            generics: syn::Generics::default(),
+            colon_token: syn::token::Colon::default(),
+            ty: Box::new(ty),
+            eq_token: Default::default(),
+            expr: Box::new(expr),
+            semi_token: syn::token::Semi::default(),
+        }))
+    }
+
     pub(super) fn lower_struct_decl(
         &mut self,
         s: &AstStructDecl,
