@@ -444,6 +444,17 @@ fn handle_buff_hover(args: &Value) -> Result<ToolResult, ToolError> {
         Ok(s) => s,
         Err(e) => return Ok(ToolResult::error(e.to_string())),
     };
+    // The LSP hover handler clamps out-of-document positions to EOF and
+    // then walks back up to 32 bytes for the nearest symbol, so a hover
+    // on a line past the end of the file would report the last decl
+    // instead of nothing. Reject positions past the document up front.
+    let line_count = src.lines().count() as u32;
+    if line >= line_count {
+        return Ok(ToolResult::ok(format!(
+            "no hover info at line {line}, character {character} in `{path}` \
+(the cursor is not on a known symbol)"
+        )));
+    }
     let state = document_state(&src);
     let pos = position(line, character);
 
