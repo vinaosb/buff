@@ -276,15 +276,20 @@ fn supervisor_permanent_restarts_after_crash() {
     }
     impl Actor for Crashy {
         fn handle(&mut self, _msg: Message) -> ActorAction {
-            let guard = self.crash_until.lock();
-            if let Ok(target) = guard {
-                if *target > 0 {
-                    *self.crash_until.lock().expect("lock-write") -= 1;
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        panic!("simulated crash for restart test");
-                    }));
-                    return ActorAction::Continue;
+            // Read the crash budget in one guard scope; std::sync::Mutex
+            // is non-reentrant, so the guard MUST be released before any
+            // re-lock below.
+            let should_crash = {
+                let g = self.crash_until.lock().expect("lock");
+                *g > 0
+            };
+            if should_crash {
+                if let Ok(mut g) = self.crash_until.lock() {
+                    *g -= 1;
                 }
+                // The panic must ESCAPE handle so the actor loop wrapper
+                // reports ChildExit::Crashed to the supervisor.
+                panic!("simulated crash for restart test");
             }
             if let Ok(mut g) = self.sink.lock() {
                 *g += 1;
@@ -299,33 +304,36 @@ fn supervisor_permanent_restarts_after_crash() {
     let crash_budget = Arc::new(Mutex::new(1u32));
     let pc2 = ping_count.clone();
     let cb2 = crash_budget.clone();
-    let r = sup
-        .start_child(ChildSpec::new(move || {
-            Box::new(Crashy {
-                sink: pc2.clone(),
-                crash_until: cb2.clone(),
+    let r1 = sup
+        .start_child(
+            ChildSpec::new(move || {
+                Box::new(Crashy {
+                    sink: pc2.clone(),
+                    crash_until: cb2.clone(),
+                })
             })
-        }))
+            .with_name("crashy"),
+        )
         .expect("start_child");
 
     // First message: triggers a panic. Supervisor must restart.
-    r.send("first".to_string()).expect("send-1");
-    assert!(
-        wait_for(|| {
-            // Restart visible when ping_count > 0 (restarted actor processed a msg).
-            // Send second message to verify the restarted actor is alive.
-            if ping_count.lock().map(|g| *g).unwrap_or(0) > 0 {
-                return true;
-            }
-            false
-        }) || {
-            // Try sending another message to nudge the restarted actor.
-            let _ = r.send("second".to_string());
-            wait_for(|| ping_count.lock().map(|g| *g).unwrap_or(0) > 0)
-        }
-    );
+    r1.send("first".to_string()).expect("send-1");
+    // A restarted actor gets a NEW mailbox, so the pre-crash ref r1 can
+    // no longer deliver; the restart is visible via the registry upsert.
+    assert!(wait_for(|| sys
+        .lookup("crashy")
+        .map(|r| r.id())
+        .unwrap_or(0)
+        != r1.id()));
 
-    let _ = r.send("third".to_string());
+    // The restarted actor must keep processing messages.
+    let r2 = sys.lookup("crashy").expect("lookup after restart");
+    let _ = r2.send("second".to_string());
+    assert!(
+        wait_for(|| ping_count.lock().map(|g| *g).unwrap_or(0) > 0),
+        "restarted actor processed a message"
+    );
+    let _ = r2.send("third".to_string());
     assert!(
         wait_for(|| ping_count.lock().map(|g| *g).unwrap_or(0) >= 2),
         "restarted actor processed subsequent messages"
@@ -350,10 +358,9 @@ fn supervisor_named_child_lookup_returns_live_ref_after_restart() {
                 *g
             };
             if n == self.crash_on {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    panic!("named-restart test crash");
-                }));
-                return ActorAction::Continue;
+                // The panic must ESCAPE handle so the loop wrapper
+                // reports a crash and the supervisor restarts.
+                panic!("named-restart test crash");
             }
             if let Ok(mut g) = self.sink.lock() {
                 *g += 1;
