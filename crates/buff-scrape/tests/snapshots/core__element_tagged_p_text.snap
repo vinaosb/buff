@@ -1,0 +1,5 @@
+---
+source: crates/buff-scrape/tests/core.rs
+expression: p.text()
+---
+tagged paragraph

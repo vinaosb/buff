@@ -1,0 +1,5 @@
+---
+source: crates/buff-scrape/tests/core.rs
+expression: p.html()
+---
+<p data-id="42">tagged paragraph</p>

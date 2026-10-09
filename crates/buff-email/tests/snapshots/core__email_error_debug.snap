@@ -1,0 +1,7 @@
+---
+source: crates/buff-email/tests/core.rs
+expression: "format!(\"{err1}\\n{err2}\\n{err3}\")"
+---
+invalid email address "bad": missing @
+SMTP send error: connection refused
+email template render error: missing variable `name`

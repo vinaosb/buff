@@ -1,6 +1,5 @@
 ---
 source: crates/buff-web/tests/api.rs
-assertion_line: 252
 expression: "format!(\"{:?}\", resp.headers_list())"
 ---
 [("Content-Type", "text/plain; charset=utf-8")]

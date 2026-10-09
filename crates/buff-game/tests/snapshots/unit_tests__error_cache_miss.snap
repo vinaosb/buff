@@ -1,0 +1,7 @@
+---
+source: crates/buff-game/tests/unit_tests.rs
+expression: e2
+---
+CacheMiss(
+    "img.png",
+)
