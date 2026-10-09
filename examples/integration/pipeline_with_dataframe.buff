@@ -40,10 +40,8 @@
 // Codegen status: documentation-only (Type::Pipeline + Type::DataFrame
 // both forward-declared; buff run cannot execute this end-to-end).
 
-import Source from buff.pipeline
-import Sink from buff.pipeline
-import DataFrame from buff.dataframe
-import AggOp from buff.dataframe
+// Source, Sink, DataFrame, and AggOp are framework surface referenced
+// directly below (documentation-only until the codegen lowering lands).
 
 func main():
     print("T22 integration: Pipeline -> DataFrame")
@@ -53,22 +51,19 @@ func main():
     let batches = Source.from_csv(
         path: "examples/integration/sales.csv",
         chunk_size: 100
-    )
-        .filter(predicate: { row => row.len() >= 3 })
-        .batch(size: 50)
-        .run()
+    ).filter(predicate: { row => row.len() >= 3 }).batch(size: 50).run()
 
     print("loaded ${batches.len()} batches")
     if batches.is_empty():
         print("no data; aborting")
-        return
+        return 0
 
     // Flatten batches. Assume the first row of the first batch is the
     // header (CSV-with-header convention from buff-dataframe read.rs).
     let first = batches[0]
     if first.is_empty():
         print("empty first batch; aborting")
-        return
+        return 0
     let header = first[0]
     let data_rows = []
     for batch in batches:

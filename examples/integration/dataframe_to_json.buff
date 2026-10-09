@@ -35,9 +35,19 @@
 // per buff-dataframe/AGENTS.md "WHERE TO LOOK" — lowering arm deferred
 // to a coordinated sibling task outside the T7 shared zone).
 
-import DataFrame from buff.dataframe
-import JSON from buff.json
-import Filesystem from buff.filesystem
+// DataFrame, JSON, and Filesystem are implicit prelude types (no import).
+
+// Read the value of column `col` in row `i`, dispatching on Series.kind().
+func series_value(df, col, i):
+    let series = df.get_column(col)
+    let kind = series.kind()
+    if kind == "int":
+        return series.as_int_slice()[i]
+    else if kind == "float":
+        return series.as_float_slice()[i]
+    else if kind == "bool":
+        return series.as_bool_slice()[i]
+    return series.as_string_slice()[i]
 
 // Build a JSON array of row-objects from a DataFrame by iterating
 // columns + reading each Series via its kind-tagged slice accessor.
@@ -47,18 +57,12 @@ func rows_to_json(df):
     let columns = df.column_names()
     let array = []
     for i in range(0, df.len()):
-        let obj = {}
+        let c0 = columns[0]
+        let obj = {c0: series_value(df, c0, i)}
         for col in columns:
-            let series = df.get_column(col)
-            let kind = series.kind()
-            if kind == "int":
-                obj[col] = series.as_int_slice()[i]
-            else if kind == "float":
-                obj[col] = series.as_float_slice()[i]
-            else if kind == "bool":
-                obj[col] = series.as_bool_slice()[i]
-            else:
-                obj[col] = series.as_string_slice()[i]
+            if col == c0:
+                continue
+            obj[col] = series_value(df, col, i)
         array.push(obj)
     return array
 
@@ -71,9 +75,7 @@ func main():
     print(df.to_table_string())
 
     // Project to a subset + filter adults, take top 5.
-    let subset = df.select(cols: ["name", "age"])
-        .filter(predicate: { row => row.get_int("age") > 18 })
-        .head(n: 5)
+    let subset = df.select(cols: ["name", "age"]).filter(predicate: { row => row.get_int("age") > 18 }).head(n: 5)
     print("subset (adults, top 5):")
     print(subset.to_table_string())
 

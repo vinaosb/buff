@@ -21,19 +21,15 @@
 // report). These files parse cleanly (mirror the proven patterns in
 // examples/integration/*.buff) but cannot execute end-to-end today.
 //
-// The import statements below are DOCUMENTATION ONLY -- per the T22 report's
-// "Implicit prelude vs explicit import" cross-cutting note, prelude types
-// (DataFrame, Model, Web, Signal, etc) are implicit. The imports make the
-// API surface explicit for readers.
+// The import statements below name the API surface explicitly -- per the
+// T22 report's "Implicit prelude vs explicit import" cross-cutting note,
+// framework prelude types (DataFrame, Model, Web, Signal, etc) are also
+// available implicitly; the imports make the dependency visible for readers.
 
-import DataFrame from buff.dataframe
-from "buff/ml" import Model, Linear, SGD, mse_loss
-import Signal from buff.reactive
-from "./data_loader.buff" import load_data, preprocess, mean_petal_length_by_species
-from "./model.buff" import new_model, train_model
-from "./server.buff" import start_server
-
-const DATA_PATH = "examples/data-science-workbench/data.csv"
+import { Model, Linear, SGD, mse_loss } from "buff/ml"
+import { load_data, preprocess, mean_petal_length_by_species } from "./data_loader.buff"
+import { new_model, train_model } from "./model.buff"
+import { start_server } from "./server.buff"
 
 // Entry point: load -> preprocess -> train initial model -> start server.
 //

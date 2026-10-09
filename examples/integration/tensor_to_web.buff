@@ -32,8 +32,8 @@
 // Codegen status: documentation-only (Type::Tensor + Type::Web are
 // both forward-declared; buff run cannot execute this end-to-end).
 
-import Tensor from buff.tensor
-from "buff/web" import Web, Request, Response
+// Tensor, Web, Request, and Response are framework surface referenced
+// directly below (documentation-only until the codegen lowering lands).
 
 func main():
     print("T22 integration: Tensor -> Web")
@@ -70,7 +70,7 @@ func main():
     })
 
     print("tensor_to_web listening on http://0.0.0.0:8080")
-    print("  GET /       -> { shape, rank, data }")
-    print("  GET /shape  -> { shape }")
-    print("  GET /health -> { status: 'ok' }")
+    print("  GET /       -> JSON object with shape, rank, and data")
+    print("  GET /shape  -> JSON object with shape")
+    print("  GET /health -> JSON object with status ok")
     app.listen(port: 8080)

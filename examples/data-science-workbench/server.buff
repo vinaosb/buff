@@ -36,15 +36,14 @@
 // and then model_signal.set(trained) to publish the new weights. Subsequent
 // GET / requests observe the updated model.
 
-import Signal from buff.reactive
-from "buff/web" import Web, Request, Response
-from "buff/observe" import Span, Counter, Histogram, Tracer
-from "./data_loader.buff" import rows_to_json, code_to_species
-from "./model.buff" import predict, model_summary, train_from_scratch
-from "./pipeline.buff" import retrain_via_pipeline
+import { Web, Request, Response } from "buff/web"
+import { Span, Counter, Histogram, Tracer } from "buff/observe"
+import { rows_to_json, code_to_species } from "./data_loader.buff"
+import { predict, model_summary, train_from_scratch } from "./model.buff"
+import { retrain_via_pipeline } from "./pipeline.buff"
 
-const SERVER_PORT = 8080
-const DATA_PATH = "examples/data-science-workbench/data.csv"
+// Server constants (no top-level `const` keyword â€” declared in start_server):
+//   SERVER_PORT = 8080, DATA_PATH = "examples/data-science-workbench/data.csv".
 
 // ---------------------------------------------------------------------------
 // Metrics (buff-observe T21).
@@ -108,12 +107,15 @@ func string_split(s, sep):
 // POST /retrain updates are visible to subsequent GET / requests) and
 // serves the four endpoints until interrupted.
 export func start_server(model_signal, df):
+    let server_port = 8080
+    let data_path = "examples/data-science-workbench/data.csv"
+
     // Bootstrap observability once (idempotent).
     Tracer.bootstrap()
     let request_counter = new_request_counter()
     let predict_hist = new_predict_histogram()
 
-    print("[server] bootstrapping on port ${SERVER_PORT}")
+    print("[server] bootstrapping on port ${server_port}")
     print("[server] T22-FU5: using single-threaded tokio runtime")
     print("[server]   (Signal<T> is !Send; current_thread runtime keeps")
     print("[server]    handlers on the main thread where the Signal lives)")
@@ -189,7 +191,7 @@ export func start_server(model_signal, df):
         // train). Composes buff-pipeline + buff-dataframe + buff-ml.
         let retrain_span = Span.new("pipeline_retrain")
         let _rguard = retrain_span.enter()
-        let outcome = retrain_via_pipeline(DATA_PATH)
+        let outcome = retrain_via_pipeline(data_path)
 
         // Train a fresh model from the in-memory DataFrame as a fallback
         // path that does not depend on the pipeline streaming layer.
@@ -231,10 +233,10 @@ export func start_server(model_signal, df):
     // ---------------------------------------------------------------------
     // Listen (blocks the main thread -- single-threaded runtime per T22-FU5).
     // ---------------------------------------------------------------------
-    print("[server] listening on http://0.0.0.0:${SERVER_PORT}")
+    print("[server] listening on http://0.0.0.0:${server_port}")
     print("[server]   GET  /          -> model summary")
-    print("[server]   GET  /predict   -> { prediction, confidence }")
-    print("[server]   POST /retrain   -> { retrained, new_loss }")
+    print("[server]   GET  /predict   -> prediction + confidence")
+    print("[server]   POST /retrain   -> retrained + new_loss")
     print("[server]   GET  /data      -> training rows (JSON)")
-    print("[server]   GET  /health    -> { status: 'ok' }")
-    app.listen(port: SERVER_PORT)
+    print("[server]   GET  /health    -> status ok")
+    app.listen(port: server_port)

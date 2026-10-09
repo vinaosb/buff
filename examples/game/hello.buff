@@ -12,7 +12,7 @@ func main():
     let config = GameConfig.new(800, 600, "Hello Game")
     let game = Game.new(config)
 
-    game.add_scene(SimpleScene.new("hello", |_game, _dt| {
+    game.add_scene(SimpleScene.new("hello", { _game, _dt =>
         print("Hello, Buff Game!")
     }))
 
