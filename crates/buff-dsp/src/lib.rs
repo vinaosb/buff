@@ -275,7 +275,10 @@ impl Window {
         Self::new(WindowKind::Hamming, n)
     }
 
-    /// Blackman window of length `n`. Symmetric.
+    /// Blackman window of length `n`. Periodic textbook form:
+    /// `w[i] = 0.42 - 0.5*cos(2*PI*i/n) + 0.08*cos(4*PI*i/n)` —
+    /// denominator `n` (matching the Hann convention), so `w[0] == 0`
+    /// and `w[n/2] == 1.0` for even `n`.
     pub fn blackman(n: usize) -> Self {
         Self::new(WindowKind::Blackman, n)
     }
@@ -317,7 +320,19 @@ fn compute_window(kind: WindowKind, n: usize) -> Vec<f64> {
             .map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos())
             .collect(),
         WindowKind::Hamming => apodize::hamming_iter(n).take(n).collect(),
-        WindowKind::Blackman => apodize::blackman_iter(n).take(n).collect(),
+        // Hand-rolled PERIODIC Blackman (w[i] = 0.42 - 0.5*cos(2*PI*i/n)
+        // + 0.08*cos(4*PI*i/n), denominator n): apodize's `blackman_iter`
+        // computes a symmetric variant that peaks at 0.8894 and is
+        // double-peaked — not the textbook window, whose peak is exactly
+        // 1.0 at i = n/2 (ITER-33). The terms are ordered `0.42 + 0.08*cos
+        // - 0.5*cos` so `w[0]` and `w[n/2]` (even n) are exact 0.0 / 1.0
+        // in f64 (`0.42 + 0.08` rounds to exactly `0.5`).
+        WindowKind::Blackman => (0..n)
+            .map(|i| {
+                0.42 + 0.08 * (4.0 * std::f64::consts::PI * i as f64 / n as f64).cos()
+                    - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos()
+            })
+            .collect(),
     };
     if coeffs.len() == n {
         coeffs
