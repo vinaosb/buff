@@ -14,11 +14,12 @@ use buff_lang_lexer::{tokenize, LexerError, Token, TokenKind};
 fn all_keywords_present() {
     let expected: &[&str] = &[
         "func", "let", "mut", "struct", "enum", "trait", "type", "if", "else", "for", "while",
-        "return", "break", "continue", "in", "match", "async", "spawn", "import", "export", "from",
-        "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer", "impl",
+        "return", "break", "continue", "const", "in", "match", "async", "spawn", "import",
+        "export", "from", "as", "true", "false", "extern", "unsafe", "guard", "extend", "defer",
+        "impl",
     ];
     assert_eq!(TokenKind::all_keywords(), expected);
-    assert_eq!(TokenKind::all_keywords().len(), 30);
+    assert_eq!(TokenKind::all_keywords().len(), 31);
 }
 
 #[test]

@@ -627,6 +627,8 @@ fn decl_item_name(decl: &Decl) -> Option<String> {
         | Decl::ExtendBlock(_)
         | Decl::ImplBlock(_)
         | Decl::ComptimeDecl(_) => None,
+        // ITER-53C: consts are named items — exportable like funcs.
+        Decl::ConstDecl(c) => Some(c.name.name.clone()),
     }
 }
 

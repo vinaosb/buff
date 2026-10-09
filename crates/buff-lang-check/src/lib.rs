@@ -514,6 +514,18 @@ fn type_check_func(
             }
         }
     }
+    // ITER-53C: pre-bind top-level const names (they lower to Rust const
+    // items). Annotated types convert; unannotated binds permissively as
+    // Unknown (mirrors the param-binding fallback).
+    for d in all_decls {
+        if let Decl::ConstDecl(c) = d {
+            let ty =
+                c.ty.as_ref()
+                    .and_then(typeref_to_type)
+                    .unwrap_or(Type::Unknown);
+            inferencer.bind(&c.name.name, ty);
+        }
+    }
     // Pre-bind EVERY parameter. `typeref_to_type` only recognises
     // primitives + Option/Result; user-defined types (struct/enum names)
     // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED

@@ -278,6 +278,22 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
             let (body, span) = crate::stmt::parse_comptime_block_parts(stream)?;
             Ok(Some(Decl::ComptimeDecl(ComptimeDecl { body, span })))
         }
+        // ITER-53C: top-level `const NAME[: Ty] = value` (keyword #31).
+        // Attributes are not attachable to const declarations.
+        Some(TokenKind::KwConst) => {
+            if saw_attributes {
+                let span = stream
+                    .peek()
+                    .map(|t| t.span)
+                    .unwrap_or_else(|| stream.eof_span());
+                return Err(ParseError::new(Diagnostic::error(
+                    "attributes are not yet supported on `const` declarations (only `func`)",
+                    span,
+                )));
+            }
+            let c = crate::stmt::parse_const_decl(stream)?;
+            Ok(Some(Decl::ConstDecl(c)))
+        }
         other => {
             let span = stream
                 .peek()

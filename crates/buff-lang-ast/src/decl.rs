@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::common::{Block, Ident, Param};
+use crate::expr::Expr;
 use crate::ty::TypeRef;
 use buff_lang_error::Span;
 
@@ -143,6 +144,12 @@ pub enum Decl {
     /// and emits one Rust `const` item per extracted let-binding; the
     /// block leaves no runtime trace.
     ComptimeDecl(ComptimeDecl),
+    /// A top-level `const NAME[: Ty] = value` declaration (ITER-53C).
+    ///
+    /// Compile-time-named constant binding. Lowers to a single Rust
+    /// `const NAME: Ty = value;` item; the type comes from the optional
+    /// annotation or falls back to the literal's natural type.
+    ConstDecl(ConstDecl),
 }
 
 /// Payload of [`Decl::ComptimeDecl`]: a top-level `comptime:` block.
@@ -155,6 +162,21 @@ pub struct ComptimeDecl {
 impl fmt::Display for ComptimeDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "comptime {{ {} stmts }}", self.body.stmts.len())
+    }
+}
+
+/// Payload of [`Decl::ConstDecl`]: a top-level `const NAME[: Ty] = value`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstDecl {
+    pub name: Ident,
+    pub ty: Option<TypeRef>,
+    pub value: Expr,
+    pub span: Span,
+}
+
+impl fmt::Display for ConstDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "const {} = <expr>", self.name.name)
     }
 }
 
@@ -174,6 +196,7 @@ impl fmt::Display for Decl {
             Decl::ExtendBlock(d) => write!(f, "{d}"),
             Decl::ImplBlock(d) => write!(f, "{d}"),
             Decl::ComptimeDecl(d) => write!(f, "{d}"),
+            Decl::ConstDecl(d) => write!(f, "{d}"),
         }
     }
 }
@@ -204,6 +227,13 @@ impl Decl {
                 "decl": {
                     "stmts": d.body.stmts.len(),
                     "span": { "start": d.span.start, "end": d.span.end },
+                },
+            }),
+            Decl::ConstDecl(c) => json!({
+                "type": "ConstDecl",
+                "decl": {
+                    "name": c.name.name,
+                    "span": { "start": c.span.start, "end": c.span.end },
                 },
             }),
         }

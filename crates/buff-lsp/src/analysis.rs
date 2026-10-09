@@ -444,6 +444,7 @@ pub fn decl_span(decl: &Decl) -> Span {
         Decl::ExtendBlock(ext) => ext.span,
         Decl::ImplBlock(_) => Span::dummy(),
         Decl::ComptimeDecl(c) => c.span,
+        Decl::ConstDecl(c) => c.span,
     }
 }
 

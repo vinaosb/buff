@@ -367,3 +367,41 @@ pub fn type_end(ty: &TypeRef) -> usize {
         | TypeRef::TraitObject { span, .. } => span.end,
     }
 }
+
+/// `const NAME[: Ty] = value` - a top-level constant declaration
+/// (ITER-53C). Dispatched from `parse_one_decl` on `KwConst` (keyword
+/// #31). The value is any expression; codegen requires it to lower to a
+/// Rust const expression (literals today).
+pub fn parse_const_decl(
+    stream: &mut TokenStream<'_>,
+) -> Result<buff_lang_ast::ConstDecl, ParseError> {
+    use super::func::parse_type_ref;
+    use crate::expr::parse_expression;
+    use buff_lang_ast::ConstDecl;
+    use buff_lang_error::Span;
+
+    let source_id = stream.source_id();
+    let start = stream.expect(TokenKind::KwConst)?.span.start;
+    let tok = stream.advance().ok_or_else(|| {
+        ParseError::new(Diagnostic::error(
+            "expected constant name after `const`, found end of input",
+            stream.eof_span(),
+        ))
+    })?;
+    let name = extract_ident(tok)?;
+    let ty = if matches!(stream.peek_kind(), Some(TokenKind::Colon)) {
+        stream.advance();
+        Some(parse_type_ref(stream)?)
+    } else {
+        None
+    };
+    stream.expect(TokenKind::Assign)?;
+    let value = parse_expression(stream)?;
+    let span = Span::new(start, value.span().end, source_id);
+    Ok(ConstDecl {
+        name,
+        ty,
+        value,
+        span,
+    })
+}

@@ -1078,6 +1078,7 @@ fn token_type_index(
         | TokenKind::KwReturn
         | TokenKind::KwBreak
         | TokenKind::KwContinue
+        | TokenKind::KwConst
         | TokenKind::KwIn
         | TokenKind::KwMatch
         | TokenKind::KwAsync

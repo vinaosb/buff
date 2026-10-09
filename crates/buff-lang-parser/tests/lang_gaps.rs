@@ -96,3 +96,33 @@ fn leading_dot_continuation_chain_parses() {
         other => panic!("expected let with .bar() method call, got {other:?}"),
     }
 }
+
+/// ITER-53C (gap 5): top-level `const NAME = value` parses to a
+/// `Decl::ConstDecl` (previously "only function declarations are allowed
+/// at top level" - the ITER-48 harvest gap).
+#[test]
+fn top_level_const_decl_parses() {
+    let decls =
+        parse_src("const max_connections = 100\n\nfunc main():\n    print(max_connections)\n")
+            .expect("top-level const must parse");
+    assert_eq!(decls.len(), 2);
+    match &decls[0] {
+        Decl::ConstDecl(c) => {
+            assert_eq!(c.name.name, "max_connections");
+            assert!(c.ty.is_none(), "no annotation in source");
+        }
+        other => panic!("expected ConstDecl, got {other:?}"),
+    }
+    assert!(matches!(decls[1], Decl::FuncDecl(_)));
+}
+
+/// The annotated form `const limit: Int = 5000` parses with `ty` set.
+#[test]
+fn top_level_const_with_annotation_parses() {
+    let decls = parse_src("const limit: Int = 5000\n\nfunc main():\n    print(limit)\n")
+        .expect("annotated const must parse");
+    match &decls[0] {
+        Decl::ConstDecl(c) => assert!(c.ty.is_some(), "annotation should be captured"),
+        other => panic!("expected ConstDecl, got {other:?}"),
+    }
+}
