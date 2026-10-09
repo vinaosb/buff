@@ -197,6 +197,9 @@ impl ActorRef {
     where
         M: Any + Send + 'static,
     {
+        if self.stop_signal.load(Ordering::Acquire) {
+            return Err(ActorError::ActorStopped(self.id));
+        }
         let env = Message::new(message);
         self.sender
             .send(env)
@@ -228,12 +231,19 @@ impl std::fmt::Debug for ActorRef {
 
 /// Internal record stored per live actor in the system's child
 /// list. Carries the canonical `JoinHandle` (so [`ActorSystem::shutdown`]
-/// can join the thread for graceful termination) and a clone of the
+/// can join the thread for graceful termination), a clone of the
 /// mailbox sender (so `shutdown` can force-disconnect the mailbox
-/// even if the caller is still holding a cloned [`ActorRef`]).
+/// even if the caller is still holding a cloned [`ActorRef`]), the
+/// one-shot control sender (held ONLY here — never cloned into an
+/// `ActorRef` — so `shutdown` can always wake an idle actor blocked
+/// in `recv` by dropping it), and the shared stop flag (set by
+/// `shutdown` before joining so post-shutdown `ActorRef::send` calls
+/// return [`ActorError::ActorStopped`]).
 pub(crate) struct SystemChild {
     pub(crate) join: Option<JoinHandle<()>>,
     pub(crate) sentinel: cb::Sender<Message>,
+    pub(crate) ctrl_tx: cb::Sender<()>,
+    pub(crate) stop_signal: Arc<AtomicBool>,
 }
 
 /// The top-level container for actors.
@@ -299,7 +309,9 @@ impl ActorSystem {
     /// mailbox, assigns the next [`ActorId`], and spawns a thread
     /// that loops `rx.recv() ─▶ actor.handle(msg)`. The thread
     /// exits cleanly when the mailbox disconnects (every sender
-    /// dropped) or when `handle` returns [`ActorAction::Stop`].
+    /// dropped), when `handle` returns [`ActorAction::Stop`], or
+    /// when [`Self::shutdown`] wakes it via the actor's control
+    /// channel.
     ///
     /// The thread's `JoinHandle` is stored internally so
     /// [`Self::shutdown`] can join every thread for graceful
@@ -321,6 +333,7 @@ impl ActorSystem {
     ) -> Result<ActorRef, ActorError> {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let (tx, rx) = cb::unbounded::<Message>();
+            let (ctrl_tx, ctrl_rx) = cb::bounded::<()>(1);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let stop_signal = Arc::new(AtomicBool::new(false));
             let stop_for_thread = stop_signal.clone();
@@ -328,7 +341,7 @@ impl ActorSystem {
             let thread = std::thread::Builder::new()
                 .name(format!("buff-actor-{id}"))
                 .spawn(move || {
-                    let exit = run_actor_loop(&mut actor, &rx, &stop_for_thread);
+                    let exit = run_actor_loop(&mut actor, &rx, &ctrl_rx, &stop_for_thread);
                     if let Some(tx_exit) = on_exit_for_thread {
                         let _ = tx_exit.send((id, exit));
                     }
@@ -339,6 +352,8 @@ impl ActorSystem {
                     let child = SystemChild {
                         join: Some(join),
                         sentinel,
+                        ctrl_tx,
+                        stop_signal: stop_signal.clone(),
                     };
                     let _ = self.children.write().map(|mut kids| kids.push(child));
                     Ok(ActorRef {
@@ -409,23 +424,34 @@ impl ActorSystem {
 
     /// Gracefully shut down every actor in this system.
     ///
-    /// Drops every mailbox sender sentinel (causing each actor's
-    /// `rx.recv()` to return `Err(Disconnected)` and the thread to
-    /// exit cleanly) and then joins every thread (blocking until
-    /// all actors have observed the disconnect and returned from
-    /// their current `handle` call). After `shutdown` returns, no
-    /// more messages can be delivered; further `send` calls on any
-    /// cloned `ActorRef` return [`ActorError::ActorStopped`].
+    /// For each live child: sets the shared stop flag (so further
+    /// `send` calls on any cloned [`ActorRef`] return
+    /// [`ActorError::ActorStopped`]), drops the child's one-shot
+    /// control sender and mailbox sentinel (waking an actor blocked
+    /// in its receive loop even when caller-held `ActorRef` clones
+    /// keep the mailbox sender count above zero), then joins the
+    /// thread. Also clears the name registry, dropping every
+    /// registry-held `ActorRef`.
+    ///
+    /// After `shutdown` returns, no more messages can be delivered;
+    /// further `send` calls on any cloned `ActorRef` return
+    /// [`ActorError::ActorStopped`].
     ///
     /// Idempotent: calling shutdown on an already-shut-down system
     /// is a no-op (children vec is drained).
     pub fn shutdown(&self) {
-        let Ok(mut kids) = self.children.write() else {
-            return;
+        let drained: Vec<SystemChild> = {
+            let Ok(mut kids) = self.children.write() else {
+                return;
+            };
+            std::mem::take(&mut *kids)
         };
-        let drained: Vec<SystemChild> = std::mem::take(&mut *kids);
-        drop(kids);
+        if let Ok(mut map) = self.registry.write() {
+            map.clear();
+        }
         for mut child in drained {
+            child.stop_signal.store(true, Ordering::Release);
+            drop(child.ctrl_tx);
             drop(child.sentinel);
             if let Some(join) = child.join.take() {
                 let _ = join.join();
@@ -435,28 +461,43 @@ impl ActorSystem {
 }
 
 /// Actor loop body, factored out so the spawn closure stays small.
-/// Loops `rx.recv() ─▶ actor.handle(msg)`, honouring the stop
-/// signal and catching `handle()` panics (which surface as
-/// [`ChildExit::Crashed`]). Returns the exit outcome so the
-/// spawning thread can forward it to the supervisor.
+/// Waits on the mailbox and the per-actor control channel via
+/// `select!`, invoking `actor.handle(msg)` per delivered message,
+/// honouring the stop signal and catching `handle()` panics (which
+/// surface as [`ChildExit::Crashed`]). The loop exits when the
+/// mailbox disconnects, when the control channel fires or its
+/// sender is dropped (the [`ActorSystem::shutdown`] wake path —
+/// possible even while caller-held `ActorRef` clones keep the
+/// mailbox connected), or when the stop signal is observed between
+/// messages. Returns the exit outcome so the spawning thread can
+/// forward it to the supervisor.
 fn run_actor_loop(
     actor: &mut Box<dyn Actor>,
     rx: &cb::Receiver<Message>,
+    ctrl_rx: &cb::Receiver<()>,
     stop_signal: &AtomicBool,
 ) -> ChildExit {
     let mut exit = ChildExit::Normal;
-    while let Ok(msg) = rx.recv() {
-        if stop_signal.load(Ordering::Acquire) {
-            break;
-        }
-        let decided = catch_unwind(AssertUnwindSafe(|| actor.handle(msg)));
-        match decided {
-            Ok(ActorAction::Continue) => continue,
-            Ok(ActorAction::Stop) => break,
-            Err(_) => {
-                exit = ChildExit::Crashed;
-                break;
+    loop {
+        cb::select! {
+            recv(rx) -> msg => {
+                let Ok(msg) = msg else {
+                    break;
+                };
+                if stop_signal.load(Ordering::Acquire) {
+                    break;
+                }
+                let decided = catch_unwind(AssertUnwindSafe(|| actor.handle(msg)));
+                match decided {
+                    Ok(ActorAction::Continue) => continue,
+                    Ok(ActorAction::Stop) => break,
+                    Err(_) => {
+                        exit = ChildExit::Crashed;
+                        break;
+                    }
+                }
             }
+            recv(ctrl_rx) -> _signal => break,
         }
     }
     exit
