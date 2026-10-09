@@ -7,7 +7,7 @@ Type representation, local inference, async propagation, ownership analysis, pre
 ```
 src/
 ├── lib.rs                # 156 lines — 22 pub mod + 35+ pub use re-exports
-├── prelude_types.rs      # 1919 lines — PreludeType enum + lookup helpers (see below)
+├── prelude_types.rs      # 1930 lines — PreludeType enum + lookup helpers (see below)
 ├── ownership.rs          # 1432 lines — T33 Copy/Arc/CoW classification
 ├── infer.rs              # 2028 lines — TypeInferencer + expr/stmt inference
 ├── async_analysis.rs     # 867 lines — T31 fixpoint async propagation (no await keyword)
@@ -32,7 +32,7 @@ src/
     └── tests.rs          # 1667 lines — T105b prelude-type integration tests
 ```
 
-### prelude_types.rs (1919 lines)
+### prelude_types.rs (1930 lines)
 
 The extensible stdlib registry. Every future prelude type (URL, Base64, Hash, TCP, etc.) adds here.
 
