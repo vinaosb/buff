@@ -1,7 +1,7 @@
 //! The compile-time type representation for the Buff language.
 //!
-//! [`Type`] is the *resolved* type of an expression — produced by the
-//! [`TypeInferencer`](crate::TypeInferencer) — and is distinct from
+//! [`Type`] is the *resolved* type of an expression Ã¢â‚¬â€ produced by the
+//! [`TypeInferencer`](crate::TypeInferencer) Ã¢â‚¬â€ and is distinct from
 //! [`TypeRef`](buff_lang_ast::TypeRef), which is a *reference* to a type written
 //! in source annotations.
 //!
@@ -9,7 +9,7 @@
 //! (struct/enum), traits, full type inference, exhaustiveness checking, and
 //! recursion detection.
 
-use std::fmt;
+mod display;
 
 /// The compile-time type of a Buff expression.
 ///
@@ -28,11 +28,11 @@ pub enum Type {
     Bool,
     /// A UTF-8 string (`String`).
     String,
-    /// A single Unicode scalar value (`Char`). (T21 — additive.)
+    /// A single Unicode scalar value (`Char`). (T21 Ã¢â‚¬â€ additive.)
     ///
     /// Maps to Rust's `char` type (a 4-byte Unicode scalar value). Distinct
     /// from `String` (a UTF-8 byte buffer): `'A'` is `Char`, `"A"` is
-    /// `String`. Not GPU-eligible (no WGSL scalar) — always CPU.
+    /// `String`. Not GPU-eligible (no WGSL scalar) Ã¢â‚¬â€ always CPU.
     Char,
     /// A 128-bit fixed-point decimal (`Decimal`). Full arithmetic support
     /// shipped in v0.5+ via `rust_decimal`.
@@ -43,19 +43,19 @@ pub enum Type {
     /// The absence of a value (for functions without a return, or `if`
     /// expressions without an `else` branch).
     Void,
-    /// A generic vector/array type: `Vector<T>` (T99 — prelude `args()`).
+    /// A generic vector/array type: `Vector<T>` (T99 Ã¢â‚¬â€ prelude `args()`).
     ///
     /// Maps to Rust's `Vec<T>`. The element type is boxed so the enum
     /// variant can carry any inner type. Full collection support (indexing,
     /// iteration, methods) arrives in T23.
     Vector(Box<Type>),
-    /// A 2-D matrix type: `Matrix<T>` (T24 — flat contiguous storage).
+    /// A 2-D matrix type: `Matrix<T>` (T24 Ã¢â‚¬â€ flat contiguous storage).
     ///
     /// Maps to the builtin `Matrix<T>` struct emitted by the Rust codegen:
     /// `struct Matrix<T> { data: Vec<T>, rows: usize, cols: usize }`. Storage
     /// is a **single flat `Vec<T>`** (row-major, `row * cols + col` indexing)
     /// so the buffer is contiguous and directly GPU-transferable (no
-    /// `Vec<Vec<T>>` nesting). This is the canonical GPU-ready collection —
+    /// `Vec<Vec<T>>` nesting). This is the canonical GPU-ready collection Ã¢â‚¬â€
     /// a `Matrix<Float<32>>` of `rows * cols` elements can be uploaded to a
     /// WGSL storage buffer verbatim.
     ///
@@ -64,12 +64,12 @@ pub enum Type {
     /// carries no element evidence by itself); `let m: Matrix<Int> = ...`
     /// annotations and 2-D indexing `m[r, c]` both flow through this variant.
     Matrix(Box<Type>),
-    /// An optional value: `Option<T>` (T99 — prelude `env()`).
+    /// An optional value: `Option<T>` (T99 Ã¢â‚¬â€ prelude `env()`).
     ///
     /// Maps to Rust's `Option<T>`. Used by `env("HOME")` which returns
     /// `Option<String>`.
     Option(Box<Type>),
-    /// A hash-map type: `Map<K, V>` (T25 — keyed dictionary collection).
+    /// A hash-map type: `Map<K, V>` (T25 Ã¢â‚¬â€ keyed dictionary collection).
     ///
     /// Maps to Rust's `std::collections::HashMap<K, V>`. The key and value
     /// types are each boxed so the enum can carry any inner types. The map
@@ -83,7 +83,7 @@ pub enum Type {
     /// literals with mixed key/value kinds fall back to the first entry's
     /// types (a future task will enforce uniformity).
     Map(Box<Type>, Box<Type>),
-    /// A result type: `Result<T, E>` (T30 — prelude error-handling enum).
+    /// A result type: `Result<T, E>` (T30 Ã¢â‚¬â€ prelude error-handling enum).
     ///
     /// Maps 1:1 to Rust's `std::result::Result<T, E>`. Mirrors [`Type::Option`]
     /// (T28): `Result` is a **built-in prelude enum** whose variants `Ok(T)`
@@ -92,7 +92,7 @@ pub enum Type {
     /// param) are each boxed, mirroring [`Type::Map`]'s two-param shape.
     ///
     /// `Ok(x)` infers `Result<T, Unknown>` (the Err type is pinned by context
-    /// — e.g. a `let x: Result<Int, Error> = Ok(42)` annotation — or stays
+    /// Ã¢â‚¬â€ e.g. a `let x: Result<Int, Error> = Ok(42)` annotation Ã¢â‚¬â€ or stays
     /// `Unknown`). `Err(e)` infers `Result<Unknown, E>` symmetrically. The
     /// `?` postfix operator (`Expr::Try`) propagates the Err and yields the
     /// Ok type `T`.
@@ -106,10 +106,10 @@ pub enum Type {
     /// A union (sum) type: `A | B | C` (T76).
     ///
     /// Each member is a resolved [`Type`]. Rust has no anonymous unions, so
-    /// codegen lowers this to a named enum wrapper (e.g. `String | Int` →
+    /// codegen lowers this to a named enum wrapper (e.g. `String | Int` Ã¢â€ â€™
     /// `enum StringOrInt { String(String), Int(i64) }`). A union is neither
     /// numeric nor GPU-eligible; it participates in no promotion rules in
-    /// v0.5 (arithmetic on a union value is a type error — the user must
+    /// v0.5 (arithmetic on a union value is a type error Ã¢â‚¬â€ the user must
     /// `match` to discriminate first). Runtime discrimination / match-on-
     /// union coercion is a documented deferral.
     Union(Vec<Type>),
@@ -117,7 +117,7 @@ pub enum Type {
     ///
     /// Each member is a resolved [`Type`]. The 2+-element rule lives at
     /// parse time (a single `(T)` is grouping, returning the bare `T`), so
-    /// this variant always carries 2+ members — there is no single-element
+    /// this variant always carries 2+ members Ã¢â‚¬â€ there is no single-element
     /// tuple in Buff. Maps 1:1 to a Rust tuple `(T, U, ...)` via codegen.
     ///
     /// A tuple is neither numeric nor GPU-eligible; it participates in no
@@ -142,29 +142,29 @@ pub enum Type {
     /// exhaustiveness), `buff_primitive_to_rust_name` (primitive name
     /// mapping), and `ast_typeref_to_syn`. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
-    /// all return `false` for the datetime variants — they are opaque
+    /// all return `false` for the datetime variants Ã¢â‚¬â€ they are opaque
     /// value types that participate in no numeric promotion.
     DateTime,
     /// A calendar date (year, month, day) without time or timezone,
     /// mapped to `chrono::NaiveDate` at codegen time (T124b). Constructed
-    /// via `Date.today()` or `Date.parse(s)`. Additive — see [`Type::DateTime`].
+    /// via `Date.today()` or `Date.parse(s)`. Additive Ã¢â‚¬â€ see [`Type::DateTime`].
     Date,
     /// A clock time (hour, minute, second, subsecond) without date or
     /// timezone, mapped to `chrono::NaiveTime` at codegen time (T124b).
-    /// Additive — see [`Type::DateTime`].
+    /// Additive Ã¢â‚¬â€ see [`Type::DateTime`].
     Time,
     /// A span of time, mapped to `chrono::TimeDelta` at codegen time
     /// (T124b). chrono's `Duration` type alias was deprecated in favor of
     /// `TimeDelta` (chrono 0.4.35+); Buff codegen uses the new name to
     /// avoid emitting deprecation warnings in user code. Constructed via
     /// `Duration.days(n)` / `Duration.hours(n)` / `Duration.minutes(n)` /
-    /// `Duration.seconds(n)` / `Duration.millis(n)`. Additive — see
+    /// `Duration.seconds(n)` / `Duration.millis(n)`. Additive Ã¢â‚¬â€ see
     /// [`Type::DateTime`].
     Duration,
     /// A monotonic instant suitable for measuring elapsed time, mapped to
     /// `std::time::Instant` at codegen time (T124b). Constructed via
     /// `Instant.now()`. Distinct from [`Type::DateTime`] (which is
-    /// wall-clock time and uses chrono). Additive — see [`Type::DateTime`].
+    /// wall-clock time and uses chrono). Additive Ã¢â‚¬â€ see [`Type::DateTime`].
     Instant,
     /// A compiled regular expression, mapped to `regex::Regex` at codegen
     /// time (T124d). Constructed via the prelude associated function
@@ -179,12 +179,12 @@ pub enum Type {
     /// exhaustiveness), `buff_primitive_to_rust_name` (primitive name
     /// mapping), and `ast_typeref_to_syn`. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
-    /// all return `false` for `Regex` — it's an opaque value type that
+    /// all return `false` for `Regex` Ã¢â‚¬â€ it's an opaque value type that
     /// participates in no numeric promotion.
     ///
     /// This is the FIRST v1.4 prelude-type variant that is BOTH a real
     /// runtime value (like DateTime) AND supports INSTANCE methods
-    /// (`recv.method(args)` shape — DateTime only had `format` +
+    /// (`recv.method(args)` shape Ã¢â‚¬â€ DateTime only had `format` +
     /// accessors; Log was namespace-only with associated functions).
     /// Future instance-method-carrying runtime types (e.g. Url, Hasher)
     /// follow this pattern.
@@ -200,14 +200,14 @@ pub enum Type {
     /// `Display`, `buff_type_to_syn` (codegen), `is_prelude_url`
     /// predicate. The `is_numeric` / `is_float_like` /
     /// `is_integer_like` / `is_gpu_eligible` predicates all return
-    /// `false` for `Url` — it's an opaque value type that participates
+    /// `false` for `Url` Ã¢â‚¬â€ it's an opaque value type that participates
     /// in no numeric promotion.
     ///
     /// Mirrors [`Type::Regex`] (T124d) as the second runtime-value
     /// prelude type with rich instance methods (Regex has 4, URL has 4).
     /// Distinct from [`Type::DateTime`] et al (which have accessor
     /// methods only) and from the namespace-only modules (Log/Toml/
-    /// Math/Random/Strings/Args/Env — those have no value
+    /// Math/Random/Strings/Args/Env Ã¢â‚¬â€ those have no value
     /// representation).
     Url,
     /// A filesystem path, mapped to `std::path::PathBuf` at codegen
@@ -224,7 +224,7 @@ pub enum Type {
     /// variant: `Display`, `buff_type_to_syn` (codegen),
     /// `is_prelude_path` predicate. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `Path` — it's an opaque
+    /// predicates all return `false` for `Path` Ã¢â‚¬â€ it's an opaque
     /// value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Url`] (T124h) and [`Type::Regex`] (T124d) as
@@ -252,14 +252,14 @@ pub enum Type {
     /// variant: `Display`, `buff_type_to_syn` (codegen),
     /// `is_prelude_process` predicate. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `Process` — it's an opaque
+    /// predicates all return `false` for `Process` Ã¢â‚¬â€ it's an opaque
     /// value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Path`] (T124j) / [`Type::Url`] (T124h) /
     /// [`Type::Regex`] (T124d) as the fourth runtime-value-with-
     /// instance-methods type (Regex/URL/Path have 4 each; Process
     /// has 2). The underlying Rust type is `Option<std::process::
-    /// Child>` — the codegen emits `Command::new(cmd).args(args)
+    /// Child>` Ã¢â‚¬â€ the codegen emits `Command::new(cmd).args(args)
     /// .spawn().ok()` so the spawn is panic-free (a spawn failure
     /// collapses to `None`; `.wait()` / `.id()` then operate on the
     /// `Option` via `.map(...).unwrap_or_default()`). See
@@ -283,12 +283,12 @@ pub enum Type {
     /// `Display`, `buff_type_to_syn` (codegen),
     /// `is_prelude_connection` predicate. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `Connection` — it's an
+    /// predicates all return `false` for `Connection` Ã¢â‚¬â€ it's an
     /// opaque value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Process`] (T124l) as a runtime-value-with-
     /// instance-methods type. The underlying Rust type is
-    /// `Option<tokio::net::TcpStream>` — the codegen emits
+    /// `Option<tokio::net::TcpStream>` Ã¢â‚¬â€ the codegen emits
     /// `tokio::net::TcpStream::connect(format!("{}:{}", h, p)).await
     /// .ok()` so the connect is panic-free (a connect failure
     /// collapses to `None`; `.send()` / `.recv()` / `.close()` then
@@ -311,12 +311,12 @@ pub enum Type {
     /// `Display`, `buff_type_to_syn` (codegen),
     /// `is_prelude_socket` predicate. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `Socket` — it's an opaque
+    /// predicates all return `false` for `Socket` Ã¢â‚¬â€ it's an opaque
     /// value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Connection`] (T124m) as a runtime-value-with-
     /// instance-methods type. The underlying Rust type is
-    /// `Option<tokio::net::UdpSocket>` — the codegen emits
+    /// `Option<tokio::net::UdpSocket>` Ã¢â‚¬â€ the codegen emits
     /// `tokio::net::UdpSocket::bind(format!("{}:{}", h, p)).await.ok()`
     /// so the bind is panic-free (a bind failure collapses to `None`;
     /// `.send_to()` / `.recv_from()` then operate on the `Option` via
@@ -340,13 +340,13 @@ pub enum Type {
     /// `Display`, `buff_type_to_syn` (codegen),
     /// `is_prelude_ws_connection` predicate. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `WsConnection` — it's an
+    /// predicates all return `false` for `WsConnection` Ã¢â‚¬â€ it's an
     /// opaque value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Connection`] / [`Type::Socket`] (T124m) as a
     /// runtime-value-with-instance-methods type. The underlying Rust
     /// type is `Option<tokio_tungstenite::WebSocketStream<
-    /// tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>` —
+    /// tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>` Ã¢â‚¬â€
     /// the codegen emits
     /// `tokio_tungstenite::connect_async(url).await.ok().map(|(ws, _)| ws)`
     /// so the connect is panic-free (a connect failure collapses to
@@ -386,7 +386,7 @@ pub enum Type {
     /// [`Type::Path`] (T124j) / [`Type::Process`] (T124l) as the
     /// fifth runtime-value-with-rich-instance-methods type. The
     /// underlying Rust type is `buff_image::Image` (a struct wrapping
-    /// `image::DynamicImage`) — the codegen emits
+    /// `image::DynamicImage`) Ã¢â‚¬â€ the codegen emits
     /// `buff_image::Image::from_path(p)?` / `buff_image::Image::from
     /// _bytes(b)?` for the constructors and `recv.width()` /
     /// `recv.height()` / `recv.get_pixel(x,y)?` / `recv.set_pixel
@@ -443,7 +443,7 @@ pub enum Type {
     /// `.select(cols)`, `.filter(pred)`, `.sort(col)`, `.head(n)`,
     /// `.len()`, `.join(other, on)`, `.group_by(col)` (returns a
     /// DataFrame whose `.agg(col, op)` chains per-group aggregation),
-    /// `.to_table_string()`. CPU-only per Metis G7 — no GPU dispatch.
+    /// `.to_table_string()`. CPU-only per Metis G7 Ã¢â‚¬â€ no GPU dispatch.
     DataFrame,
     /// T10 (v1.13 frameworks): the runtime-value AudioBuffer type.
     /// Maps to `buff_audio::AudioBuffer` at codegen time. Constructed
@@ -465,7 +465,7 @@ pub enum Type {
     /// [`Type::Path`] (T124j) / [`Type::Process`] (T124l) / [`Type::Image`]
     /// (T9) as a runtime-value-with-rich-instance-methods type. The
     /// underlying Rust type is `buff_audio::AudioBuffer` (a struct
-    /// wrapping interleaved `Vec<f32>` + sample_rate + channels) — the
+    /// wrapping interleaved `Vec<f32>` + sample_rate + channels) Ã¢â‚¬â€ the
     /// codegen emits `buff_audio::AudioBuffer::from_path(p)?` /
     /// `buff_audio::AudioBuffer::from_samples(s, sr, ch)?` for the
     /// constructors and the eight instance methods lowering to
@@ -476,7 +476,7 @@ pub enum Type {
     /// MVP forbids real-time playback (deferred to v1.18+) and
     /// synthesis (that's buff-dsp T11).
     Audio,
-    /// T12: the Buff `World` runtime-value type — an
+    /// T12: the Buff `World` runtime-value type Ã¢â‚¬â€ an
     /// Entity-Component-System store mapped to `buff_ecs::World` at
     /// codegen time. Constructed via the prelude associated function
     /// `World.new()` (no args; returns an empty `World`); carries
@@ -491,13 +491,13 @@ pub enum Type {
     /// This is **additive** (T12): no existing variant was renamed,
     /// reordered, or had its payload altered. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `World` — it's an opaque
+    /// predicates all return `false` for `World` Ã¢â‚¬â€ it's an opaque
     /// value type that participates in no numeric promotion.
     ///
     /// Mirrors [`Type::Regex`] (T124d) / [`Type::Path`] (T124j) /
     /// [`Type::Process`] (T124l) / [`Type::Image`] (T9) as a
     /// runtime-value-with-rich-instance-methods type. The underlying
-    /// Rust type is `buff_ecs::World` — the codegen emits
+    /// Rust type is `buff_ecs::World` Ã¢â‚¬â€ the codegen emits
     /// `buff_ecs::World::new()` for the ctor and dispatches the
     /// instance methods to `World::*` paths.
     World,
@@ -513,26 +513,26 @@ pub enum Type {
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
     /// predicates all return `false` for `Entity`. Underlying Rust
     /// type `buff_ecs::Entity` is a transparent newtype over
-    /// `hecs::Entity` (`(u32, u32)` id+generation pair) — no raw
+    /// `hecs::Entity` (`(u32, u32)` id+generation pair) Ã¢â‚¬â€ no raw
     /// pointers, no lifetimes, `Copy + Send + Sync + 'static`.
     Entity,
-    /// T19: the `Template` runtime-value type — a compiled HTML
+    /// T19: the `Template` runtime-value type Ã¢â‚¬â€ a compiled HTML
     /// template wrapping `buff_template::Template` (itself wrapping
     /// `handlebars::Handlebars`). Constructed via the associated
     /// functions `Template.from_string(src)` /
     /// `Template.from_path(path)`; carries the instance method
     /// `template.render(context_json) -> String`. Added by T31
     /// (this commit) because T19 added the codegen `M::Render` arm
-    /// but missed the matching `Type::Template` variant — codegen
+    /// but missed the matching `Type::Template` variant Ã¢â‚¬â€ codegen
     /// cannot compile otherwise.
     Template,
-    /// T33: the `HttpClient` runtime-value type — an idiomatic HTTP
+    /// T33: the `HttpClient` runtime-value type Ã¢â‚¬â€ an idiomatic HTTP
     /// client wrapping `reqwest::blocking::Client` via a safe FFI
     /// boundary per the T4 FFI guide. Constructed via the prelude
     /// associated function `HttpClient.new()` (returns a new client
     /// with default settings); carries the instance methods
     /// `client.get(url)`, `client.post(url)`, `client.put(url)`,
-    /// `client.delete(url)` — each returning a `RequestBuilder`
+    /// `client.delete(url)` Ã¢â‚¬â€ each returning a `RequestBuilder`
     /// (opaque, typed `Type::Unknown` for MVP). The `RequestBuilder`
     /// carries `.header(name, val)`, `.json(body)`, `.timeout(secs)`,
     /// `.send()` (returns `Response`, also opaque for MVP). The
@@ -546,7 +546,7 @@ pub enum Type {
     /// Rust type is `buff_http_client::HttpClient` (a struct wrapping
     /// `reqwest::blocking::Client`). Pure-Rust, CPU-only.
     HttpClient,
-    /// T29: the `Validator` runtime-value type — a declarative schema
+    /// T29: the `Validator` runtime-value type Ã¢â‚¬â€ a declarative schema
     /// validator (pydantic-equivalent) wrapping
     /// `buff_validate::Validator` at codegen time. Constructed via
     /// `Validator.new()` (empty rule set); carries the builder
@@ -554,7 +554,7 @@ pub enum Type {
     /// `.with_url(field)`, `.with_length(field, min, max)`,
     /// `.with_range(field, min, max)`, `.with_regex(field, pattern)`,
     /// each returning a new Validator (Buff "no visible references"
-    /// stance — builders consume self); plus the action methods
+    /// stance Ã¢â‚¬â€ builders consume self); plus the action methods
     /// `.validate(map) -> Result<Void, String>` and
     /// `.to_json_schema() -> String`.
     ///
@@ -569,7 +569,7 @@ pub enum Type {
     /// methods on `&str` / integer values; NO derive macros (T29
     /// must-not #1: "no compile-time macro validation").
     Validator,
-    /// T42: the `Email` runtime-value type — a buildable email
+    /// T42: the `Email` runtime-value type Ã¢â‚¬â€ a buildable email
     /// message wrapping `buff_email::Email` at codegen time.
     /// Constructed via the prelude associated function
     /// `Email.new(from, to, subject)` (validates RFC 5322 mailboxes
@@ -577,7 +577,7 @@ pub enum Type {
     /// the builder instance methods `email.body(text)` /
     /// `email.html(template, context_json)` / `email.attach(path)`,
     /// each consuming `self` and returning a new `Email` (Buff "no
-    /// visible references" stance — builders consume self, matches
+    /// visible references" stance Ã¢â‚¬â€ builders consume self, matches
     /// the Validator / HttpClient surface).
     ///
     /// This is **additive** (T42): no existing variant was renamed,
@@ -585,12 +585,12 @@ pub enum Type {
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
     /// predicates all return `false` for `Email`. Underlying Rust
     /// type is `buff_email::Email` (a struct wrapping the
-    /// constituent parts — from / to / subject / optional plain
+    /// constituent parts Ã¢â‚¬â€ from / to / subject / optional plain
     /// body / optional rendered HTML body / queued attachments).
     /// Pure-Rust, CPU-only. The MVP wraps `lettre::Message::builder`
     /// + `lettre::message::{MultiPart, Attachment}` at send time.
     Email,
-    /// T42: the `SmtpClient` runtime-value type — a configured SMTP
+    /// T42: the `SmtpClient` runtime-value type Ã¢â‚¬â€ a configured SMTP
     /// transport wrapping `buff_email::SmtpClient` at codegen time.
     /// Constructed via the prelude associated function
     /// `SmtpClient.new(host, port, username, password)` (configures
@@ -607,7 +607,7 @@ pub enum Type {
     /// `lettre::SmtpTransport`). Pure-Rust, CPU-only. IMAP / POP3
     /// receiving explicitly deferred to v1.22+ per T42 must-not #1.
     SmtpClient,
-    /// T43: the `Document` runtime-value type — a parsed HTML
+    /// T43: the `Document` runtime-value type Ã¢â‚¬â€ a parsed HTML
     /// document wrapping `buff_scrape::Document` (itself wrapping a
     /// cached `String` source + lazy `scraper::Html` rebuild per
     /// access). Constructed via the associated function
@@ -621,26 +621,26 @@ pub enum Type {
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
     /// predicates all return `false` for `Document`. Underlying
     /// Rust type is `buff_scrape::Document` (a struct wrapping an
-    /// owned `String` source — `scraper::Html` is rebuilt per
+    /// owned `String` source Ã¢â‚¬â€ `scraper::Html` is rebuilt per
     /// `select`/`text`/`title` call because scraper's `Html` is
     /// `!Send + !Sync`; the wrapper stays `Send + Sync + Clone`).
     Document,
-    /// T43: the `Element` runtime-value type — a single selected
+    /// T43: the `Element` runtime-value type Ã¢â‚¬â€ a single selected
     /// HTML element wrapping `buff_scrape::Element`. Constructed as
     /// the return value of `Document.select(css)` /
     /// `Element.select(css)`; carries 5 instance methods:
     /// `el.text()`, `el.attr(name)`, `el.html()`, `el.inner_html()`,
-    /// `el.select(css)`. Owned (`'static + Send + Sync + Clone`) —
+    /// `el.select(css)`. Owned (`'static + Send + Sync + Clone`) Ã¢â‚¬â€
     /// text/html/inner_html/attrs are cached eagerly at construction.
     ///
     /// This is **additive** (T43). The `is_numeric` / `is_float_like`
     /// / `is_integer_like` / `is_gpu_eligible` predicates all return
     /// `false` for `Element`. Underlying Rust type is
     /// `buff_scrape::Element` (a struct wrapping owned `String`s +
-    /// `BTreeMap<String, String>` attrs — no raw pointers, no
+    /// `BTreeMap<String, String>` attrs Ã¢â‚¬â€ no raw pointers, no
     /// lifetimes, satisfies FFI guide R1/R4/R5).
     Element,
-    /// T43: the `Crawler` runtime-value type — an HTTP crawler
+    /// T43: the `Crawler` runtime-value type Ã¢â‚¬â€ an HTTP crawler
     /// wrapping `buff_scrape::Crawler`. Constructed via the
     /// associated function `Crawler.new(seed_url)`; carries 4
     /// instance methods: `crawler.seed()`, `crawler.fetch(url)`,
@@ -658,7 +658,7 @@ pub enum Type {
     /// associated functions `MsgPack.serialize(value) -> Bytes`
     /// and `MsgPack.deserialize(bytes) -> Value`. This is a
     /// namespace-only type (like `Log` / `Toml` / `Base64` /
-    /// `Hex` / `Yaml` / `Csv`) — it has no runtime value
+    /// `Hex` / `Yaml` / `Csv`) Ã¢â‚¬â€ it has no runtime value
     /// representation; `buff_type()` returns [`Type::Void`].
     ///
     /// This is **additive** (T51): no existing variant was renamed,
@@ -670,7 +670,7 @@ pub enum Type {
     ///
     /// Mirrors [`Type::Base64`] / [`Type::Hex`] / [`Type::Yaml`] /
     /// [`Type::Csv`] as a namespace-only prelude type. The underlying
-    /// Rust crate is `buff_msgpack` (wrapping `rmp_serde`) — the
+    /// Rust crate is `buff_msgpack` (wrapping `rmp_serde`) Ã¢â‚¬â€ the
     /// codegen emits `buff_msgpack::serialize(&value).unwrap_or_default()`
     /// / `buff_msgpack::deserialize(&bytes).unwrap_or_default()` for
     /// the two associated functions. Pure-Rust, no native deps.
@@ -702,12 +702,12 @@ pub enum Type {
     /// Mirrors [`Type::Image`] (T9) / [`Type::Regex`] (T124d) as a
     /// runtime-value-with-rich-instance-methods type. The underlying
     /// Rust type is `buff_geo::Point` (a struct wrapping
-    /// `geo_types::Point<f64>`) — the codegen emits
+    /// `geo_types::Point<f64>`) Ã¢â‚¬â€ the codegen emits
     /// `buff_geo::Point::new(x, y)` for the ctor and `recv.x()` /
     /// `recv.y()` / `recv.distance_to(other)` for the instance methods.
     /// Pure-Rust, CPU-only.
     Point,
-    /// T45: a geospatial polyline — an ordered sequence of [`Point`]s,
+    /// T45: a geospatial polyline Ã¢â‚¬â€ an ordered sequence of [`Point`]s,
     /// mapped to `buff_geo::LineString` at codegen time. Constructed via
     /// `LineString.new(points)` or `LineString.from_coords(flat)`; carries
     /// the instance method `.length()`. CPU-only per Metis G7 lock.
@@ -719,7 +719,7 @@ pub enum Type {
     /// runtime-value-with-instance-methods type. The underlying Rust type
     /// is `buff_geo::LineString` (wrapping `geo_types::LineString<f64>`).
     LineString,
-    /// T45: a geospatial polygon — an outer ring + future interior holes,
+    /// T45: a geospatial polygon Ã¢â‚¬â€ an outer ring + future interior holes,
     /// mapped to `buff_geo::Polygon` at codegen time. Constructed via
     /// `Polygon.new(ring)` or `Polygon.from_coords(flat)`; carries the
     /// instance methods `.area()`, `.contains(point)`,
@@ -735,7 +735,7 @@ pub enum Type {
     /// enhancement.
     Polygon,
     /// T46: the `Text` NLP namespace, mapped to `buff_nlp::Text` at
-    /// codegen time. Namespace-only (like `MsgPack` / `Log` / `Toml`) —
+    /// codegen time. Namespace-only (like `MsgPack` / `Log` / `Toml`) Ã¢â‚¬â€
     /// the type itself is never instantiated as a runtime value; only
     /// its associated functions are callable (`Text.detect_language` /
     /// `Text.stem` / `Text.tokenize` / `Text.sentences`). `buff_type()`
@@ -748,7 +748,7 @@ pub enum Type {
     /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type that
     /// nonetheless carries a `Type` variant for exhaustiveness. The
     /// underlying Rust namespace is `buff_nlp::Text` (a unit struct
-    /// namespace marker — never instantiated). Pure-Rust, CPU-only.
+    /// namespace marker Ã¢â‚¬â€ never instantiated). Pure-Rust, CPU-only.
     Text,
     /// T46: a detected natural language, mapped to `buff_nlp::Language`
     /// at codegen time. Constructed ONLY via
@@ -765,7 +765,7 @@ pub enum Type {
     Language,
     /// T46: a Snowball stemming algorithm selector (18 supported
     /// languages), mapped to `buff_nlp::StemAlgorithm` at codegen time.
-    /// Opaque enum — only passed as an arg to `Text.stem(word,
+    /// Opaque enum Ã¢â‚¬â€ only passed as an arg to `Text.stem(word,
     /// algorithm)`; NO instance methods exposed. Buff users write the
     /// variants as `.english` / `.portuguese` / etc. (enum-variant
     /// literal syntax).
@@ -773,7 +773,7 @@ pub enum Type {
     /// This is **additive** (T46). The `is_numeric` / `is_float_like` /
     /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`.
     ///
-    /// Mirrors no prior type exactly — it is the first opaque enum
+    /// Mirrors no prior type exactly Ã¢â‚¬â€ it is the first opaque enum
     /// passed-only-as-arg in the prelude. The underlying Rust type is
     /// `buff_nlp::StemAlgorithm` (an enum with 18 variants matching
     /// `rust_stemmers::Algorithm` 1:1).
@@ -781,7 +781,7 @@ pub enum Type {
     /// T52: the `Protobuf` Protocol-Buffers format namespace, mapped
     /// to `buff_protobuf` at codegen time. Namespace-only (like
     /// `MsgPack` / `Log` / `Toml` / `Base64` / `Hex` / `Yaml` / `Csv`)
-    /// — the type itself is never instantiated as a runtime value;
+    /// Ã¢â‚¬â€ the type itself is never instantiated as a runtime value;
     /// only its associated functions are callable
     /// (`Protobuf.serialize(value) -> Bytes`,
     /// `Protobuf.deserialize(bytes) -> Value`,
@@ -796,7 +796,7 @@ pub enum Type {
     /// predicate. The `is_numeric` / `is_float_like` / `is_integer_like`
     /// / `is_gpu_eligible` predicates all return `false` for `Protobuf`.
     ///
-    /// Mirrors [`Type::MsgPack`] (T51) as the closest sibling — both
+    /// Mirrors [`Type::MsgPack`] (T51) as the closest sibling Ã¢â‚¬â€ both
     /// are namespace-only binary-format modules wrapping pure-Rust
     /// codec crates. The underlying Rust crate is `buff_protobuf`
     /// (wrapping `prost` + `prost-types`); the codegen emits
@@ -804,7 +804,7 @@ pub enum Type {
     /// `buff_protobuf::deserialize(&bytes).unwrap_or_default()` /
     /// `buff_protobuf::roundtrip(&value)` for the three associated
     /// functions. Pure-Rust, no native deps (NO protoc / NO protoc-built
-    /// .proto codegen in MVP — gRPC streaming + prost-build deferred).
+    /// .proto codegen in MVP Ã¢â‚¬â€ gRPC streaming + prost-build deferred).
     Protobuf,
     /// T52: a protobuf-encoded message runtime value, mapped to
     /// `buff_protobuf::Message` at codegen time. Constructed via
@@ -854,7 +854,7 @@ pub enum Type {
     /// T47: the chat `Platform` enum-like runtime-value type. Maps to
     /// `buff_chat::Platform` at codegen time. The two variants
     /// (`Platform::Discord` / `Platform::Telegram`) are exposed as
-    /// associated constants (`Platform.Discord` / `Platform.Telegram` —
+    /// associated constants (`Platform.Discord` / `Platform.Telegram` Ã¢â‚¬â€
     /// zero-arg `Type.NAME` access shape, lowered through
     /// [`PreludeAssocConst::Discord`] / [`PreludeAssocConst::Telegram`]).
     /// The instance methods `platform.is_discord()` / `platform.is_telegram()`
@@ -876,7 +876,7 @@ pub enum Type {
     /// Mirrors [`Type::HttpClient`] (T33) / [`Type::Bot`] (T47) as a
     /// runtime-value-with-rich-instance-methods type. The underlying Rust
     /// type is `buff_web3::Provider` (an `Arc<EthProvider<Http>>` wrapper,
-    /// `Send + Sync + Clone`). Pure-Rust, CPU-only (NO GPU dispatch —
+    /// `Send + Sync + Clone`). Pure-Rust, CPU-only (NO GPU dispatch Ã¢â‚¬â€
     /// network I/O never runs on the GPU path).
     Provider,
     /// T48: the secp256k1 private-key wallet runtime-value type. Maps to
@@ -893,7 +893,7 @@ pub enum Type {
     /// underlying Rust type is `buff_web3::Wallet` (wrapping
     /// `ethers::signers::LocalWallet`). Pure-Rust, CPU-only.
     Wallet,
-    /// T48: the [`Wallet`] bound to a [`Provider`] — the "client" type
+    /// T48: the [`Wallet`] bound to a [`Provider`] Ã¢â‚¬â€ the "client" type
     /// passed to [`Contract::new`] for signing transactions. Maps to
     /// `buff_web3::ConnectedWallet` at codegen time. Constructed ONLY via
     /// `wallet.connect(provider)`; carries the single instance method
@@ -925,9 +925,9 @@ pub enum Type {
     /// T48: the chainable call builder for a single ABI method invocation.
     /// Maps to `buff_web3::ContractMethod` at codegen time. Constructed
     /// ONLY via `contract.method(name)`; carries the chainable instance
-    /// methods `.arg(value)` / `.args(values)` (builder pattern — consume
-    /// self, return Self) and the terminal `.call()` (read — returns
-    /// ABI-decoded String) / `.send()` (write — returns the 32-byte tx
+    /// methods `.arg(value)` / `.args(values)` (builder pattern Ã¢â‚¬â€ consume
+    /// self, return Self) and the terminal `.call()` (read Ã¢â‚¬â€ returns
+    /// ABI-decoded String) / `.send()` (write Ã¢â‚¬â€ returns the 32-byte tx
     /// hash hex String, requires a ConnectedWallet).
     ///
     /// This is **additive** (T48). The `is_numeric` / `is_float_like` /
@@ -941,7 +941,7 @@ pub enum Type {
     /// T49: the `AES` namespace type, mapped to
     /// `buff_crypto_extras::AES` at codegen time. Namespace-only
     /// (like `MsgPack` / `Log` / `Toml` / `Base64` / `Hex` / `Yaml` /
-    /// `Csv`) — the type itself is never instantiated as a runtime
+    /// `Csv`) Ã¢â‚¬â€ the type itself is never instantiated as a runtime
     /// value; only its associated functions are callable
     /// (`AES.generate_key()` / `AES.generate_nonce()` /
     /// `AES.encrypt(key, nonce, plaintext)` /
@@ -955,7 +955,7 @@ pub enum Type {
     /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type that
     /// nonetheless carries a `Type` variant for exhaustiveness. The
     /// underlying Rust crate is `buff_crypto_extras` (wrapping
-    /// `aes_gcm::Aes256Gcm`). Pure-Rust, CPU-only (NO GPU dispatch —
+    /// `aes_gcm::Aes256Gcm`). Pure-Rust, CPU-only (NO GPU dispatch Ã¢â‚¬â€
     /// AEAD never runs on the GPU path).
     AES,
     /// T49: the `RSA` namespace type, mapped to
@@ -1003,7 +1003,7 @@ pub enum Type {
     ///
     /// Mirrors [`Type::MsgPack`] (T51) as a namespace-only type. The
     /// underlying Rust crate is `buff_crypto_extras` (wrapping the
-    /// `argon2` raw Argon2id KDF — distinct from T34's PHC-string
+    /// `argon2` raw Argon2id KDF Ã¢â‚¬â€ distinct from T34's PHC-string
     /// Password hashing). Pure-Rust, CPU-only.
     Argon2,
     /// T49: the `RsaKeypair` runtime-value type, mapped to
@@ -1018,7 +1018,7 @@ pub enum Type {
     /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] (T45) as a
     /// runtime-value-with-instance-methods type. The underlying Rust
     /// type is `buff_crypto_extras::RsaKeypair` (a struct wrapping two
-    /// owned `String`s — public_pem + private_pem — `Send + Sync +
+    /// owned `String`s Ã¢â‚¬â€ public_pem + private_pem Ã¢â‚¬â€ `Send + Sync +
     /// Clone`). Pure-Rust, CPU-only.
     RsaKeypair,
     /// T54: a 4-lane `f32` SIMD register (the concrete realisation of the
@@ -1029,7 +1029,7 @@ pub enum Type {
     /// `.sub(other)`, `.mul(other)`, `.div(other)` (lane-wise binary),
     /// `.sum()`, `.min()`, `.max()` (horizontal reductions),
     /// `.to_vec()` (extract). CPU-only per Metis G7 lock (NO GPU
-    /// dispatch — GPU SIMD is WGSL's job via `buff-lang-codegen-wgsl`).
+    /// dispatch Ã¢â‚¬â€ GPU SIMD is WGSL's job via `buff-lang-codegen-wgsl`).
     ///
     /// This is **additive** (T54). The `is_numeric` / `is_float_like` /
     /// `is_integer_like` / `is_gpu_eligible` predicates all return `false`
@@ -1037,11 +1037,11 @@ pub enum Type {
     ///
     /// Mirrors [`Type::Image`] (T9) / [`Type::Point`] (T45) as a
     /// runtime-value-with-rich-instance-methods type. The underlying Rust
-    /// type is `buff_simd::Simd` (a struct wrapping `wide::f32x4` — a
+    /// type is `buff_simd::Simd` (a struct wrapping `wide::f32x4` Ã¢â‚¬â€ a
     /// 128-bit SSE/NEON register). The MVP is **fixed at 4 lanes**; the
     /// generic `<T, N>` parameter plumbing is deferred to v1.20+.
     /// Pure-Rust, CPU-only; wraps the `wide` crate (stable portable
-    /// SIMD — NO nightly `std::simd`, NO runtime detection).
+    /// SIMD Ã¢â‚¬â€ NO nightly `std::simd`, NO runtime detection).
     Simd,
     /// T59: the actor-system runtime type. Maps to
     /// `buff_actors::ActorSystem`. Constructed via
@@ -1061,7 +1061,7 @@ pub enum Type {
     /// `buff_actors::supervisor::ChildSpec`. Constructed via
     /// `ChildSpec.new(factory)`; carries `.with_name` / `.name`.
     ChildSpec,
-    /// T59: the restart-strategy enum (namespace-only — mirrors
+    /// T59: the restart-strategy enum (namespace-only Ã¢â‚¬â€ mirrors
     /// Platform / StemAlgorithm). Variants `.permanent` /
     /// `.temporary` / `.transient`. Maps to
     /// `buff_actors::supervisor::RestartStrategy`.
@@ -1074,7 +1074,7 @@ pub enum Type {
     /// existing variant was renamed, reordered, or had its payload
     /// altered. The `is_numeric` / `is_float_like` / `is_integer_like`
     /// / `is_gpu_eligible` predicates all return `false` for `Tensor`
-    /// — it's an opaque container that participates in no scalar
+    /// Ã¢â‚¬â€ it's an opaque container that participates in no scalar
     /// promotion (GPU dispatch is a v1.18+ enhancement).
     Tensor,
     /// T11: a time-domain signal, mapped to `buff_dsp::Signal` at
@@ -1087,7 +1087,7 @@ pub enum Type {
     /// T11: an FFT frequency-spectrum runtime-value type, mapped to
     /// `buff_dsp::Spectrum` at codegen time. Returned by
     /// `signal.fft()` / `signal.spectrogram(window_size)`. Carries
-    /// `Vec<Complex>` + sample_rate — hermitian half (`N/2 + 1` bins)
+    /// `Vec<Complex>` + sample_rate Ã¢â‚¬â€ hermitian half (`N/2 + 1` bins)
     /// of a length-N real input. **Additive** (T11).
     Spectrum,
     /// T17: an HTTP web server runtime-value type, mapped to
@@ -1103,7 +1103,7 @@ pub enum Type {
     /// `Database.connect(url)`; carries the instance methods
     /// `pool.query(sql, params)` / `pool.query_one(sql, params)` /
     /// `pool.execute(sql, params)` / `pool.begin()`. **Additive**
-    /// (T18). Pure-Rust (sqlx, rustls-tls — NOT native-tls).
+    /// (T18). Pure-Rust (sqlx, rustls-tls Ã¢â‚¬â€ NOT native-tls).
     Pool,
     /// T27: a fuzz input-strategy runtime-value type, mapped to
     /// `buff_fuzz::Strategy` at codegen time. Constructed via
@@ -1128,7 +1128,7 @@ pub enum Type {
     /// Pure stdlib (BTreeSet-backed).
     Rbac,
     /// A user-defined generic type application: `Pair<Int, String>`,
-    /// `Tree<T>`, or a bare user struct/enum `Point` (T37 — v1.25
+    /// `Tree<T>`, or a bare user struct/enum `Point` (T37 Ã¢â‚¬â€ v1.25
     /// language-features batch).
     ///
     /// Produced by [`crate::infer::typeref_to_type_with_user`] when a
@@ -1146,7 +1146,7 @@ pub enum Type {
     /// user-defined shape that participates in no numeric promotion).
     /// The codegen lowering emits the user type's name verbatim with a
     /// turbofish when `args` is non-empty (`Pair<i64, String>`), or the
-    /// bare name when `args` is empty (`Point`) — mirroring what
+    /// bare name when `args` is empty (`Point`) Ã¢â‚¬â€ mirroring what
     /// `ast_typeref_to_syn` already emits directly from the `TypeRef`
     /// (so a `Type::User` flowing through `buff_type_to_syn` produces
     /// byte-identical Rust to the `TypeRef`-driven path).
@@ -1155,27 +1155,27 @@ pub enum Type {
     /// String>` against a declaration `struct Pair<T, U>`, the resolver
     /// binds `T=Int`, `U=String` positionally and recurses into each
     /// argument. Full monomorphization happens in rustc (zero-cost
-    /// static dispatch) — Buff's type system only needs to be AWARE of
+    /// static dispatch) Ã¢â‚¬â€ Buff's type system only needs to be AWARE of
     /// the user generic so the null-safety / assignment checks can
     /// compare annotations like `let p: Pair<Int, String>`.
     User { name: String, args: Vec<Type> },
     /// A trait object: `Box<dyn Trait>` for runtime polymorphism (T68).
     ///
-    /// Carries the trait as a resolved [`Type`] — conventionally a
+    /// Carries the trait as a resolved [`Type`] Ã¢â‚¬â€ conventionally a
     /// [`Type::User`] whose `name` is the trait identifier (e.g.
     /// `Type::User { name: "Drawable", args: [] }` represents `Box<dyn
     /// Drawable>`). Codegen lowers this 1:1 to Rust's `Box<dyn Trait>`,
     /// enabling runtime dispatch (vtable-based) over a set of concrete
     /// types that implement the trait. This is the dynamic counterpart to
     /// Rust's static (monomorphized) generics: when the concrete type at a
-    /// call site is not known at compile time — e.g. a heterogeneous
+    /// call site is not known at compile time Ã¢â‚¬â€ e.g. a heterogeneous
     /// collection `Vector<Box<dyn Drawable>>` holding circles, squares,
-    /// and triangles — the trait object erases the concrete type behind a
+    /// and triangles Ã¢â‚¬â€ the trait object erases the concrete type behind a
     /// single fat pointer.
     ///
     /// Buff's hide-the-borrow-checker philosophy maps cleanly onto trait
     /// objects: the user writes the trait name, the compiler emits
-    /// `Box<dyn ...>` (the single owned, heap-allocated form — no `&dyn`
+    /// `Box<dyn ...>` (the single owned, heap-allocated form Ã¢â‚¬â€ no `&dyn`
     /// references leak into user-visible syntax). Construction is via
     /// `Box::new(concrete_value)` emitted by codegen when a concrete value
     /// flows into a `Box<dyn Trait>` parameter/return.
@@ -1183,7 +1183,7 @@ pub enum Type {
     /// This is **additive** (T68): no existing variant was renamed,
     /// reordered, or had its payload altered. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible` predicates
-    /// all return `false` for `DynamicDispatch` — a trait object is an
+    /// all return `false` for `DynamicDispatch` Ã¢â‚¬â€ a trait object is an
     /// opaque erased shape that participates in no numeric promotion and
     /// is never GPU-eligible (vtable dispatch cannot cross the CPU/GPU
     /// boundary). All exhaustive `match`es on `Type` were extended with
@@ -1191,35 +1191,35 @@ pub enum Type {
     /// (codegen).
     DynamicDispatch(Box<Type>),
     /// A lazy integer range: `Range<T>` produced by `start..end`
-    /// (exclusive) or `start..=end` (inclusive) (T84 — v1.25 Wave 2a).
+    /// (exclusive) or `start..=end` (inclusive) (T84 Ã¢â‚¬â€ v1.25 Wave 2a).
     ///
     /// Maps to Rust's `std::ops::Range<T>` (exclusive) or
     /// `std::ops::RangeInclusive<T>` (inclusive) at codegen time. Both
     /// bounds are full expressions in the AST ([`Expr::Range`]); the
     /// `inclusive` flag is preserved through the AST so codegen can pick
     /// the right Rust operator. The element type `T` is inferred from
-    /// the bounds (`0..10` → `Range<Int<64>>`; both bounds are visited
+    /// the bounds (`0..10` Ã¢â€ â€™ `Range<Int<64>>`; both bounds are visited
     /// and the first non-`Unknown` one wins, falling back to
     /// `Int<64>` if both are indeterminate).
     ///
-    /// **LAZY, not a Vec.** A `Range<Int>` is an iterator — it produces
+    /// **LAZY, not a Vec.** A `Range<Int>` is an iterator Ã¢â‚¬â€ it produces
     /// values on demand and never materialises the full sequence in
     /// memory. `for i in 0..10` iterates 10 times without allocating;
     /// `(0..10).contains(5)` returns `true` in O(1). This mirrors
     /// Rust's `Range` exactly (Buff surfaces Rust's semantics
-    /// verbatim — no copy, no Vec, no eager evaluation).
+    /// verbatim Ã¢â‚¬â€ no copy, no Vec, no eager evaluation).
     ///
     /// This is **additive** (T84): no existing variant was renamed,
     /// reordered, or had its payload altered. The `is_numeric` /
     /// `is_float_like` / `is_integer_like` / `is_gpu_eligible`
-    /// predicates all return `false` for `Range` — it's a lazy
+    /// predicates all return `false` for `Range` Ã¢â‚¬â€ it's a lazy
     /// iterator, not a scalar value, so it participates in no numeric
     /// promotion. See the T68 `Expr::Range` entry on
     /// [`buff_lang_ast::Expr`] for the AST/parser/codegen wiring that
     /// landed earlier (T68 shipped the expression form; T84 closes the
     /// loop by giving it a real `Type`).
     Range(Box<Type>),
-    /// T71: a lazy iterator `Iterator<T>` — the result of
+    /// T71: a lazy iterator `Iterator<T>` Ã¢â‚¬â€ the result of
     /// `vector.lazy()`. Maps to Rust's iterator adapters
     /// (`.iter().map().filter().take()...`). Each adapter
     /// method returns a new `Iterator` (no allocation until
@@ -1233,7 +1233,7 @@ pub enum Type {
     /// (codegen), `typeref_to_type` (inferencer +
     /// exhaustiveness). The `is_numeric` / `is_float_like` /
     /// `is_integer_like` / `is_gpu_eligible` predicates all
-    /// return `false` for `Iterator` — it is a lazy adapter
+    /// return `false` for `Iterator` Ã¢â‚¬â€ it is a lazy adapter
     /// type that participates in no numeric promotion.
     Iterator(Box<Type>),
 }
@@ -1329,7 +1329,7 @@ impl Type {
     /// (128-bit fixed-point, no GPU representation) are **not** GPU-eligible
     /// and must run on the CPU (Rayon) path.
     ///
-    /// This is **type metadata only** in v0.5 — there is no dispatch engine
+    /// This is **type metadata only** in v0.5 Ã¢â‚¬â€ there is no dispatch engine
     /// yet (that arrives in v1.0). The predicate is consumed directly by
     /// tests now and will feed the v1.0 heterogeneous dispatch analyzer.
     pub fn is_gpu_eligible(&self) -> bool {
@@ -1391,7 +1391,7 @@ impl Type {
     /// Create a tuple type `(T, U, ...)` from its resolved members (T103).
     /// Maps 1:1 to a Rust tuple. The caller MUST pass 2+ members (the
     /// parser disallows single-element tuples, but this constructor does
-    /// not enforce it — a single-element `Tuple` is technically
+    /// not enforce it Ã¢â‚¬â€ a single-element `Tuple` is technically
     /// constructible here for testing; downstream code treats it the same).
     pub fn tuple(members: Vec<Type>) -> Self {
         Type::Tuple(members)
@@ -1482,7 +1482,7 @@ impl Type {
     /// method calls (`regex.match(...)`, `regex.find(...)`, ...) to the
     /// `regex::Regex` lowering. Distinct from [`Self::is_prelude_datetime`]
     /// (Regex is not a datetime family member) and from the namespace-only
-    /// check ([`crate::prelude_types::PreludeType::is_namespace_only`]) —
+    /// check ([`crate::prelude_types::PreludeType::is_namespace_only`]) Ã¢â‚¬â€
     /// `Regex` IS a runtime value (an opaque compiled-pattern handle).
     pub fn is_prelude_regex(&self) -> bool {
         matches!(self, Type::Regex)
@@ -1495,7 +1495,7 @@ impl Type {
     /// [`Self::is_prelude_datetime`] (URL is not a chrono type) and
     /// from [`Self::is_prelude_regex`] (URL is a different runtime
     /// value type). Used by the chrono over-broad-walker cautionary
-    /// tale (T124f gotcha) — `buff_type().is_prelude_url()` is the
+    /// tale (T124f gotcha) Ã¢â‚¬â€ `buff_type().is_prelude_url()` is the
     /// narrow round-trip check for the URL type only.
     pub fn is_prelude_url(&self) -> bool {
         matches!(self, Type::Url)
@@ -1518,7 +1518,7 @@ impl Type {
     /// from [`Self::is_prelude_regex`] (Path is not a regex), and
     /// from [`Self::is_prelude_url`] (Path is not a URL). Used by
     /// the chrono over-broad-walker cautionary tale (T124f gotcha)
-    /// — `buff_type().is_prelude_path()` is the narrow round-trip
+    /// Ã¢â‚¬â€ `buff_type().is_prelude_path()` is the narrow round-trip
     /// check for the Path type only.
     pub fn is_prelude_path(&self) -> bool {
         matches!(self, Type::Path)
@@ -1526,7 +1526,7 @@ impl Type {
 
     /// T124l: the spawned-process type. Maps to
     /// `Option<std::process::Child>` at codegen time (the `Option`
-    /// wrapper lets `Process.spawn` be panic-free — a spawn failure
+    /// wrapper lets `Process.spawn` be panic-free Ã¢â‚¬â€ a spawn failure
     /// collapses to `None`). Constructed via `Process.spawn(cmd,
     /// args)`; supports instance methods `.wait() -> Int` (exit
     /// code) and `.id() -> Int` (OS process ID).
@@ -1912,13 +1912,13 @@ impl Type {
     }
 
     /// T51: Returns `true` if this type is the prelude `MsgPack` namespace.
-    /// Namespace-only (no runtime value — like Log / Toml / Base64 / Hex).
+    /// Namespace-only (no runtime value Ã¢â‚¬â€ like Log / Toml / Base64 / Hex).
     pub fn is_prelude_msgpack(&self) -> bool {
         matches!(self, Type::MsgPack)
     }
 
     /// T52: the `Protobuf` Protocol-Buffers format namespace type. Maps
-    /// to `buff_protobuf` at codegen time. Namespace-only — never
+    /// to `buff_protobuf` at codegen time. Namespace-only Ã¢â‚¬â€ never
     /// instantiated as a runtime value; only its associated functions
     /// are callable (`Protobuf.serialize` / `Protobuf.deserialize` /
     /// `Protobuf.roundtrip`). Mirrors `Type::MsgPack` (T51).
@@ -1927,7 +1927,7 @@ impl Type {
     }
 
     /// T52: Returns `true` if this type is the prelude `Protobuf`
-    /// namespace. Namespace-only (no runtime value — like MsgPack /
+    /// namespace. Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack /
     /// Log / Toml / Base64 / Hex).
     pub fn is_prelude_protobuf(&self) -> bool {
         matches!(self, Type::Protobuf)
@@ -2186,7 +2186,7 @@ impl Type {
     }
 
     /// T46: the `Text` NLP namespace type. Maps to `buff_nlp::Text` at
-    /// codegen time. Namespace-only — never instantiated as a runtime
+    /// codegen time. Namespace-only Ã¢â‚¬â€ never instantiated as a runtime
     /// value; only its associated functions are callable
     /// (`Text.detect_language` / `Text.stem` / `Text.tokenize` /
     /// `Text.sentences`). Mirrors `Type::MsgPack` (T51).
@@ -2195,7 +2195,7 @@ impl Type {
     }
 
     /// T46: Returns `true` if this type is the prelude `Text` NLP
-    /// namespace. Namespace-only (no runtime value — like MsgPack).
+    /// namespace. Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack).
     pub fn is_prelude_text(&self) -> bool {
         matches!(self, Type::Text)
     }
@@ -2217,7 +2217,7 @@ impl Type {
     }
 
     /// T46: the Snowball stemming algorithm selector enum. Maps to
-    /// `buff_nlp::StemAlgorithm` at codegen time. Opaque enum — only
+    /// `buff_nlp::StemAlgorithm` at codegen time. Opaque enum Ã¢â‚¬â€ only
     /// passed as an arg to `Text.stem(word, algorithm)`; NO instance
     /// methods exposed.
     pub fn stem_algorithm() -> Self {
@@ -2357,7 +2357,7 @@ impl Type {
     }
 
     /// T49: the `AES` namespace type. Maps to `buff_crypto_extras::AES`
-    /// at codegen time. Namespace-only — never instantiated as a runtime
+    /// at codegen time. Namespace-only Ã¢â‚¬â€ never instantiated as a runtime
     /// value; only its associated functions are callable
     /// (`AES.generate_key` / `AES.generate_nonce` / `AES.encrypt` /
     /// `AES.decrypt`). Mirrors `Type::MsgPack` (T51).
@@ -2366,13 +2366,13 @@ impl Type {
     }
 
     /// T49: Returns `true` if this type is the prelude `AES` namespace.
-    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    /// Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack / Log / Toml).
     pub fn is_prelude_aes(&self) -> bool {
         matches!(self, Type::AES)
     }
 
     /// T49: the `RSA` namespace type. Maps to `buff_crypto_extras::RSA`
-    /// at codegen time. Namespace-only — never instantiated as a runtime
+    /// at codegen time. Namespace-only Ã¢â‚¬â€ never instantiated as a runtime
     /// value; only its associated functions are callable
     /// (`RSA.generate_keypair` / `RSA.sign` / `RSA.verify`). Mirrors
     /// `Type::MsgPack` (T51).
@@ -2381,13 +2381,13 @@ impl Type {
     }
 
     /// T49: Returns `true` if this type is the prelude `RSA` namespace.
-    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    /// Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack / Log / Toml).
     pub fn is_prelude_rsa(&self) -> bool {
         matches!(self, Type::RSA)
     }
 
     /// T49: the `ECDH` namespace type. Maps to
-    /// `buff_crypto_extras::ECDH` at codegen time. Namespace-only —
+    /// `buff_crypto_extras::ECDH` at codegen time. Namespace-only Ã¢â‚¬â€
     /// never instantiated as a runtime value; only its associated
     /// functions are callable (`ECDH.generate_private` /
     /// `ECDH.public_from_private` / `ECDH.derive_shared`). Mirrors
@@ -2397,13 +2397,13 @@ impl Type {
     }
 
     /// T49: Returns `true` if this type is the prelude `ECDH` namespace.
-    /// Namespace-only (no runtime value — like MsgPack / Log / Toml).
+    /// Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack / Log / Toml).
     pub fn is_prelude_ecdh(&self) -> bool {
         matches!(self, Type::ECDH)
     }
 
     /// T49: the `Argon2` namespace type. Maps to
-    /// `buff_crypto_extras::Argon2` at codegen time. Namespace-only —
+    /// `buff_crypto_extras::Argon2` at codegen time. Namespace-only Ã¢â‚¬â€
     /// never instantiated as a runtime value; only its associated
     /// functions are callable (`Argon2.generate_salt` /
     /// `Argon2.derive_key`). Mirrors `Type::MsgPack` (T51).
@@ -2412,7 +2412,7 @@ impl Type {
     }
 
     /// T49: Returns `true` if this type is the prelude `Argon2`
-    /// namespace. Namespace-only (no runtime value — like MsgPack /
+    /// namespace. Namespace-only (no runtime value Ã¢â‚¬â€ like MsgPack /
     /// Log / Toml).
     pub fn is_prelude_argon2(&self) -> bool {
         matches!(self, Type::Argon2)
@@ -2478,331 +2478,5 @@ impl FloatWidth {
     }
 }
 
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Type::Int { width } => write!(f, "Int<{}>", width.bits()),
-            Type::Bits { width } => write!(f, "Bits<{}>", width.bits()),
-            Type::Float { width } => write!(f, "Float<{}>", width.bits()),
-            Type::Double => f.write_str("Double"),
-            Type::Bool => f.write_str("Bool"),
-            Type::String => f.write_str("String"),
-            Type::Char => f.write_str("Char"),
-            Type::Decimal => f.write_str("Decimal"),
-            Type::Unknown => f.write_str("Unknown"),
-            Type::Void => f.write_str("Void"),
-            Type::Vector(elem) => write!(f, "Vector<{elem}>"),
-            Type::Matrix(elem) => write!(f, "Matrix<{elem}>"),
-            Type::Option(inner) => write!(f, "Option<{inner}>"),
-            Type::Map(key, value) => write!(f, "Map<{key}, {value}>"),
-            Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
-            // T76: union `A | B | C`.
-            Type::Union(members) => {
-                for (i, m) in members.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(" | ")?;
-                    }
-                    write!(f, "{m}")?;
-                }
-                Ok(())
-            }
-            // T103: tuple `(T, U, ...)`. Renders with leading/trailing parens
-            // and comma-separated members, mirroring the source form.
-            Type::Tuple(members) => {
-                f.write_str("(")?;
-                for (i, m) in members.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{m}")?;
-                }
-                f.write_str(")")
-            }
-            // T124b: prelude datetime family. These are opaque value types
-            // whose canonical Rust representation lives in the codegen crate
-            // (chrono / std::time). The Display form mirrors the Buff
-            // surface name so diagnostics read naturally.
-            Type::DateTime => f.write_str("DateTime"),
-            Type::Date => f.write_str("Date"),
-            Type::Time => f.write_str("Time"),
-            Type::Duration => f.write_str("Duration"),
-            Type::Instant => f.write_str("Instant"),
-            // T124d: prelude compiled-regex type. Opaque value type whose
-            // canonical Rust representation lives in the codegen crate
-            // (`regex::Regex`). The Display form mirrors the Buff surface
-            // name so diagnostics read naturally.
-            Type::Regex => f.write_str("Regex"),
-            // T124h: prelude parsed-URL type. Opaque value type whose
-            // canonical Rust representation lives in the codegen crate
-            // (`url::Url`). The Display form mirrors the Buff surface
-            // name so diagnostics read naturally.
-            Type::Url => f.write_str("URL"),
-            // T124j: prelude filesystem-path type. Opaque value type
-            // whose canonical Rust representation lives in the codegen
-            // crate (`std::path::PathBuf`). The Display form mirrors
-            // the Buff surface name so diagnostics read naturally.
-            Type::Path => f.write_str("Path"),
-            // T124l: prelude spawned-process type. Opaque value type
-            // whose canonical Rust representation lives in the codegen
-            // crate (`Option<std::process::Child>` - the Option
-            // wrapper lets spawn be panic-free). The Display form
-            // mirrors the Buff surface name so diagnostics read
-            // naturally.
-            Type::Process => f.write_str("Process"),
-            // T124m: prelude TCP-connection type. Opaque value type
-            // whose canonical Rust representation lives in the
-            // codegen crate (`Option<tokio::net::TcpStream>` - the
-            // Option wrapper lets connect be panic-free). The
-            // Display form mirrors the Buff surface name.
-            Type::Connection => f.write_str("Connection"),
-            // T124m: prelude UDP-socket type. Opaque value type
-            // whose canonical Rust representation lives in the
-            // codegen crate (`Option<tokio::net::UdpSocket>` -
-            // the Option wrapper lets bind be panic-free). The
-            // Display form mirrors the Buff surface name.
-            Type::Socket => f.write_str("Socket"),
-            // T124m: prelude WebSocket-connection type. Opaque
-            // value type whose canonical Rust representation lives
-            // in the codegen crate
-            // (`Option<tokio_tungstenite::WebSocketStream<...>>` -
-            // the Option wrapper lets connect be panic-free). The
-            // Display form mirrors the Buff surface name.
-            Type::WsConnection => f.write_str("WsConnection"),
-            // T2: channel sender / receiver. Opaque runtime-value
-            // types mapped to `buff_lang_runtime::Sender<T>` /
-            // `buff_lang_runtime::Receiver<T>`. Display mirrors the
-            // Buff surface name.
-            Type::Sender => f.write_str("Sender"),
-            Type::Receiver => f.write_str("Receiver"),
-            // T9: image. Opaque runtime-value type mapped to
-            // `buff_image::Image`. Display mirrors the Buff surface
-            // name (`Image`).
-            Type::Image => f.write_str("Image"),
-            // T37: fake-data generator. Opaque runtime-value type
-            // mapped to `buff_fake::Faker`. Display mirrors the Buff
-            // surface name (`Faker`).
-            Type::Faker => f.write_str("Faker"),
-            // T31: cache. Opaque runtime-value type mapped to
-            // `buff_cache::Cache`. Display mirrors the Buff surface
-            // name (`Cache`).
-            Type::Cache => f.write_str("Cache"),
-            Type::I18n => f.write_str("I18n"),
-            Type::DataFrame => f.write_str("DataFrame"),
-            Type::Audio => f.write_str("AudioBuffer"),
-            // T12: prelude ECS types. Opaque value types whose
-            // canonical Rust representations live in the `buff-ecs`
-            // crate (`buff_ecs::World` / `buff_ecs::Entity`). The
-            // Display form mirrors the Buff surface name so
-            // diagnostics read naturally.
-            Type::World => f.write_str("World"),
-            Type::Entity => f.write_str("Entity"),
-            Type::Template => f.write_str("Template"),
-            // T33: prelude HTTP client type. Opaque value type mapped
-            // to `buff_http_client::HttpClient`. Display mirrors the
-            // Buff surface name.
-            Type::HttpClient => f.write_str("HttpClient"),
-            // T29: prelude validator type. Opaque value type mapped
-            // to `buff_validate::Validator`. Display mirrors the
-            // Buff surface name.
-            Type::Validator => f.write_str("Validator"),
-            // T42: prelude email type. Opaque value type mapped to
-            // `buff_email::Email`. Display mirrors the Buff surface
-            // name.
-            Type::Email => f.write_str("Email"),
-            // T42: prelude SMTP client type. Opaque value type mapped
-            // to `buff_email::SmtpClient`. Display mirrors the Buff
-            // surface name.
-            Type::SmtpClient => f.write_str("SmtpClient"),
-            // T43: prelude scrape types. Opaque value types mapped to
-            // `buff_scrape::{Document, Element, Crawler}`. Display
-            // mirrors the Buff surface names.
-            Type::Document => f.write_str("Document"),
-            Type::Element => f.write_str("Element"),
-            Type::Crawler => f.write_str("Crawler"),
-            // T51: prelude MsgPack namespace. Namespace-only (no runtime
-            // value — like Log / Toml / Base64 / Hex / Yaml / Csv).
-            // Display mirrors the Buff surface name.
-            Type::MsgPack => f.write_str("MsgPack"),
-            // T50: prelude Xml type. Opaque runtime-value type mapped
-            // to `buff_xml::XmlDocument`. Display mirrors the Buff
-            // surface name.
-            Type::Xml => f.write_str("Xml"),
-            // T50: prelude XmlElement type. Opaque runtime-value type
-            // mapped to `buff_xml::XmlElement`. Display mirrors the
-            // Buff surface name.
-            Type::XmlElement => f.write_str("XmlElement"),
-            // T45: prelude geo types. Opaque value types mapped to
-            // `buff_geo::{Point, LineString, Polygon}`. Display mirrors
-            // the Buff surface name.
-            Type::Point => f.write_str("Point"),
-            Type::LineString => f.write_str("LineString"),
-            Type::Polygon => f.write_str("Polygon"),
-            // T54: prelude SIMD type. Opaque runtime-value type mapped
-            // to `buff_simd::Simd` (a 4-lane f32x4 register). Display
-            // mirrors the Buff surface name.
-            Type::Simd => f.write_str("Simd"),
-            // T59: prelude actor types. Opaque runtime-value types
-            // mapped to `buff_actors::{ActorSystem, ActorRef,
-            // Supervisor}` + `buff_actors::supervisor::{ChildSpec,
-            // RestartStrategy}`.
-            Type::ActorSystem => f.write_str("ActorSystem"),
-            Type::ActorRef => f.write_str("ActorRef"),
-            Type::Supervisor => f.write_str("Supervisor"),
-            Type::ChildSpec => f.write_str("ChildSpec"),
-            Type::RestartStrategy => f.write_str("RestartStrategy"),
-            // T8/T11/T17/T18/T27/T34: framework runtime-value types
-            // whose canonical Rust representations live in the
-            // matching `buff-*` framework crates. Display mirrors the
-            // Buff surface name so diagnostics read naturally.
-            Type::Tensor => f.write_str("Tensor"),
-            Type::Signal => f.write_str("Signal"),
-            Type::Spectrum => f.write_str("Spectrum"),
-            Type::Web => f.write_str("Web"),
-            Type::Pool => f.write_str("Pool"),
-            Type::Strategy => f.write_str("Strategy"),
-            Type::OAuth2Client => f.write_str("OAuth2Client"),
-            Type::Rbac => f.write_str("Rbac"),
-            // T46: prelude NLP types. `Text` is namespace-only (mirrors
-            // MsgPack); `Language` is a runtime value (mirrors Point);
-            // `StemAlgorithm` is an opaque enum (only passed as arg).
-            // Display mirrors the Buff surface name in all three cases.
-            Type::Text => f.write_str("Text"),
-            Type::Language => f.write_str("Language"),
-            Type::StemAlgorithm => f.write_str("StemAlgorithm"),
-            // T52: prelude Protobuf namespace + Message instance type.
-            // `Protobuf` is namespace-only (mirrors MsgPack); `Message`
-            // is a runtime value (mirrors Image / Xml). Display mirrors
-            // the Buff surface name in both cases.
-            Type::Protobuf => f.write_str("Protobuf"),
-            Type::Message => f.write_str("Message"),
-            // T47: prelude chat types. `Bot` / `ChatMessage` /
-            // `Platform` are all runtime values (mirrors Point /
-            // Language). Display mirrors the Buff surface name in all
-            // three cases. Note `ChatMessage` (not `Message`) — T52
-            // owns the shorter `Message` name (protobuf).
-            Type::Bot => f.write_str("Bot"),
-            Type::ChatMessage => f.write_str("ChatMessage"),
-            Type::Platform => f.write_str("Platform"),
-            // T48: prelude web3 types. All five are runtime values
-            // (mirrors Provider / Wallet / Contract surfaces from
-            // ethers-rs / web3.py / ethers.js). Display mirrors the
-            // Buff surface name in all five cases.
-            Type::Provider => f.write_str("Provider"),
-            Type::Wallet => f.write_str("Wallet"),
-            Type::ConnectedWallet => f.write_str("ConnectedWallet"),
-            Type::Contract => f.write_str("Contract"),
-            Type::ContractMethod => f.write_str("ContractMethod"),
-            // T49: prelude crypto-extras types. AES / RSA / ECDH /
-            // Argon2 are namespace-only (mirrors MsgPack); RsaKeypair
-            // is a runtime value (mirrors Image / Point). Display
-            // mirrors the Buff surface name in all five cases.
-            Type::AES => f.write_str("AES"),
-            Type::RSA => f.write_str("RSA"),
-            Type::ECDH => f.write_str("ECDH"),
-            Type::Argon2 => f.write_str("Argon2"),
-            Type::RsaKeypair => f.write_str("RsaKeypair"),
-            // T37: user-defined generic type application. Renders the
-            // user type's name with comma-separated resolved args in
-            // angle brackets (matching the source form), or the bare
-            // name when there are no args.
-            Type::User { name, args } => {
-                if args.is_empty() {
-                    f.write_str(name)
-                } else {
-                    write!(f, "{name}<")?;
-                    for (i, a) in args.iter().enumerate() {
-                        if i > 0 {
-                            f.write_str(", ")?;
-                        }
-                        write!(f, "{a}")?;
-                    }
-                    f.write_str(">")
-                }
-            }
-            // T84: lazy integer range `Range<T>`. Renders the Buff
-            // surface form `Range<elem>` so diagnostics read naturally
-            // (mirrors Vector<T> / Matrix<T>). The element is the
-            // inferred bound type (`Range<Int<64>>` for `0..10`).
-            Type::Range(elem) => write!(f, "Range<{elem}>"),
-            // T71: lazy iterator `Iterator<T>`. Renders the Buff
-            // surface form `Iterator<elem>` so diagnostics read
-            // naturally (mirrors Vector<T> / Range<T>).
-            Type::Iterator(elem) => write!(f, "Iterator<{elem}>"),
-            // T68: trait object `Box<dyn Trait>`. Renders the Rust surface
-            // form verbatim so diagnostics read naturally and the codegen
-            // output matches 1:1. The inner type is the trait (conventionally
-            // a `Type::User { name: "Drawable", .. }`).
-            Type::DynamicDispatch(trait_ty) => write!(f, "Box<dyn {trait_ty}>"),
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn type_display_variants() {
-        assert_eq!(Type::int_default().to_string(), "Int<64>");
-        assert_eq!(Type::byte().to_string(), "Bits<8>");
-        assert_eq!(Type::float_default().to_string(), "Float<32>");
-        assert_eq!(Type::double().to_string(), "Double");
-        assert_eq!(Type::bool().to_string(), "Bool");
-        assert_eq!(Type::string().to_string(), "String");
-        assert_eq!(Type::char().to_string(), "Char");
-        assert_eq!(Type::Decimal.to_string(), "Decimal");
-        assert_eq!(Type::Unknown.to_string(), "Unknown");
-        assert_eq!(Type::Void.to_string(), "Void");
-    }
-
-    #[test]
-    fn numeric_classification() {
-        assert!(Type::int_default().is_numeric());
-        assert!(Type::byte().is_numeric());
-        assert!(Type::float_default().is_numeric());
-        assert!(Type::double().is_numeric());
-        assert!(Type::Decimal.is_numeric());
-        assert!(!Type::bool().is_numeric());
-        assert!(!Type::string().is_numeric());
-
-        assert!(Type::float_default().is_float_like());
-        assert!(Type::double().is_float_like());
-        assert!(!Type::int_default().is_float_like());
-
-        assert!(Type::int_default().is_integer_like());
-        assert!(Type::byte().is_integer_like());
-        assert!(!Type::float_default().is_integer_like());
-    }
-
-    // T20: GPU/CPU dispatch type-metadata predicates.
-    #[test]
-    fn gpu_cpu_dispatch_metadata() {
-        // WGSL-native 32-bit scalars are GPU-eligible.
-        assert!(Type::float_default().is_gpu_eligible()); // Float<32>
-        assert!(Type::Bool.is_gpu_eligible());
-        assert!(Type::Int {
-            width: IntWidth::W32
-        }
-        .is_gpu_eligible());
-        assert!(Type::Bits {
-            width: IntWidth::W32
-        }
-        .is_gpu_eligible());
-
-        // Decimal is NEVER GPU-eligible — it must run on CPU (Rayon).
-        assert!(!Type::Decimal.is_gpu_eligible());
-        assert!(Type::Decimal.must_run_on_cpu());
-
-        // Double (f64) and wide integers are also CPU-only (no WGSL scalar).
-        assert!(!Type::Double.is_gpu_eligible());
-        assert!(Type::Double.must_run_on_cpu());
-        assert!(!Type::int_default().is_gpu_eligible()); // Int<64>
-        assert!(!Type::byte().is_gpu_eligible()); // Bits<8>
-
-        // Predicate complementarity for Decimal.
-        assert_ne!(
-            Type::Decimal.is_gpu_eligible(),
-            Type::Decimal.must_run_on_cpu()
-        );
-    }
-}
+mod tests;
