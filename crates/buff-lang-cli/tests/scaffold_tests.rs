@@ -16,6 +16,11 @@
 //! ([`std::env::set_current_dir`]) are serialized via [`CWD_LOCK`]. `cwd` is
 //! process-global; without the lock, parallel tests would race and write each
 //! other's files into the wrong directory.
+//!
+//! The lock must ALSO be held while any spawned child that inherits the
+//! process cwd is running (e.g. the `rustc`/compiled-exe children spawned by
+//! `commands::run::run` — they get no explicit `.current_dir()`). See
+//! [`test_new_generated_project_runs`] for the ITER-21 race this prevents.
 
 use std::fs;
 use std::path::PathBuf;
@@ -385,7 +390,28 @@ fn test_new_generated_project_runs() {
     commands::new::run(project_name, TemplateKind::Binary).expect("scaffold");
     let main_path = workdir.join(project_name).join("src/main.buff");
     std::env::set_current_dir(&original).expect("restore cwd");
-    drop(_guard);
+
+    // ITER-21: the guard deliberately stays held for the REST of this test
+    // (it drops at end of scope). `run_with_defaults` spawns `rustc` and the
+    // compiled exe WITHOUT an explicit `.current_dir()`, so both children
+    // inherit the process-global cwd at fork time. If the lock were released
+    // here, a sibling chdir-test (all of them run on parallel threads) could
+    // `set_current_dir` the whole process into ITS temp workdir while our
+    // multi-second rustc compile runs, then finish and `cleanup()`-delete
+    // that workdir. A forked-but-not-yet-initialized rustup proxy (`rustc`
+    // on PATH is the `~/.cargo/bin` shim) then fails `current_dir()` with
+    // ENOENT and dies with "error: Unable to proceed. Could not locate
+    // working directory." — the recurring macos CI flake in PRs #99/#102/
+    // #103. Holding the lock makes the inherited cwd deterministically
+    // `original` (the crate root cargo launched us in — never deleted).
+    // Windows cannot flake this way (deleting a live cwd fails with a
+    // sharing violation), which is why only macos reported it.
+    //
+    // A deterministic regression test for the race itself is not possible:
+    // it needs a scheduler-dependent interleaving across two threads plus a
+    // child process's internal init timing, and the direct mechanism demo
+    // (deleting the live cwd of a running child) is unrepresentable on
+    // Windows. The lock-scope structure above is the enforceable invariant.
 
     // Compile + run the scaffolded program, capturing stdout.
     // Using commands::run::run forwards stdout to the test process, which
