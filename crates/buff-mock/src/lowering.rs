@@ -21,8 +21,8 @@
 //! ```ignore
 //! impl Greeter for buff_mock::Mock<Greeter> {
 //!     fn greet(&self, name: String) -> String {
-//!         self.record_call("greet", vec![buff_mock::ArgumentValue::String(name)]);
-//!         match self.lookup_return("greet", &[]) {
+//!         self.record_call("greet", vec![buff_mock::ArgumentValue::String(name.clone())]);
+//!         match self.lookup_return("greet", &[buff_mock::ArgumentValue::String(name)]) {
 //!             Some(buff_mock::ReturnValue::String(s)) => s,
 //!             _ => String::new(),
 //!         }
@@ -36,6 +36,11 @@
 //!     }
 //! }
 //! ```
+//!
+//! Note: `record_call` receives a clone of every non-`Copy` argument
+//! (`String`) so the originals can be moved into the `lookup_return`
+//! slice — argument-aware dispatch then lets `.with_args(...)`
+//! expectations match generated impls, not just hand-written ones.
 //!
 //! The trait itself stays in the user's source — only the impl is
 //! emitted. The consumer (`buff-lang-codegen-rust` future integration,
@@ -155,9 +160,16 @@ fn build_impl_method(sig: &MethodSig) -> ImplItemFn {
     let method_ident = Ident::new(&sig.name.name, Span::call_site());
     let method_name_lit = sig.name.name.clone();
 
-    let self_ty_for_receiver = SynType::Path(TypePath {
-        qself: None,
-        path: mk_single_segment_path("Self"),
+    // prettyplease only prints `&self` (no `: Self`) when the receiver's
+    // declared type is consistent with the reference: `Type::Reference(&Self)`.
+    let self_ty_for_receiver = SynType::Reference(syn::TypeReference {
+        and_token: Token![&](Span::call_site()),
+        lifetime: None,
+        mutability: None,
+        elem: Box::new(SynType::Path(TypePath {
+            qself: None,
+            path: mk_single_segment_path("Self"),
+        })),
     });
     let receiver = syn::FnArg::Receiver(syn::Receiver {
         attrs: Vec::new(),
@@ -237,7 +249,7 @@ fn build_method_body_expr(sig: &MethodSig, method_name: &str) -> Expr {
         let arg_exprs: Vec<Expr> = sig
             .params
             .iter()
-            .map(|p| mk_argument_value_expr(&p.name.name, &p.ty))
+            .map(|p| mk_argument_value_expr(&p.name.name, &p.ty, true))
             .collect();
         mk_record_call_with_args(method_name, arg_exprs)
     };
@@ -248,9 +260,14 @@ fn build_method_body_expr(sig: &MethodSig, method_name: &str) -> Expr {
             let lookup_expr = if sig.params.is_empty() {
                 mk_method_call_on_self("lookup_return_no_args", vec![mk_str_lit(method_name)])
             } else {
+                let lookup_args: Vec<Expr> = sig
+                    .params
+                    .iter()
+                    .map(|p| mk_argument_value_expr(&p.name.name, &p.ty, false))
+                    .collect();
                 mk_method_call_on_self(
                     "lookup_return",
-                    vec![mk_str_lit(method_name), mk_empty_slice_expr()],
+                    vec![mk_str_lit(method_name), mk_args_slice_expr(lookup_args)],
                 )
             };
             let match_expr = mk_return_unwrap_match(rt, lookup_expr);
@@ -308,15 +325,31 @@ fn mk_vec_macro(items: Vec<Expr>) -> Expr {
     })
 }
 
-/// Construct `ArgumentValue::TypeName(arg)` for a parameter.
-fn mk_argument_value_expr(arg_name: &str, ty: &TypeRef) -> Expr {
+/// Construct `buff_mock::ArgumentValue::TypeName(arg)` for a parameter.
+/// When `clone` is true the argument is wrapped as `arg.clone()` —
+/// used by the `record_call` site so non-`Copy` (`String`) arguments
+/// stay available for the `lookup_return` slice.
+fn mk_argument_value_expr(arg_name: &str, ty: &TypeRef, clone: bool) -> Expr {
     let variant = argument_value_variant_name(ty);
-    let arg_path = mk_two_segment_path("ArgumentValue", &variant);
-    let arg_ident = Expr::Path(syn::ExprPath {
+    let arg_path = mk_three_segment_path("buff_mock", "ArgumentValue", &variant);
+    let arg_expr = Expr::Path(syn::ExprPath {
         attrs: Vec::new(),
         qself: None,
         path: mk_single_segment_path(arg_name),
     });
+    let arg_expr = if clone && is_non_copy_param_type(ty) {
+        Expr::MethodCall(syn::ExprMethodCall {
+            attrs: Vec::new(),
+            receiver: Box::new(arg_expr),
+            dot_token: Token![.](Span::call_site()),
+            method: Ident::new("clone", Span::call_site()),
+            turbofish: None,
+            paren_token: Default::default(),
+            args: Punctuated::new(),
+        })
+    } else {
+        arg_expr
+    };
     Expr::Call(ExprCall {
         attrs: Vec::new(),
         func: Box::new(Expr::Path(syn::ExprPath {
@@ -325,29 +358,42 @@ fn mk_argument_value_expr(arg_name: &str, ty: &TypeRef) -> Expr {
             path: arg_path,
         })),
         paren_token: Default::default(),
-        args: std::iter::once(arg_ident).collect(),
+        args: std::iter::once(arg_expr).collect(),
     })
 }
 
-/// Construct the `match lookup_expr { Some(ReturnValue::T(x)) => x, _ => default }`.
+/// `true` for supported parameter types that are not `Copy` (only
+/// `String` today) — those must be cloned when recorded.
+fn is_non_copy_param_type(ty: &TypeRef) -> bool {
+    matches!(ty, TypeRef::Named { name, .. } if name.name == "String")
+}
+
+/// Construct the `match lookup_expr {
+/// Some(buff_mock::ReturnValue::T(x)) => x, _ => default }`.
 fn mk_return_unwrap_match(rt: &TypeRef, lookup_expr: Expr) -> Expr {
     let (variant_name, binding_name) = return_value_variant(rt);
     let default_expr = default_for_type(rt);
 
-    let some_path = mk_two_segment_path("Some", &variant_name);
+    let binding_pat = Pat::Ident(syn::PatIdent {
+        attrs: Vec::new(),
+        by_ref: None,
+        mutability: None,
+        ident: Ident::new(&binding_name, Span::call_site()),
+        subpat: None,
+    });
+    let return_value_pat = Pat::TupleStruct(syn::PatTupleStruct {
+        attrs: Vec::new(),
+        qself: None,
+        path: mk_three_segment_path("buff_mock", "ReturnValue", &variant_name),
+        paren_token: Default::default(),
+        elems: std::iter::once(binding_pat).collect(),
+    });
     let some_pattern = Pat::TupleStruct(syn::PatTupleStruct {
         attrs: Vec::new(),
         qself: None,
-        path: some_path,
+        path: mk_single_segment_path("Some"),
         paren_token: Default::default(),
-        elems: std::iter::once(Pat::Ident(syn::PatIdent {
-            attrs: Vec::new(),
-            by_ref: None,
-            mutability: None,
-            ident: Ident::new(&binding_name, Span::call_site()),
-            subpat: None,
-        }))
-        .collect(),
+        elems: std::iter::once(return_value_pat).collect(),
     });
 
     let some_arm = syn::Arm {
@@ -386,8 +432,9 @@ fn mk_return_unwrap_match(rt: &TypeRef, lookup_expr: Expr) -> Expr {
     })
 }
 
-/// Construct `&[]` (empty slice expression) for `lookup_return(name, &[])`.
-fn mk_empty_slice_expr() -> Expr {
+/// Construct `&[expr, ...]` (reference-to-slice expression) for the
+/// `lookup_return(name, &[args...])` dispatch call.
+fn mk_args_slice_expr(elems: Vec<Expr>) -> Expr {
     Expr::Reference(syn::ExprReference {
         attrs: Vec::new(),
         and_token: Token![&](Span::call_site()),
@@ -395,7 +442,7 @@ fn mk_empty_slice_expr() -> Expr {
         expr: Box::new(Expr::Array(syn::ExprArray {
             attrs: Vec::new(),
             bracket_token: Default::default(),
-            elems: Punctuated::new(),
+            elems: elems.into_iter().collect(),
         })),
     })
 }
@@ -420,7 +467,7 @@ fn mk_single_segment_path(name: &str) -> syn::Path {
     }
 }
 
-/// Build a two-segment `syn::Path` (e.g. `ArgumentValue::String`).
+/// Build a two-segment `syn::Path` (e.g. `String::new`).
 fn mk_two_segment_path(first: &str, second: &str) -> syn::Path {
     let mut segments: Punctuated<PathSegment, Token![::]> = Punctuated::new();
     segments.push(PathSegment {
@@ -431,6 +478,21 @@ fn mk_two_segment_path(first: &str, second: &str) -> syn::Path {
         ident: Ident::new(second, Span::call_site()),
         arguments: PathArguments::None,
     });
+    syn::Path {
+        leading_colon: None,
+        segments,
+    }
+}
+
+/// Build a three-segment `syn::Path` (e.g. `buff_mock::ArgumentValue::String`).
+fn mk_three_segment_path(first: &str, second: &str, third: &str) -> syn::Path {
+    let mut segments: Punctuated<PathSegment, Token![::]> = Punctuated::new();
+    for name in [first, second, third] {
+        segments.push(PathSegment {
+            ident: Ident::new(name, Span::call_site()),
+            arguments: PathArguments::None,
+        });
+    }
     syn::Path {
         leading_colon: None,
         segments,
@@ -499,16 +561,13 @@ fn return_value_variant(ty: &TypeRef) -> (String, String) {
 fn default_for_type(ty: &TypeRef) -> Expr {
     match ty {
         TypeRef::Named { name, .. } => match name.name.as_str() {
-            "String" => Expr::MethodCall(syn::ExprMethodCall {
+            "String" => Expr::Call(ExprCall {
                 attrs: Vec::new(),
-                receiver: Box::new(Expr::Path(syn::ExprPath {
+                func: Box::new(Expr::Path(syn::ExprPath {
                     attrs: Vec::new(),
                     qself: None,
-                    path: mk_single_segment_path("String"),
+                    path: mk_two_segment_path("String", "new"),
                 })),
-                dot_token: Token![.](Span::call_site()),
-                method: Ident::new("new", Span::call_site()),
-                turbofish: None,
                 paren_token: Default::default(),
                 args: Punctuated::new(),
             }),
