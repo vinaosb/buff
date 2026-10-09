@@ -379,7 +379,10 @@ impl Asset {
     /// within a kind but a future "manifest" feature could share
     /// names across kinds.
     pub fn cache_get(&self, path: &Path) -> Option<AssetRef<'_>> {
-        self.cache.get_texture(path).map(AssetRef::Texture)
+        if let Some(texture) = self.cache.get_texture(path) {
+            return Some(AssetRef::Texture(texture));
+        }
+        self.cache.get_audio(path).map(AssetRef::Audio)
     }
 }
 

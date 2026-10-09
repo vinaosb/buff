@@ -17,8 +17,8 @@ trait Greeter {
 
 impl Greeter for Mock<dyn Greeter> {
     fn greet(&self, name: String) -> String {
-        self.record_call("greet", vec![ArgumentValue::String(name)]);
-        match self.lookup_return("greet", &[]) {
+        self.record_call("greet", vec![ArgumentValue::String(name.clone())]);
+        match self.lookup_return("greet", &[ArgumentValue::String(name)]) {
             Some(ReturnValue::String(s)) => s,
             _ => String::new(),
         }
@@ -32,7 +32,7 @@ impl Greeter for Mock<dyn Greeter> {
     }
     fn add(&self, a: i64, b: i64) -> i64 {
         self.record_call("add", vec![ArgumentValue::Int(a), ArgumentValue::Int(b)]);
-        match self.lookup_return("add", &[]) {
+        match self.lookup_return("add", &[ArgumentValue::Int(a), ArgumentValue::Int(b)]) {
             Some(ReturnValue::Int(i)) => i,
             _ => 0,
         }
