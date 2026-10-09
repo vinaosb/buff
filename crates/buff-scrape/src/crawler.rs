@@ -263,9 +263,9 @@ fn robots_allowed(crawler: &Crawler, url: &str) -> bool {
     };
     // `host_str()` drops an explicit port, which would send the robots
     // request to the scheme's default port (connection-refused on any
-    // custom-port host → silent fail-open). `origin()` keeps scheme +
-    // host + non-default port together.
-    let robots_url = format!("{}/robots.txt", parsed_seed.origin());
+    // custom-port host → silent fail-open). The origin's ASCII
+    // serialization keeps scheme + host + non-default port together.
+    let robots_url = format!("{}/robots.txt", parsed_seed.origin().ascii_serialization());
     let parsed_target = match url::Url::parse(url) {
         Ok(u) => u,
         Err(_) => return true,
