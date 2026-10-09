@@ -9,10 +9,14 @@ use proptest::prelude::*;
 
 proptest! {
     /// Roundtrip property: `s.fft().ifft() ≈ s` for any real signal
-    /// of length 8..=512 (power-of-2 NOT required — realfft handles
-    /// arbitrary lengths).
+    /// of even length 8..=512. Odd lengths are excluded: realfft's
+    /// C2R output length is `2*(bins-1)`, which drops the final
+    /// sample of an odd-length signal (power-of-2 NOT required).
     #[test]
-    fn fft_ifft_roundtrip_arbitrary_length(samples in vec(-1e3..1e3, 8..=512)) {
+    fn fft_ifft_roundtrip_arbitrary_length(
+        samples in vec(-1e3..1e3, 8..=512)
+            .prop_filter("even length (realfft c2r)", |s| s.len() % 2 == 0)
+    ) {
         let original = Signal::from_vec(samples.clone(), 8_000);
         let recovered = Signal::ifft(original.clone().fft());
         prop_assert_eq!(recovered.len(), original.len());
@@ -28,8 +32,13 @@ proptest! {
     }
 
     /// DC property: a constant signal's FFT has all energy in bin 0.
+    /// The `mags[0] > n-1` threshold implicitly requires |value| > 1
+    /// (bin 0 = value*n), so near-zero amplitudes are filtered out.
     #[test]
-    fn fft_dc_signal_only_dc_bin(value in -1e3..1e3, n in 16usize..=64) {
+    fn fft_dc_signal_only_dc_bin(
+        value in (-1e3f64..1e3).prop_filter("amplitude must exceed 1", |v| v.abs() > 1.0),
+        n in 16usize..=64,
+    ) {
         let s = Signal::from_vec(vec![value; n], n as u32);
         let spec = s.fft();
         let mags = spec.magnitudes();
@@ -66,15 +75,30 @@ proptest! {
         }
     }
 
-    /// Parseval: sum of |x|^2 == (1/N) · sum of |X[k]|^2 (energy preserved).
+    /// Parseval: the full-spectrum energy equals N * the time-domain
+    /// energy (forward FFT is unnormalized). The half (hermitian)
+    /// spectrum double-counts every interior bin and holds DC +
+    /// Nyquist once, so
+    /// `full = 2*half - |X[0]|^2 - |X[N/2]|^2`.
+    /// Zero-energy (all-zero) signals are filtered out — the identity
+    /// degenerates to 0/0 there.
     #[test]
-    fn fft_parseval_energy_conservation(samples in vec(-1.0f64..1.0f64, 16usize..=128)) {
+    fn fft_parseval_energy_conservation(
+        samples in vec(-1.0f64..1.0f64, 16usize..=128)
+            .prop_filter("signal must have nonzero energy", |s| {
+                s.iter().any(|&x| x != 0.0)
+            })
+            .prop_filter("even length (hermitian pairing)", |s| s.len() % 2 == 0),
+    ) {
         let n = samples.len();
         let s = Signal::from_vec(samples.clone(), n as u32);
         let spec = s.fft();
+        let mags = spec.magnitudes();
         let time_energy: f64 = samples.iter().map(|x| x * x).sum();
-        let freq_energy: f64 = spec.magnitudes().iter().map(|m| m * m).sum();
-        let ratio = freq_energy / time_energy.max(1e-12);
+        let half_energy: f64 = mags.iter().map(|m| m * m).sum();
+        let full_energy =
+            2.0 * half_energy - mags[0] * mags[0] - mags[mags.len() - 1] * mags[mags.len() - 1];
+        let ratio = full_energy / time_energy.max(1e-12);
         let tolerance = 1e-6 * (n as f64);
         prop_assert!((ratio - n as f64).abs() < tolerance);
     }

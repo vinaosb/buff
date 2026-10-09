@@ -1,0 +1,13 @@
+---
+source: crates/buff-dsp/tests/snapshots.rs
+expression: format_f64_slice(w.as_slice())
+snapshot_kind: text
+---
+  0.000060
+  0.033392
+  0.332834
+  0.889370
+  0.889370
+  0.332834
+  0.033392
+  0.000060

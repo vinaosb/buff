@@ -210,8 +210,9 @@ fn summarize_reports_correct_peak_and_rms() {
 
 #[test]
 fn display_formats_compactly() {
+    // 44100 INTERLEAVED SAMPLES at 2ch = 22050 frames = 0.500s.
     let buf = AudioBuffer::from_samples(vec![0.0; 44100], 44100, 2).expect("ok");
     let s = format!("{}", buf);
-    assert!(s.starts_with("AudioBuffer(2ch, 44100 Hz,"));
-    assert!(s.contains("44100 frames"));
+    assert!(s.starts_with("AudioBuffer(2ch, 44100 Hz, 0.500s,"));
+    assert!(s.contains("22050 frames"));
 }

@@ -428,11 +428,6 @@ impl AudioBuffer {
                 "slice endpoints must be finite".to_string(),
             ));
         }
-        if start_sec < 0.0 || end_sec < 0.0 {
-            return Err(AudioError::InvalidParam(
-                "slice endpoints must be >= 0".to_string(),
-            ));
-        }
         if start_sec > end_sec {
             return Err(AudioError::InvalidParam(format!(
                 "start_sec ({}) must be <= end_sec ({})",
@@ -440,8 +435,8 @@ impl AudioBuffer {
             )));
         }
         let total = self.duration_secs();
-        let start = start_sec.min(total);
-        let end = end_sec.min(total);
+        let start = start_sec.max(0.0).min(total);
+        let end = end_sec.max(0.0).min(total);
 
         let ch = self.channels as usize;
         let start_frame = (start * self.sample_rate as f64) as usize;
@@ -461,9 +456,16 @@ impl AudioBuffer {
     /// core audio API surface but useful for diagnostics.
     pub fn summarize(&self) -> AudioSummary {
         let peak = self.samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
-        let sum_sq: f64 = self.samples.iter().map(|s| (*s as f64) * (*s as f64)).sum();
+        // fold(0.0, add) instead of .sum(): `Sum for f64` starts at
+        // -0.0, so an empty buffer yields sum_sq = -0.0 and
+        // sqrt(-0.0) = -0.0 would render "rms=-0.0000".
+        let sum_sq: f64 = self
+            .samples
+            .iter()
+            .map(|s| (*s as f64) * (*s as f64))
+            .fold(0.0_f64, |a, b| a + b);
         let n = self.samples.len().max(1);
-        let rms = (sum_sq / n as f64) as f32;
+        let rms = (sum_sq / n as f64).sqrt() as f32;
         AudioSummary {
             frames: self.frames(),
             channels: self.channels,
