@@ -28,6 +28,11 @@ pub struct Pool {
 impl Pool {
     pub async fn connect(url: &str) -> Result<Pool> {
         validate_driver(url)?;
+        // sqlx 0.7+ requires explicit registration of the `Any` driver
+        // registry (drivers are compiled in via crate features, but the
+        // runtime registry starts empty — without this, AnyPool::connect
+        // panics with "No drivers installed"). Idempotent (internal Once).
+        sqlx::any::install_default_drivers();
         let scheme = url.split(':').next().unwrap_or("").to_string();
         let pool = AnyPoolOptions::new()
             .max_connections(8)
