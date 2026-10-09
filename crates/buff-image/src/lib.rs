@@ -318,15 +318,26 @@ impl Image {
     }
 
     /// Convert to grayscale (single-channel luma). Consumes self
-    /// and returns a new `Image` whose pixel format is RGB (the
-    /// `image::DynamicImage::to_luma8` output is re-wrapped as RGB8
-    /// so the Buff surface stays uniform — internally the image is
-    /// 3-channel with R==G==B==luma).
+    /// and returns a new `Image` (internally `Luma8`: one channel
+    /// per pixel, surfaced via `get_pixel` as R==G==B==luma).
     ///
-    /// Uses Rec. 601 luma coefficients: `0.299 R + 0.587 G + 0.114 B`.
+    /// Uses Rec. 601 luma coefficients: `0.299 R + 0.587 G + 0.114 B`,
+    /// computed per pixel via [`Color::luma`]. The conversion is done
+    /// explicitly instead of delegating to `image::DynamicImage::to_luma8`
+    /// because the upstream `image` crate weights luma with the
+    /// Rec. 709/sRGB coefficients (`0.2126 / 0.7152 / 0.0722`), which
+    /// would violate this crate's documented Rec. 601 contract.
     pub fn grayscale(self) -> Image {
-        let luma = image::DynamicImage::ImageLuma8(self.inner.to_luma8());
-        Image { inner: luma }
+        let rgba = self.inner.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let mut luma = image::GrayImage::new(width, height);
+        for (x, y, px) in rgba.enumerate_pixels() {
+            let c = Color::from_rgba(*px);
+            luma.put_pixel(x, y, image::Luma([c.luma()]));
+        }
+        Image {
+            inner: image::DynamicImage::ImageLuma8(luma),
+        }
     }
 
     /// Invert every pixel in place (subtract each channel from 255).

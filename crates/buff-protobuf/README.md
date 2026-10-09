@@ -81,7 +81,9 @@ The MVP uses protobuf's well-known [`google.protobuf.Struct`](https://protobuf.d
 | array | `Value::list_value` (`ListValue`) |
 | object | `Struct { fields }` (`Value::struct_value` for nested) |
 
-Non-object JSON shapes (scalars / arrays) are wrapped in a single-field `Struct { "_value": v }` because protobuf's `Value` message is never a top-level message. The inverse unwrap is automatic on decode.
+Non-object JSON shapes (scalars / arrays) are wrapped in a single-field `Struct { "_value": v }` because protobuf's `Value` message is never a top-level message. The inverse unwrap is automatic on decode. Empty objects take the same wrap: a field-less `Struct` would encode to zero bytes, which is indistinguishable from "no message" on the wire.
+
+Numbers travel the wire as `f64` (protobuf `number_value` is a double), but decode emits whole values within the `i64` range as JSON integers — matching protobuf's canonical JSON mapping — so `42` roundtrips as `42`, not `42.0`.
 
 NaN / Infinity are rejected at encode time because protobuf `Value::number_value` is a finite `f64` (and `NaN != NaN` in IEEE-754 would otherwise silently corrupt roundtrips).
 

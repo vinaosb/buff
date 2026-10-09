@@ -62,6 +62,13 @@ pub enum ImageError {
 
 impl From<image::ImageError> for ImageError {
     fn from(err: image::ImageError) -> Self {
-        ImageError::Codec(err.to_string())
+        match err {
+            // Filesystem failures (missing file, permission denied,
+            // disk full during save, ...) keep the original io::Error
+            // so callers can distinguish them from codec failures
+            // (the blanket arm below).
+            image::ImageError::IoError(e) => ImageError::Io(e),
+            other => ImageError::Codec(other.to_string()),
+        }
     }
 }
