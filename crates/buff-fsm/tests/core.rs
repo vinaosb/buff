@@ -132,7 +132,11 @@ fn guard_allows_transition() {
     assert!(m.can_fire("open"));
     m.fire("open").expect("open");
     assert_eq!(m.current_state(), "opened");
-    assert_eq!(*counter.lock().expect("lock"), 1);
+    // Guards are repeatable `Fn` predicates ("Guards survive (they are `Fn`,
+    // not `FnOnce`)" — src/lib.rs), so they may be evaluated more than once.
+    // Exactly two evaluations here is by design: `can_fire` peeks once to
+    // report pass/fail, then `fire` re-evaluates independently to dispatch.
+    assert_eq!(*counter.lock().expect("lock"), 2);
 }
 
 #[test]
