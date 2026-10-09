@@ -119,7 +119,7 @@ pub fn analyze(source: &str, source_id: SourceId) -> DocumentAnalysis {
     }
 
     for d in &decls {
-        infer_decl(d, &mut diags, &mut symbols, &mut types);
+        infer_decl(d, &decls, &mut diags, &mut symbols, &mut types);
     }
 
     DocumentAnalysis {
@@ -135,6 +135,7 @@ pub fn analyze(source: &str, source_id: SourceId) -> DocumentAnalysis {
 /// recording inferred identifier types into `types`.
 fn infer_decl(
     decl: &Decl,
+    all_decls: &[Decl],
     diags: &mut Vec<Diagnostic>,
     symbols: &mut SymbolIndex,
     types: &mut TypeBindingIndex,
@@ -158,6 +159,21 @@ fn infer_decl(
         for p in &f.params {
             symbols.add_local(&p.name, LocalKind::Param, p.name.span, f.span);
             infer.bind(&p.name.name, Type::Unknown);
+        }
+        // ITER-53B: pre-bind top-level comptime bindings (they lower to
+        // user-visible consts) so references inside functions resolve in
+        // the editor too — parity with buff-lang-check's seeding. Bind as
+        // the evaluated value's Buff type; evaluation failure falls back
+        // to permissive Unknown (the LSP is diagnostic-tolerant).
+        let mut comptime_interp = buff_lang_types::ComptimeInterpreter::with_decls(all_decls);
+        for d in all_decls {
+            if let Decl::ComptimeDecl(c) = d {
+                if let Ok(bindings) = comptime_interp.eval_bindings(&c.body) {
+                    for (name, value) in bindings {
+                        infer.bind(&name, value.buff_type());
+                    }
+                }
+            }
         }
         infer_block(&f.body, f.span, &mut infer, diags, symbols, types);
     }
@@ -427,6 +443,7 @@ pub fn decl_span(decl: &Decl) -> Span {
         Decl::ExternFuncDecl(d) => d.span,
         Decl::ExtendBlock(ext) => ext.span,
         Decl::ImplBlock(_) => Span::dummy(),
+        Decl::ComptimeDecl(c) => c.span,
     }
 }
 

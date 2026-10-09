@@ -103,3 +103,51 @@ fn facts_with_errors_still_lower_successful_values() {
     let items = lower_comptime_facts(&facts).expect("lower ok");
     assert_eq!(items.len(), 1);
 }
+
+// ---------------------------------------------------------------------
+// ITER-53B: top-level `comptime:` declarations (the T53 config form).
+// -----------------------------------------------------------------------
+
+#[test]
+fn top_level_comptime_becomes_user_visible_consts() {
+    use buff_lang_codegen_rust::generate_rust;
+    use buff_lang_error::SourceId;
+    use buff_lang_lexer::tokenize;
+    use buff_lang_parser::parse;
+
+    let src = "comptime:\n    let max_connections = 100\n    let timeout_seconds = 30\n\nfunc main():\n    print(max_connections)\n    print(timeout_seconds)\n";
+    let toks = tokenize(src, SourceId(0)).expect("lexer");
+    let decls = parse(&toks, SourceId(0)).expect("parse");
+    let rust = generate_rust(&decls).expect("codegen");
+
+    assert!(
+        rust.contains("const max_connections: i64 = 100i64;"),
+        "expected user-visible const for max_connections in:\n{rust}"
+    );
+    assert!(
+        rust.contains("const timeout_seconds: i64 = 30i64;"),
+        "expected user-visible const for timeout_seconds in:\n{rust}"
+    );
+    assert!(
+        !rust.contains("__BUFF_COMPTIME_"),
+        "top-level bindings must use user-visible names, not span-keyed internals:\n{rust}"
+    );
+}
+
+#[test]
+fn top_level_comptime_evaluation_error_maps_to_codegen_error() {
+    use buff_lang_codegen_rust::generate_rust;
+    use buff_lang_error::SourceId;
+    use buff_lang_lexer::tokenize;
+    use buff_lang_parser::parse;
+
+    // `foo` is not bound inside the comptime block -> E1210-class failure.
+    let src = "comptime:\n    let x = foo\n\nfunc main():\n    print(x)\n";
+    let toks = tokenize(src, SourceId(0)).expect("lexer");
+    let decls = parse(&toks, SourceId(0)).expect("parse");
+    let err = generate_rust(&decls).expect_err("unbound comptime ident must fail codegen");
+    assert!(
+        err.to_string().contains("comptime"),
+        "error should mention comptime: {err}"
+    );
+}

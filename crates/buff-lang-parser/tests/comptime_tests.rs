@@ -90,3 +90,19 @@ fn parses_comptime_block_followed_by_normal_stmt() {
         panic!("expected FuncDecl");
     }
 }
+
+#[test]
+fn parses_top_level_comptime_block() {
+    // ITER-53B: `comptime:` at TOP level (the T53 config form exercised by
+    // examples/comptime_config.buff, which failed `buff check` before).
+    // The block parses to a Decl-level comptime declaration whose lets
+    // become compile-time constants.
+    let sid = SourceId(9);
+    let src =
+        "comptime:\n    let max_connections = 100\n\nfunc main():\n    print(max_connections)";
+    let toks = tokenize(src, sid).expect("lexer");
+    let decls = parse(&toks, sid).expect("top-level comptime block must parse");
+    assert_eq!(decls.len(), 2);
+    assert!(matches!(decls[0], buff_lang_ast::Decl::ComptimeDecl { .. }));
+    assert!(matches!(decls[1], buff_lang_ast::Decl::FuncDecl(_)));
+}

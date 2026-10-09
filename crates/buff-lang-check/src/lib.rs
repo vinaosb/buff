@@ -495,6 +495,25 @@ fn type_check_func(
     // user-defined types return `None` and stay `Unknown`, which is
     // permissive in the inference rules).
     inferencer.register_function_signatures(all_decls, typeref_to_type);
+    // ITER-53B: pre-bind top-level comptime bindings. Codegen lowers them
+    // to user-visible consts, so references inside functions must resolve
+    // here too — otherwise `print(max_connections)` reports "undefined
+    // variable" while the full pipeline runs fine. Evaluation errors
+    // surface as the same E1210-class diagnostics the codegen path
+    // reports. One interpreter across all blocks = merge semantics.
+    let mut comptime_interp = buff_lang_types::ComptimeInterpreter::with_decls(all_decls);
+    for d in all_decls {
+        if let Decl::ComptimeDecl(c) = d {
+            match comptime_interp.eval_bindings(&c.body) {
+                Ok(bindings) => {
+                    for (name, value) in bindings {
+                        inferencer.bind(&name, value.buff_type());
+                    }
+                }
+                Err(e) => errors.push(e.into()),
+            }
+        }
+    }
     // Pre-bind EVERY parameter. `typeref_to_type` only recognises
     // primitives + Option/Result; user-defined types (struct/enum names)
     // return `None`. Previously the `if let Some(ty) = ...` shape SKIPPED

@@ -196,6 +196,20 @@ impl ComptimeInterpreter {
         Ok(last)
     }
 
+    /// Evaluate a block and return its accumulated `let` bindings
+    /// (name → value). This is the top-level `comptime:` consumption path
+    /// (ITER-53B): codegen turns each binding into a user-visible Rust
+    /// `const` named after the binding. The env is CLONED (not drained)
+    /// so callers can evaluate several blocks against one interpreter
+    /// with merge semantics.
+    pub fn eval_bindings(
+        &mut self,
+        block: &Block,
+    ) -> Result<BTreeMap<String, ComptimeValue>, ComptimeError> {
+        self.eval_block(block)?;
+        Ok(self.env.clone())
+    }
+
     fn eval_stmt(&mut self, stmt: &Stmt) -> Result<ComptimeValue, ComptimeError> {
         match stmt {
             Stmt::LetDecl { name, value, .. } => {
@@ -625,6 +639,9 @@ fn walk_decl(
 ) {
     let body = match decl {
         buff_lang_ast::Decl::FuncDecl(f) => Some(&f.body),
+        // ITER-53B: top-level `comptime:` blocks join the program walk —
+        // their evaluation errors surface exactly like in-function ones.
+        buff_lang_ast::Decl::ComptimeDecl(d) => Some(&d.body),
         _ => None,
     };
     if let Some(b) = body {

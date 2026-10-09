@@ -194,6 +194,9 @@ fn lint_decl(decl: &Decl, out: &mut Vec<Diagnostic>) {
         | Decl::ExternCrateDecl(_)
         | Decl::ExternFuncDecl(_)
         | Decl::ImplBlock(_) => {}
+        // ITER-53B: comptime let-bindings are user-named — lint them like
+        // function-body lets.
+        Decl::ComptimeDecl(c) => lint_block(&c.body, out),
     }
 }
 

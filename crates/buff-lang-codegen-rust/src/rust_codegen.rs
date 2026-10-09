@@ -556,6 +556,16 @@ impl RustCodegen {
             if matches!(decl, Decl::ReexportDecl { .. }) {
                 continue;
             }
+            // T53/ITER-53B: a top-level `comptime:` block evaluates at
+            // compile time — its `let` bindings become user-visible Rust
+            // `const` items, emitted BEFORE any function so every later
+            // item can reference them. Multi-item by design (one const
+            // per binding), following the ExtendBlock multi-item
+            // precedent of extending `items` rather than pushing one.
+            if let Decl::ComptimeDecl(d) = decl {
+                items.extend(crate::comptime::lower_comptime_decl(d, decls)?);
+                continue;
+            }
             // T75: an `extend TYPE { ... }` block lowers to TWO top-level
             // Rust items (an extension-trait declaration + a blanket-free
             // impl). This is the ONLY decl variant whose lowering produces
