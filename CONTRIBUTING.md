@@ -275,3 +275,23 @@ addressing in your PR description so maintainers can track progress.
 
 Contributions are licensed under the same terms as the project:
 [MIT OR Apache-2.0](./LICENSE).
+
+
+## Local fast CI gate (fail before you push)
+
+`scripts/local-ci.ps1` is a diff-aware local gate: it checks only the crates
+your change touches (fmt + clippy `-D warnings` + `cargo test -p <crate>`),
+so the common case finishes in seconds-to-minutes on a warm target dir.
+
+Opt in once per clone:
+
+    git config core.hooksPath .githooks
+
+- `pre-commit`: AGENTS.md header auto-refresh + fmt check on staged crates.
+- `pre-push`: fmt + clippy + tests on every crate changed vs `origin/main`.
+
+The hooks fail closed; automation can bypass with `--no-verify`, but GitHub
+CI (11 required checks via branch protection on `main`) still gates every
+merge. Run manually any time:
+
+    powershell -NoProfile -File scripts/local-ci.ps1 -Scope Push

@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-07-27 (v1.39 real-use-cases launch; v1.25 launch-readiness refresh; originally v0.1 → v1.0 → v1.9 → v1.24 → v1.39)
-**Commit:** 7ac027d (`main`, v1.39 real-use-cases launch — 5 use-case batches + golden harness + CI/pages; v1.0-v1.39 shipped)
-**Branch:** ``main`` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.39.0; v0.1-dev preserved as historical marker)
+**Commit:** 1efa764 (`main`, v1.39 real-use-cases launch — 5 use-case batches + golden harness + CI/pages; v1.0-v1.39 shipped)
+**Branch:** `chore/iter16-local-ci`main`` (tags: v0.1.0, v0.5.0, v1.0.0 … v1.39.0; v0.1-dev preserved as historical marker)
 
 ## OVERVIEW
 
