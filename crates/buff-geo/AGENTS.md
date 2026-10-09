@@ -34,7 +34,7 @@ buff-geo/
 | `Point::new` | `(x: f64, y: f64) -> Point` | Infallible. |
 | `point.x` / `point.y` | `(self) -> f64` | Copy type. |
 | `point.distance_to` | `(self, other: Point) -> f64` | Euclidean. |
-| `point.buffer` | `(self, radius: f64) -> Result<Polygon, GeoError>` | Circle approximation (32 segments). |
+| `point.buffer` | `(self, radius: f64) -> Result<Polygon, GeoError>` | Circle approximation (64 segments). |
 
 ### `LineString` — ordered sequence of points
 
