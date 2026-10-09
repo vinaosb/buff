@@ -61,10 +61,17 @@ impl Language {
         self.0.code().to_string()
     }
 
-    /// The human-readable English name of the language (e.g.
+    /// The human-readable English name (exonym) of the language (e.g.
     /// `"English"`, `"Portuguese"`, `"French"`). Owned `String`.
+    ///
+    /// whatlang's own `Lang::name()` returns the endonym (the language's
+    /// name for itself, e.g. `"Português"`); this crate's documented
+    /// contract is the English exonym, so the value is mapped explicitly
+    /// via [`eng_exonym`]. That mapping is an exhaustive `match` over
+    /// every `whatlang::Lang` variant: adding an upstream variant breaks
+    /// compilation here instead of silently leaking an endonym.
     pub fn name(&self) -> String {
-        self.0.name().to_string()
+        eng_exonym(self.0).to_string()
     }
 
     /// pub(crate) constructor — only [`Text::detect_language`] builds
@@ -76,7 +83,85 @@ impl Language {
 
 impl std::fmt::Display for Language {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.0.name(), self.0.code())
+        write!(f, "{} ({})", eng_exonym(self.0), self.0.code())
+    }
+}
+
+/// Map a `whatlang::Lang` to its English exonym (e.g. `Por` →
+/// `"Portuguese"`). Upstream `Lang::name()` returns endonyms; this
+/// table is the explicit endonym→exonym translation. Arm order and
+/// values follow whatlang 0.16's own `lang_to_eng_name` table.
+fn eng_exonym(lang: whatlang::Lang) -> &'static str {
+    match lang {
+        whatlang::Lang::Epo => "Esperanto",
+        whatlang::Lang::Eng => "English",
+        whatlang::Lang::Rus => "Russian",
+        whatlang::Lang::Cmn => "Mandarin",
+        whatlang::Lang::Spa => "Spanish",
+        whatlang::Lang::Por => "Portuguese",
+        whatlang::Lang::Ita => "Italian",
+        whatlang::Lang::Ben => "Bengali",
+        whatlang::Lang::Fra => "French",
+        whatlang::Lang::Deu => "German",
+        whatlang::Lang::Ukr => "Ukrainian",
+        whatlang::Lang::Kat => "Georgian",
+        whatlang::Lang::Ara => "Arabic",
+        whatlang::Lang::Hin => "Hindi",
+        whatlang::Lang::Jpn => "Japanese",
+        whatlang::Lang::Heb => "Hebrew",
+        whatlang::Lang::Yid => "Yiddish",
+        whatlang::Lang::Pol => "Polish",
+        whatlang::Lang::Amh => "Amharic",
+        whatlang::Lang::Jav => "Javanese",
+        whatlang::Lang::Kor => "Korean",
+        whatlang::Lang::Nob => "Bokmal",
+        whatlang::Lang::Dan => "Danish",
+        whatlang::Lang::Swe => "Swedish",
+        whatlang::Lang::Fin => "Finnish",
+        whatlang::Lang::Tur => "Turkish",
+        whatlang::Lang::Nld => "Dutch",
+        whatlang::Lang::Hun => "Hungarian",
+        whatlang::Lang::Ces => "Czech",
+        whatlang::Lang::Ell => "Greek",
+        whatlang::Lang::Bul => "Bulgarian",
+        whatlang::Lang::Bel => "Belarusian",
+        whatlang::Lang::Mar => "Marathi",
+        whatlang::Lang::Kan => "Kannada",
+        whatlang::Lang::Ron => "Romanian",
+        whatlang::Lang::Slv => "Slovene",
+        whatlang::Lang::Hrv => "Croatian",
+        whatlang::Lang::Srp => "Serbian",
+        whatlang::Lang::Mkd => "Macedonian",
+        whatlang::Lang::Lit => "Lithuanian",
+        whatlang::Lang::Lav => "Latvian",
+        whatlang::Lang::Est => "Estonian",
+        whatlang::Lang::Tam => "Tamil",
+        whatlang::Lang::Vie => "Vietnamese",
+        whatlang::Lang::Urd => "Urdu",
+        whatlang::Lang::Tha => "Thai",
+        whatlang::Lang::Guj => "Gujarati",
+        whatlang::Lang::Uzb => "Uzbek",
+        whatlang::Lang::Pan => "Punjabi",
+        whatlang::Lang::Aze => "Azerbaijani",
+        whatlang::Lang::Ind => "Indonesian",
+        whatlang::Lang::Tel => "Telugu",
+        whatlang::Lang::Pes => "Persian",
+        whatlang::Lang::Mal => "Malayalam",
+        whatlang::Lang::Ori => "Oriya",
+        whatlang::Lang::Mya => "Burmese",
+        whatlang::Lang::Nep => "Nepali",
+        whatlang::Lang::Sin => "Sinhalese",
+        whatlang::Lang::Khm => "Khmer",
+        whatlang::Lang::Tuk => "Turkmen",
+        whatlang::Lang::Aka => "Akan",
+        whatlang::Lang::Zul => "Zulu",
+        whatlang::Lang::Sna => "Shona",
+        whatlang::Lang::Afr => "Afrikaans",
+        whatlang::Lang::Lat => "Latin",
+        whatlang::Lang::Slk => "Slovak",
+        whatlang::Lang::Cat => "Catalan",
+        whatlang::Lang::Tgl => "Tagalog",
+        whatlang::Lang::Hye => "Armenian",
     }
 }
 
