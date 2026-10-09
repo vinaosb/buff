@@ -7,7 +7,7 @@ Lowers Buff AST → Rust source via `syn`/`quote`/`prettyplease`. ~16,004 LOC ac
 ```
 src/
 ├── lib.rs                # 197 lines — generate_rust(), generate_test_rust(), format_file() + re-exports
-├── rust_codegen.rs       # 12,777 lines — RustCodegen visitor: ALL AST→syn lowering (see below)
+├── rust_codegen.rs       # 10,584 lines — RustCodegen visitor: ALL AST→syn lowering (see below)
 ├── multi_crate.rs        # T8 — multi-crate emission (one .rs per Buff module when imports present)
 ├── atomic_analysis.rs    # 1025 lines — T42 atomic promotion (let mut → AtomicI64 fetch_add)
 ├── race_analysis.rs      # 856 lines — T41 race detection in parallel closures
@@ -20,7 +20,7 @@ src/
 └── rust_codegen/         # T105a — submodule split of rust_codegen.rs (11 files, see below)
 ```
 
-### rust_codegen.rs (12,777 lines)
+### rust_codegen.rs (10,584 lines)
 
 Core visitor. Three prelude lowering paths:
 - `lower_prelude_call` (~20 arms for free fns: print, sqrt, sleep, etc.)
