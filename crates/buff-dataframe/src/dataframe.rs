@@ -252,11 +252,12 @@ impl DataFrame {
                 };
                 let indices: Vec<usize> = (0..series.len()).collect();
                 let val = crate::groupby::aggregate(series, &indices, op);
-                let key = "all".to_string();
-                DataFrame::from_rows(
-                    vec!["group".to_string(), col.to_string()],
-                    vec![vec![key, val]],
-                )
+                // Explicit String columns (same contract as `GroupBy::agg`);
+                // `from_rows` would re-infer numeric values away from String.
+                let mut columns = BTreeMap::new();
+                columns.insert("group".to_string(), Series::String(vec!["all".to_string()]));
+                columns.insert(col.to_string(), Series::String(vec![val]));
+                DataFrame::from_parts(columns, vec!["group".to_string(), col.to_string()])
             }
         }
     }

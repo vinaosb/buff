@@ -277,6 +277,19 @@ fn parse_document(xml: &str) -> Result<XmlDocument, XmlError> {
         buf.clear();
     }
 
+    // quick-xml is a streaming tokenizer: it emits Start events and
+    // Eof without validating tag balance, so input like
+    // `<root><unclosed>` reaches EOF without an error event. Per the
+    // crate's error taxonomy (error.rs), an unclosed tag is
+    // `XmlError::Parse` — report the still-open elements.
+    if !stack.is_empty() {
+        let names: Vec<&str> = stack.iter().map(|e| e.name.as_str()).collect();
+        return Err(XmlError::Parse(format!(
+            "unexpected end of input: unclosed element(s): {}",
+            names.join(", ")
+        )));
+    }
+
     match root {
         Some(r) => Ok(XmlDocument { root: r }),
         None => Err(XmlError::NoRootElement),
