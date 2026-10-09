@@ -183,6 +183,74 @@ fn computed_clone_shares_storage() {
 }
 
 #[test]
+fn effect_writing_signal_it_reads_does_not_retrigger_itself() {
+    // ITER-04 regression: an effect that reads AND writes the same signal used
+    // to re-enter itself synchronously via Signal::set -> schedule ->
+    // callback, exhausting the native stack (STATUS_STACK_OVERFLOW, 0xc00000fd).
+    // Chosen semantics: a notification aimed at a currently-executing callback
+    // is dropped, so the effect runs once per external notification.
+    let s = Signal::new(0);
+    let runs = Signal::new(0);
+    let _ = Effect::new({
+        let s = s.clone();
+        let runs = runs.clone();
+        move || {
+            let v = s.get();
+            s.set(v + 1);
+            runs.set(runs.get() + 1);
+        }
+    });
+    assert_eq!(runs.get(), 1);
+    assert_eq!(s.get(), 1);
+
+    // An external change still re-runs the effect exactly once.
+    s.set(100);
+    assert_eq!(runs.get(), 2);
+    assert_eq!(s.get(), 101);
+}
+
+#[test]
+fn mutually_triggering_effects_terminate() {
+    // ITER-04 regression: effect A reads x / writes y while effect B reads
+    // y / writes x. Without the re-entrancy guard the A -> B -> A ping-pong
+    // recursed until the native stack overflowed. The guard drops the
+    // notification aimed at whichever callback is still on the execution
+    // stack, so the cascade terminates.
+    let x = Signal::new(0);
+    let y = Signal::new(0);
+    let a_runs = Signal::new(0);
+    let b_runs = Signal::new(0);
+
+    let _ = Effect::new({
+        let x = x.clone();
+        let y = y.clone();
+        let a_runs = a_runs.clone();
+        move || {
+            let _ = x.get();
+            y.set(1);
+            a_runs.set(a_runs.get() + 1);
+        }
+    });
+    let _ = Effect::new({
+        let y = y.clone();
+        let x = x.clone();
+        let b_runs = b_runs.clone();
+        move || {
+            let _ = y.get();
+            x.set(2);
+            b_runs.set(b_runs.get() + 1);
+        }
+    });
+
+    // Creating B re-runs A once (x changed); A's y.write re-runs B, whose
+    // x.write is dropped because A is still executing. Stable end state:
+    assert_eq!(a_runs.get(), 2);
+    assert_eq!(b_runs.get(), 1);
+    assert_eq!(x.get(), 2);
+    assert_eq!(y.get(), 1);
+}
+
+#[test]
 fn deeply_nested_batch_dedups_correctly() {
     let src = Signal::new(0);
     let runs = Signal::new(0);

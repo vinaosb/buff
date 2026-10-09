@@ -131,7 +131,7 @@ impl<T: Clone + 'static> Computed<T> {
         let cb_for_init = Rc::clone(&invalidate_cb);
         let compute_for_init = Rc::clone(&compute);
         let cell_for_init = Rc::clone(&cell);
-        runtime::with_observer(cb_for_init, || {
+        runtime::run_scoped(&cb_for_init, || {
             let value = compute_for_init();
             cell_for_init.borrow_mut().cached = Some(value);
         });
@@ -156,7 +156,7 @@ impl<T: Clone + 'static> Computed<T> {
         let cb = Rc::clone(&self.invalidate_cb);
         let compute = Rc::clone(&self.compute);
         let cell = Rc::clone(&self.cell);
-        runtime::with_observer(cb, || {
+        runtime::run_scoped(&cb, || {
             let value = compute();
             cell.borrow_mut().cached = Some(value);
         });
@@ -214,15 +214,12 @@ impl Effect {
         F: Fn() + 'static,
     {
         let callback: Callback = Rc::new(body);
-        let cb_for_observer = Rc::clone(&callback);
-        runtime::with_observer(cb_for_observer, || {
-            callback();
-        });
+        runtime::run_scoped(&callback, || callback());
         Self { callback }
     }
 
     pub fn run(&self) {
-        (self.callback)();
+        runtime::run_scoped(&self.callback, || (self.callback)());
     }
 }
 
