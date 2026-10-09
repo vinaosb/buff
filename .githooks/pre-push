@@ -1,0 +1,5 @@
+#!/bin/sh
+# Full local gate (ITER-16): fmt + clippy + tests on changed crates before push
+# (~1-3 min warm). Fail here, not 8 minutes later on GitHub.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-ci.ps1 -Scope Push
+exit $?
