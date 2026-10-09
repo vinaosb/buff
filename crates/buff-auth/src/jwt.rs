@@ -48,6 +48,11 @@ pub fn jwt_decode(token: &str, secret: &str) -> Result<Map<String, Value>, AuthE
         let key = DecodingKey::from_secret(secret_owned.as_bytes());
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = false;
+        // `Validation::new` defaults `required_spec_claims` to {"exp"}, and
+        // jsonwebtoken enforces that set UNCONDITIONALLY (independent of
+        // `validate_exp`). Clear it so tokens without an `exp` claim decode
+        // successfully, matching the documented MVP policy above.
+        validation.required_spec_claims.clear();
         let data = decode::<Value>(&token_owned, &key, &validation)?;
         match data.claims {
             Value::Object(map) => Ok::<Map<String, Value>, AuthError>(map),

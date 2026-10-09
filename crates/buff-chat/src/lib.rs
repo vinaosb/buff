@@ -150,7 +150,7 @@ impl BotInner {
 /// ```
 /// use buff_chat::{Bot, Message, Platform};
 ///
-/// let bot = Bot::new(Platform::Discord, "token").expect("bot");
+/// let bot = Bot::new(Platform::Discord, "token".to_string()).expect("bot");
 /// let _ = bot.command("ping", move |msg| {
 ///     println!("ping from {}: {}", msg.author(), msg.text());
 /// });
