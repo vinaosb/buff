@@ -177,7 +177,11 @@ mod tests {
 
     #[test]
     fn deserialize_garbage_rejected() {
-        let err = deserialize(b"not msgpack data").unwrap_err();
+        // 0xc1 is the one marker the msgpack spec reserves as "never used",
+        // so it must always decode to an error. (The tempting b"not msgpack
+        // data" is NOT garbage: 'n' = 0x6e is a valid positive fixint = 110,
+        // and from_slice ignores trailing bytes.)
+        let err = deserialize(&[0xc1]).unwrap_err();
         assert!(matches!(err, MsgPackError::Decode(_)));
     }
 
