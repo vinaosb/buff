@@ -13,7 +13,7 @@ use buff_fuzz::{run, Strategy};
 
 fn main() {
     let strategy = Strategy::string(64);
-    let summary = run(&strategy, 256, |len| len >= 0 && len <= 255).expect("fuzz run failed");
+    let summary = run(&strategy, 256, |len| (0..=255).contains(&len)).expect("fuzz run failed");
 
     println!("strategy:     {strategy}");
     println!("iterations:   {}", summary.iterations);
