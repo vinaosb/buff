@@ -17,8 +17,8 @@ buff/
 │   ├── buff-lang-ast/                   # Pure AST data nodes (decl/expr/stmt/ty/op/ir/lossless) + T57 byte-exact roundtrip
 │   ├── buff-lang-lexer/                 # Hand-rolled byte-scanner + offside-rule indent tracker
 │   ├── buff-lang-parser/                # Hand-rolled recursive-descent + Pratt (NOT chumsky)
-│   ├── buff-lang-types/                 # Type inference + 12-module analysis suite + prelude + prelude_types (T124b 1919-line stdlib registry)
-│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is ~10.6k lines (largest file in the workspace)
+│   ├── buff-lang-types/                 # Type inference + 12-module analysis suite + prelude + prelude_types (T124b 1,930-line stdlib registry)
+│   ├── buff-lang-codegen-rust/          # AST → syn::File → prettyplease → Rust source (+ race/atomic/gpu_alignment analyses + T124 stdlib lowering); rust_codegen.rs is 2,437 lines after the ITER-31..44 module split (30 src files, ~26k LOC; largest workspace file is now parser stmt/stmt_decl.rs at 2,843 lines)
 │   ├── buff-lang-codegen-wgsl/          # AST → WGSL GPU shaders (T44; the ONE format!() exception to no-raw-string-codegen rule)
 │   ├── buff-lang-codegen-buffhtml/      # RSX template AST → rsx!{} TokenStream (T133-T135; post-format SpanMap side-table)
 │   ├── buff-lang-ast-rsx/               # Pure-data AST for .buffhtml SFC (T133; sibling to buff-lang-ast, separate blast radius)
@@ -67,7 +67,7 @@ buff/
 | Add a new RSX/`.buffhtml` node | `crates/buff-lang-ast-rsx/src/lib.rs` | Ripple: buffhtml-parser + codegen-buffhtml |
 | Add a TokenKind | `crates/buff-lang-lexer/src/token.rs` → `lexer.rs` → parser `stream.rs` | Also check `regex_context()` `/`-disambiguation |
 | Add a prelude/builtin fn (free) | `crates/buff-lang-types/src/prelude.rs` (PreludeFn + return_type) + codegen-rust `lower_prelude_call` | Implicit — no `import` needed |
-| Add a prelude type (DateTime/Regex/URL/etc) | `crates/buff-lang-types/src/prelude_types.rs` (PreludeType + PreludeAssocFn + PreludeInstanceFn) + codegen-rust `lower_prelude_type_assoc_fn` + `extern_crates` BTreeSet | THE 1919-line registry every T124 stdlib task extends |
+| Add a prelude type (DateTime/Regex/URL/etc) | `crates/buff-lang-types/src/prelude_types.rs` (PreludeType + PreludeAssocFn + PreludeInstanceFn) + codegen-rust `lower_prelude_type_assoc_fn` + `extern_crates` BTreeSet | THE 1,930-line registry every T124 stdlib task extends |
 | Add a `buff check` lint | `crates/buff-lang-check/src/naming_lint.rs` + `buff-lang-check/src/lib.rs::check_source` | Standalone typecheck T55 shipped; no codegen needed |
 | Add an LSP capability | `crates/buff-lsp/src/handlers.rs` + `server.rs` capability registration | Pure handlers; only server.rs has I/O |
 | Add a registry endpoint | `crates/buff-registry/src/handlers.rs` + `lib.rs::app()` route arm | axum 0.8 `{name}` path syntax |
@@ -164,7 +164,7 @@ buff-lang-runtime (T38-T50; rayon CPU + wgpu GPU + tokio async; @prefer(gpu) hin
 - **`compile_to_rust` vs `compile_rust_to_exe`** split in the `buff-lang-pipeline` crate: callers can inspect intermediate Rust source before invoking rustc. `.buffhtml` adds `compile_buffhtml_to_rust` with a `SpanMap` side-table for reverse error mapping. (The CLI crate re-exports the pipeline; it no longer has its own pipeline module.)
 - **Standalone typecheck SHIPPED**: `buff check` (T55) at `buff-lang-check/src/lib.rs::check_source()` runs lex → parse → TypeInferencer → naming_lint WITHOUT codegen. (Earlier docs said "post-v1.0 work" — OUTDATED.)
 - **Type-checking is ALSO INSIDE codegen** for `buff build`/`buff run` (TypeInferencer embedded in RustCodegen, consulted at each `let` binding; failures fall back to no annotation).
-- **Prelude**: free fns (`print`, etc.) AND prelude types (`DateTime`, `Regex`, `URL`, `Hash`, `TCP`, etc) are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs` + `prelude_types.rs` (1919-line extensible registry). Codegen-lowered to mature Rust crates (chrono/tracing/regex/toml/rand/base64/sha2/hmac/tokio-tungstenite/etc).
+- **Prelude**: free fns (`print`, etc.) AND prelude types (`DateTime`, `Regex`, `URL`, `Hash`, `TCP`, etc) are implicit (no `import`). Type sigs in `buff-lang-types/src/prelude.rs` + `prelude_types.rs` (1,930-line extensible registry). Codegen-lowered to mature Rust crates (chrono/tracing/regex/toml/rand/base64/sha2/hmac/tokio-tungstenite/etc).
 - **Two parser entry points**: `parse()` fail-fast (production) + `parse_recovering()` accumulating (LSP/`buff check`). Both share `parse_one_decl()` dispatcher.
 - **Three parse-time desugars** (no new AST nodes): `|>` (pipeline) → FuncCall; `?.` (null-conditional) → `and_then` MethodCall + Lambda; `??` (null-coalesce) → BinaryOp.
 - **`buff-ui dev` server** (`crates/buff-lang-cli/src/ui_dev/`): WebSocket live reload + file watcher + Wasm builder (T131). `buff ssr` for server-side rendering (T135 via `dioxus-ssr`).

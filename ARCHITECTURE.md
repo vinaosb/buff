@@ -78,13 +78,13 @@ binding contract (`@group(0) @binding(0/1)` storage buffers, workgroup 64).
 
 The compiler side does GPU-adjacent analysis, but nothing downstream dispatches on
 it: `gpu_alignment` adds `#[repr(C)]` + `bytemuck` derives to structs flowing
-through `par_map`/`par_filter`/`par_reduce` (`rust_codegen.rs:1422`), and
+through `par_map`/`par_filter`/`par_reduce` (`gpu_alignment.rs`), and
 `@prefer(gpu)`/`@force(gpu)` are lowered to `#[doc]` marker attributes
 (`rust_codegen/decl_lowering.rs:707-727`) that no runtime code reads. The runtime's
 dispatch APIs (`decide_with_prefer`, `dispatch_with_prefer`, `dispatch_tiled`,
 `WgpuBackend`, `ColdStartBackend`) have zero callers outside `buff-lang-runtime`
 itself. Emitted user programs reference `buff_lang_runtime::` only for channels:
-`buff_lang_runtime::Channel::new` (`rust_codegen.rs:4594`) and the
+`buff_lang_runtime::Channel::new` (`rust_codegen/prelude_types.rs:1798`) and the
 `Sender`/`Receiver` type mapping. A `par_map` call is emitted verbatim as a method
 call; no rayon or GPU code is injected. Verdict: **test-only**.
 
@@ -181,7 +181,7 @@ Known exceptions, all deliberate and documented:
    frameworks-are-leaves rule.
 3. **`buff-lang-runtime`'s crate name is a stability surface.** `codegen-rust`
    emits the literal token `buff_lang_runtime::Channel::new(...)` into generated
-   user programs (`rust_codegen.rs:4594`; `Sender`/`Receiver` mapping in
+   user programs (`rust_codegen/prelude_types.rs:1798`; `Sender`/`Receiver` mapping in
    `rust_codegen/type_lowering.rs:481-482`). Renaming the crate breaks every
    program ever transpiled — never rename without a compat story.
 4. **`buff-mcp` → `buff-lang-cli` (library).** The only production consumer of
