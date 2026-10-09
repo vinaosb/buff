@@ -68,18 +68,41 @@ fn hamming_window_does_not_reach_zero_at_endpoints() {
 }
 
 #[test]
-fn blackman_window_has_lower_endpoints_than_hann() {
-    // Blackman has wider main lobe but lower side lobes — endpoints
-    // should be lower than Hann's (which are exactly 0).
-    let hann = Window::hann(32);
-    let blackman = Window::blackman(32);
-    let hann_mid = hann.as_slice()[16];
-    let blackman_mid = blackman.as_slice()[16];
-    assert!(blackman_mid > 0.0, "blackman peak should be positive");
-    assert!(
-        blackman_mid < hann_mid,
-        "blackman peak {blackman_mid} should be < hann {hann_mid}"
-    );
+fn blackman_textbook_reference_vector_n8() {
+    // Textbook PERIODIC Blackman (ITER-33 fix):
+    //   w[i] = 0.42 - 0.5*cos(2*PI*i/n) + 0.08*cos(4*PI*i/n)
+    // Hand-computed for n=8 — peak exactly 1.0 at i=4, w[0] exactly 0,
+    // and the first half is a monotone ramp (apodize's symmetric
+    // variant peaked at 0.8894 twice, which is not the textbook
+    // window):
+    //   [0.0, 0.0664, 0.34, 0.7736, 1.0, 0.7736, 0.34, 0.0664]
+    let w = Window::blackman(8);
+    let expected = [0.0_f64, 0.0664, 0.34, 0.7736, 1.0, 0.7736, 0.34, 0.0664];
+    assert_eq!(w.as_slice().len(), 8);
+    let mut max_err: f64 = 0.0;
+    for (got, want) in w.as_slice().iter().zip(expected.iter()) {
+        max_err = max_err.max((got - want).abs());
+    }
+    assert!(max_err < 1e-3, "blackman(8) max_abs_err = {max_err}");
+    assert_eq!(w.as_slice()[0], 0.0, "blackman(8)[0] must be exactly 0");
+    assert_eq!(w.as_slice()[4], 1.0, "blackman(8)[4] must be exactly 1.0");
+
+    // Wrap-around symmetry, same convention as the periodic Hann:
+    // w[i] == w[n-i] for i in 1..n, and a monotone non-decreasing
+    // first half (a double peak means the window is not Blackman).
+    let w32 = Window::blackman(32);
+    let coeffs = w32.as_slice();
+    let n = coeffs.len();
+    assert_eq!(coeffs[0], 0.0, "blackman(32)[0] must be exactly 0");
+    assert_eq!(coeffs[16], 1.0, "blackman(32) peak must be exactly 1.0");
+    for i in 1..n / 2 {
+        let err = (coeffs[i] - coeffs[n - i]).abs();
+        assert!(err < 1e-12, "blackman periodic asymmetry at {i}: err={err}");
+        assert!(
+            coeffs[i] >= coeffs[i - 1] - 1e-12,
+            "blackman first half must be monotone non-decreasing at {i}"
+        );
+    }
 }
 
 #[test]
