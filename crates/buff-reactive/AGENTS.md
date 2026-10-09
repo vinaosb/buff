@@ -49,7 +49,7 @@ tests/
 - ❌ **Time-travel debugging** — deferred to v1.18+.
 - ❌ **v1.9 RSX integration** — out of scope (provide primitives only; RSX integration is a separate task).
 - ❌ **`unwrap`/`expect`/`panic!`** in non-test code — project hard rule.
-- ❌ **Setting a signal you depend on inside an Effect** — causes infinite notification loops; users must avoid this pattern. The runtime does NOT detect cycles for MVP (deferred to v1.18+).
+- ❌ **Setting a signal you depend on inside an Effect** — no longer crashes: since ITER-04 (PR #88) the runtime has a re-entrancy guard (`src/runtime.rs` `RUNNING` stack + `is_running`); `run_notification` DROPS any notification aimed at a callback that is currently executing (dropping, not deferring — the running callback already reads fresh values for any signal it reads after its own write). Self-loops and synchronous write/read cycles are therefore broken by the runtime. Full graph-level cycle detection (reporting a cycle as an error) remains deferred to v1.18+.
 
 ## UNIQUE STYLES
 
