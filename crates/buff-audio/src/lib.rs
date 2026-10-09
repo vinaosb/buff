@@ -421,7 +421,7 @@ impl AudioBuffer {
 
     /// Return a new buffer containing samples from `start_sec` to
     /// `end_sec` (clamped to `[0, duration_secs()]`). Endpoints are
-    /// rounded to the nearest frame boundary.
+    /// truncated to the nearest frame boundary.
     pub fn slice(&self, start_sec: f64, end_sec: f64) -> Result<AudioBuffer, AudioError> {
         if !start_sec.is_finite() || !end_sec.is_finite() {
             return Err(AudioError::InvalidParam(
