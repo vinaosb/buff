@@ -231,8 +231,8 @@ fn build_single_file(
     } else {
         pipeline::compile_to_rust_with_cache(file, use_cache)?
     };
-    pipeline::compile_rust_to_exe_with_speed(
-        &compile_out.rust_file_path,
+    crate::project_pipeline::link_single_exe(
+        &compile_out,
         &stem_output,
         file,
         mode,
@@ -306,6 +306,7 @@ fn build_project(release: bool, minimal: bool, fast: bool, target: Option<&str>)
         CargoMode::Build,
         build_mode,
         target,
+        None,
     )?;
 
     let mode_str = mode_label(build_mode);
