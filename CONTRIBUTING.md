@@ -283,6 +283,15 @@ Contributions are licensed under the same terms as the project:
 your change touches (fmt + clippy `-D warnings` + `cargo test -p <crate>`),
 so the common case finishes in seconds-to-minutes on a warm target dir.
 
+> **Windows note:** `cargo fmt --check --all` / `cargo fmt --all` fails on
+> Windows with os error 206 (the filename or extension is too long - cargo
+> hands rustfmt one command line for the whole 73-crate workspace on long
+> paths, exceeding the CreateProcess limit). On Windows use
+> `scripts/fmt-all.ps1` instead of `cargo fmt --all`: it loops
+> `cargo fmt --check -p <crate>` per crate, exits nonzero listing failures,
+> and accepts `-Fix` to apply the fixes. `local-ci.ps1 -Scope All` already
+> fmts per-crate for the same reason. Linux (GitHub CI) is unaffected.
+
 Opt in once per clone:
 
     git config core.hooksPath .githooks
