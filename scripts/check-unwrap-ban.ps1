@@ -52,7 +52,9 @@ $violations = @( )
 
 $srcFiles = Get-ChildItem -Path (Join-Path $Root "crates") -Recurse -Filter *.rs |
     Where-Object {
-        $_.FullName -notmatch '\\tests\\|\\examples\\|\\snapshots\\|\\templates\\'
+        # Separator-agnostic so the SAME pattern excludes on Windows local
+        # runs (backslash) and Linux CI runners (forward slash).
+        $_.FullName -notmatch '[\\/](tests|examples|snapshots|templates)[\\/]'
     }
 
 foreach ($f in $srcFiles) {
