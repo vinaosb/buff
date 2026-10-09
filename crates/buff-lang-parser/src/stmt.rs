@@ -1184,7 +1184,13 @@ pub fn parse_if_expr(stream: &mut TokenStream<'_>) -> Result<Expr, ParseError> {
     let mut end = then_block.span.end;
 
     // Optional else: `else BLOCK` or `else if ...` (chains).
-    let else_block = if matches!(stream.peek_kind(), Some(TokenKind::KwElse)) {
+    //
+    // ITER-36: the else is detected with `peek_kind_before_dedent` so a
+    // leftover `Dedent` (emitted when the then-arm's LAST statement was
+    // itself a layout block) blocks the attachment — the else belongs to an
+    // OUTER chain member then, and stealing it here used to swallow the
+    // rest of the enclosing block (tests/dedent_else_chain.rs).
+    let else_block = if matches!(stream.peek_kind_before_dedent(), Some(TokenKind::KwElse)) {
         stream.advance(); // consume `else`
         if matches!(stream.peek_kind(), Some(TokenKind::KwIf)) {
             // `else if ...` — recurse (handles both `else if let` chains and
