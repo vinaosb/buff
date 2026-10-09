@@ -34,8 +34,17 @@ impl Pool {
         // panics with "No drivers installed"). Idempotent (internal Once).
         sqlx::any::install_default_drivers();
         let scheme = url.split(':').next().unwrap_or("").to_string();
+        // SQLite `:memory:` databases are per-connection: with N > 1 pooled
+        // connections, CREATE/INSERT/SELECT can land on unrelated in-memory
+        // databases ("no such table"). One connection gives the pool a single
+        // consistent database; concurrent acquirers merely serialize.
+        let max_connections = if scheme == "sqlite" && url.contains(":memory:") {
+            1
+        } else {
+            8
+        };
         let pool = AnyPoolOptions::new()
-            .max_connections(8)
+            .max_connections(max_connections)
             .connect(url)
             .await
             .map_err(DbError::from)?;

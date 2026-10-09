@@ -12,7 +12,7 @@ async fn pool_connect_sqlite_memory() {
     let pool = Pool::connect("sqlite::memory:").await;
     assert!(pool.is_ok(), "sqlite::memory: should connect");
     let pool = pool.unwrap();
-    assert_eq!(pool.url_scheme(), "SQLite");
+    assert_eq!(pool.url_scheme(), "sqlite");
 }
 
 #[tokio::test]
