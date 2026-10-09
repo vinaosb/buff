@@ -26,12 +26,31 @@ respected if already set (workers use C:\ct).
 [CmdletBinding()]
 param(
     [ValidateSet('Auto', 'Commit', 'Push', 'All')]
-    [string]$Scope = 'Auto'
+    [string]$Scope = 'Auto',
+    # Ring/sqlite-family crates whose native deps cannot link on THIS Windows
+    # host (MSVC 18 Insiders vs VS2022 SDK mismatch). Their clippy/test steps
+    # are skipped with a warning. GitHub CI (ubuntu/windows/macos) is their
+    # gate. fmt still runs (rustfmt never links). -NoSkipUnlinkable forces
+    # the full treatment (for hosts where they DO link).
+    [switch]$NoSkipUnlinkable
 )
 
-# NOTE: deliberately NOT setting $ErrorActionPreference='Stop' — under PS 5.1
+# NOTE: deliberately NOT setting $ErrorActionPreference='Stop' - under PS 5.1
 # that turns native stderr chatter (e.g. cargo's "Blocking waiting for file
 # lock") into terminating exceptions. Gate decisions use $LASTEXITCODE only.
+
+# Host-specific unlinkable set (see param docs). Prune when the toolchain env
+# is fixed; extend when a new crate grows a cc-rs/ring/sqlite dependency.
+$script:Unlinkable = @('buff-auth', 'buff-chat', 'buff-db', 'buff-email', 'buff-http-client', 'buff-mcp', 'buff-registry', 'buff-scrape', 'buffup', 'buff-web3')
+
+function Get-GateCrates([string[]]$All) {
+    if ($NoSkipUnlinkable) { return , $All }
+    $skip = @($All | Where-Object { $script:Unlinkable -contains $_ })
+    foreach ($s in $skip) {
+        Write-Host ("[local-ci] SKIP clippy/tests for {0}: host cannot link it (fmt still checked) - CI is its gate." -f $s) -ForegroundColor Yellow
+    }
+    return , @($All | Where-Object { $script:Unlinkable -notcontains $_ })
+}
 
 # --- locate cargo ------------------------------------------------------------
 $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
@@ -119,7 +138,7 @@ if ($Scope -ne 'Commit') {
     Write-Host '[local-ci] clippy ...' -NoNewline
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $clippyBad = @()
-    foreach ($c in $crates) {
+    foreach ($c in (Get-GateCrates $crates)) {
         $cout = & $cargo clippy -p $c --all-targets -- -D warnings 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             $clippyBad += $c
@@ -131,6 +150,7 @@ if ($Scope -ne 'Commit') {
     if ($clippyBad.Count -gt 0) {
         Write-Host ' FAIL' -ForegroundColor Red
         Write-Host ("[local-ci] clippy failed in: {0}" -f ($clippyBad -join ', '))
+        Write-Host '[local-ci] hint: impossible-looking output? cargo clean -p <crate> and retry (stale worktree binaries bake foreign paths).'
         $failures += 'clippy'
     } else {
         Write-Host (" ok ({0:N1}s)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
@@ -142,7 +162,7 @@ if ($Scope -ne 'Commit') {
     Write-Host '[local-ci] tests ...' -NoNewline
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $testBad = @()
-    foreach ($c in $crates) {
+    foreach ($c in (Get-GateCrates $crates)) {
         $out = & $cargo test -p $c 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             $testBad += $c
@@ -153,6 +173,7 @@ if ($Scope -ne 'Commit') {
     }
     if ($testBad.Count -gt 0) {
         Write-Host ("[local-ci] tests failed in: {0}" -f ($testBad -join ', '))
+        Write-Host '[local-ci] hint: insta "+new results" everywhere / manifest-dir errors? cargo clean -p <crate> and retry (stale worktree binaries bake foreign paths).'
         $failures += 'tests'
     } else {
         Write-Host (" ok ({0:N1}s)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
