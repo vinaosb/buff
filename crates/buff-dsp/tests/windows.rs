@@ -16,14 +16,19 @@ fn hann_t11_reference_vector_n8() {
 }
 
 #[test]
-fn hann_window_is_symmetric() {
+fn hann_window_is_periodic_symmetric() {
+    // Periodic Hann (w[i] = 0.5 - 0.5*cos(2*PI*i/n)): strict mirror
+    // symmetry coeffs[i] == coeffs[n-1-i] does NOT hold (w[0] = 0 but
+    // w[n-1] = w[1] > 0). The periodic convention instead gives
+    // wrap-around symmetry: w[i] == w[n-i] for i in 1..n.
     let w = Window::hann(32);
     let coeffs = w.as_slice();
     let n = coeffs.len();
-    for i in 0..n / 2 {
-        let err = (coeffs[i] - coeffs[n - 1 - i]).abs();
-        assert!(err < 1e-12, "hann asymmetry at {i}: err={err}");
+    for i in 1..n / 2 {
+        let err = (coeffs[i] - coeffs[n - i]).abs();
+        assert!(err < 1e-12, "hann periodic asymmetry at {i}: err={err}");
     }
+    assert_eq!(coeffs[0], 0.0, "periodic hann must start at exactly 0");
 }
 
 #[test]

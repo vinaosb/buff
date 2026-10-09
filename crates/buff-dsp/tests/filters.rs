@@ -9,10 +9,13 @@ use std::f64::consts::PI;
 #[test]
 fn lowpass_passes_dc_attenuates_nyquist() {
     // A low-pass at 100 Hz with sr=1000 should pass DC (gain≈1) and
-    // heavily attenuate Nyquist (500 Hz).
+    // heavily attenuate Nyquist (500 Hz). 2048 samples so the biquad's
+    // startup transient is a negligible fraction of the RMS window —
+    // at 64 samples the unsettled head alone pulls dc_gain below 0.99.
     let sr = 1_000u32;
-    let dc = Signal::from_vec(vec![1.0; 64], sr);
-    let nyq = Signal::sine(sr as f64 / 2.0 * 0.95, sr, 64);
+    let n = 2_048usize;
+    let dc = Signal::from_vec(vec![1.0; n], sr);
+    let nyq = Signal::sine(sr as f64 / 2.0 * 0.95, sr, n);
     let dc_out = dc.lowpass(100.0);
     let nyq_out = nyq.lowpass(100.0);
     let dc_gain = rms(dc_out.as_slice()) / rms(dc.as_slice()).max(1e-9);

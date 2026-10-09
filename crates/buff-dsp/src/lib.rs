@@ -258,7 +258,10 @@ impl Spectrum {
 // ---------------------------------------------------------------------------
 
 impl Window {
-    /// Hann window of length `n`. Symmetric (periodic in `n-1`).
+    /// Hann window of length `n`. Periodic:
+    /// `w[i] = 0.5 - 0.5 * cos(2*PI*i/n)` — denominator `n`, not
+    /// `n-1`, so `w[0] == 0` and `w[n-1] == w[1]` (the STFT / COLA
+    /// convention).
     ///
     /// Matches the T11 acceptance-scenario reference vector
     /// `[0, 0.146, 0.5, 0.854, 1.0, 0.854, 0.5, 0.146]` for `n=8`
@@ -295,12 +298,24 @@ impl Window {
 }
 
 fn compute_window(kind: WindowKind, n: usize) -> Vec<f64> {
+    // `apodize` panics for `size <= 1` (`assert!(1 < size)`); a
+    // 1-tap window cannot shape anything, so the identity
+    // coefficient is the only sensible degenerate result.
+    if n < 2 {
+        return vec![1.0; n];
+    }
     // `apodize` ships iterator-based window ctors: `hanning_iter(n)`,
     // `hamming_iter(n)`, `blackman_iter(n)` all yield `f64` coefficients
     // in `[0, 1]`. The iterators are exact length `n` — we `.take(n)` as
     // a defensive measure (no panic if a future bump changes semantics).
     let coeffs: Vec<f64> = match kind {
-        WindowKind::Hann => apodize::hanning_iter(n).take(n).collect(),
+        // Hand-rolled PERIODIC Hann (w[i] = 0.5 - 0.5*cos(2*PI*i/n)):
+        // apodize's `hanning_iter` computes the SYMMETRIC variant
+        // (denominator n-1), which does not match the T11 reference
+        // vector and breaks the STFT/COLA convention.
+        WindowKind::Hann => (0..n)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos())
+            .collect(),
         WindowKind::Hamming => apodize::hamming_iter(n).take(n).collect(),
         WindowKind::Blackman => apodize::blackman_iter(n).take(n).collect(),
     };
@@ -605,7 +620,9 @@ mod externs {
 
     /// Inverse FFT of a hermitian `&[Complex]` spectrum. Returns a
     /// real time-domain signal of length `2 * (bins - 1)` or `None`
-    /// on panic. Empty input → empty `Vec`.
+    /// on panic. Empty input → empty `Vec`. The raw C2R output is
+    /// normalized by `1/n` so that `s.fft().ifft() ≈ s` (realfft's
+    /// inverse transform is unnormalized).
     pub(super) fn dsp_fft_inverse(input: &[Complex], _sample_rate: u32) -> Option<Vec<f64>> {
         let bins = input.len();
         if bins == 0 {
@@ -622,7 +639,7 @@ mod externs {
             c2r.process(&mut complex_buf, &mut real_buf)
         }));
         match r {
-            Ok(Ok(())) => Some(real_buf),
+            Ok(Ok(())) => Some(real_buf.iter().map(|v| v / n as f64).collect()),
             Ok(Err(_)) => Some(Vec::new()),
             Err(_) => None,
         }
