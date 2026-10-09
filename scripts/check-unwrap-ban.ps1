@@ -27,6 +27,9 @@ $Allowlist = @(
 )
 
 function IsAllowed([string]$file, [string]$line) {
+    # Normalize to backslashes so the allowlist matches on BOTH Windows
+    # local runs and Linux CI runners (CI paths use forward slashes).
+    $file = $file -replace '/', '\'
     foreach ($e in $Allowlist) {
         $parts = $e -split '\|', 3
         if ($file.Contains($parts[0]) -and $line.Contains($parts[1])) {
