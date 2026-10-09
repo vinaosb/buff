@@ -34,7 +34,48 @@ use syn::{
 };
 
 use buff_lang_error::{CodegenError, Diagnostic, ErrorCode, Span as BuffSpan};
-use buff_lang_types::{ComptimeFacts, ComptimeValue};
+use buff_lang_types::{ComptimeFacts, ComptimeInterpreter, ComptimeValue};
+
+/// Lower a top-level `comptime:` declaration (ITER-53B): evaluate the
+/// block with the comptime interpreter and emit one USER-VISIBLE Rust
+/// `const NAME: Ty = value;` item per `let` binding (unlike
+/// [`lower_comptime_facts`], which emits internal `__BUFF_COMPTIME_*`
+/// consts keyed by span offset — that path serves in-function blocks,
+/// where bindings are referenced by the original names and rewiring is
+/// deferred). Evaluated bindings are emitted in deterministic BTreeMap
+/// order; evaluation failure maps its diagnostic to [`CodegenError`].
+pub fn lower_comptime_decl(
+    decl: &buff_lang_ast::ComptimeDecl,
+    all_decls: &[buff_lang_ast::Decl],
+) -> Result<Vec<Item>, CodegenError> {
+    let mut interp = ComptimeInterpreter::with_decls(all_decls);
+    let bindings = interp
+        .eval_bindings(&decl.body)
+        .map_err(|e| CodegenError::new(e.diagnostic))?;
+    bindings
+        .iter()
+        .map(|(name, value)| lower_named_const(name, value))
+        .collect()
+}
+
+/// One `const NAME: Ty = expr;` item named after the user's binding.
+fn lower_named_const(name: &str, value: &ComptimeValue) -> Result<Item, CodegenError> {
+    let ident = syn::Ident::new(name, ProcSpan::call_site());
+    let ty = rust_type_for(value);
+    let expr = rust_expr_for(value, BuffSpan::dummy())?;
+    Ok(Item::Const(ItemConst {
+        attrs: Vec::new(),
+        vis: Visibility::Inherited,
+        const_token: Const::default(),
+        ident,
+        generics: syn::Generics::default(),
+        colon_token: Colon::default(),
+        ty: Box::new(ty),
+        eq_token: Default::default(),
+        expr: Box::new(expr),
+        semi_token: Semi::default(),
+    }))
+}
 
 /// Lower every value in `facts` to a top-level Rust `const` item.
 ///

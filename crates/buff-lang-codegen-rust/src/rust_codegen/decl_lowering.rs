@@ -147,6 +147,10 @@ impl RustCodegen {
             // reusing the T26 derive helper.
             Decl::EnumDecl(e) => Ok(Item::Enum(self.lower_enum_decl(e)?)),
             Decl::ImportDecl { .. } => Err(self.unsupported("import codegen")),
+            // ITER-53B: top-level comptime blocks are special-cased in
+            // `generate()` (evaluated to multiple const items). Keep a
+            // defensive arm for direct callers, mirroring ReexportDecl.
+            Decl::ComptimeDecl { .. } => Err(self.unsupported("top-level comptime codegen")),
             Decl::ModuleDecl { .. } => Err(self.unsupported("module codegen")),
             // T93: trait declarations lower to a Rust `syn::ItemTrait`.
             // Required methods (MethodSig) become bodyless trait method

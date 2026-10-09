@@ -369,6 +369,7 @@ fn item_from_decl(decl: &Decl, src: &str, lines: &LineTable, is_pub: bool) -> Op
         | Decl::ExtendBlock(_)
         | Decl::ExportDecl(_)
         | Decl::ImplBlock(_) => return None,
+        Decl::ComptimeDecl(_) => return None,
     };
     let anchor = format!("{}-{}", kind.label(), name);
     let doc = doc_comment_for(src, lines, span.start);

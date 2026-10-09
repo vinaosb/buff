@@ -1039,7 +1039,11 @@ fn parse_defer(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
     Ok(Stmt::Defer { expr, span })
 }
 
-fn parse_comptime_block(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+/// Parse the `comptime` keyword + block, returning the raw parts (shared by
+/// the statement-level wrapper and the top-level declaration route).
+pub(crate) fn parse_comptime_block_parts(
+    stream: &mut TokenStream<'_>,
+) -> Result<(Block, Span), ParseError> {
     let source_id = stream.source_id();
     let ct_tok = stream.advance().ok_or_else(|| {
         ParseError::new(Diagnostic::error(
@@ -1050,6 +1054,11 @@ fn parse_comptime_block(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError
     let start = ct_tok.span.start;
     let body = parse_block(stream)?;
     let span = Span::new(start, body.span.end, source_id);
+    Ok((body, span))
+}
+
+fn parse_comptime_block(stream: &mut TokenStream<'_>) -> Result<Stmt, ParseError> {
+    let (body, span) = parse_comptime_block_parts(stream)?;
     Ok(Stmt::ComptimeBlock { body, span })
 }
 

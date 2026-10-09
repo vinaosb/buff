@@ -625,7 +625,8 @@ fn decl_item_name(decl: &Decl) -> Option<String> {
         | Decl::ExternCrateDecl(_)
         | Decl::ExternFuncDecl(_)
         | Decl::ExtendBlock(_)
-        | Decl::ImplBlock(_) => None,
+        | Decl::ImplBlock(_)
+        | Decl::ComptimeDecl(_) => None,
     }
 }
 

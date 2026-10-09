@@ -129,6 +129,7 @@ impl RenameWalker {
     fn rename_decl(&mut self, decl: &mut Decl) {
         match decl {
             Decl::FuncDecl(f) => self.rename_func(f),
+            Decl::ComptimeDecl(c) => self.rename_block(&mut c.body),
             Decl::StructDecl(s) => {
                 self.maybe_rename(&mut s.name);
                 for (fname, _) in &mut s.fields {

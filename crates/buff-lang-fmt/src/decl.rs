@@ -26,6 +26,13 @@ impl<'a> Formatter<'a> {
                 let _ = write!(self.buf, "module {};", m.name);
             }
             Decl::TraitDecl(t) => self.write_trait(t),
+            // ITER-53B: top-level `comptime:` block — layout form like a
+            // bodyless func header followed by the indented block.
+            Decl::ComptimeDecl(c) => {
+                self.write_indent();
+                self.raw("comptime:");
+                self.write_block_body(&c.body);
+            }
             Decl::ExportDecl(e) => self.write_export(e),
             Decl::ReexportDecl(r) => {
                 self.write_indent();

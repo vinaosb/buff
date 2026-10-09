@@ -134,6 +134,28 @@ pub enum Decl {
     /// [`RustCodegen::generate`] — it goes through the normal `lower_decl`
     /// path.
     ImplBlock(ImplBlock),
+    /// A top-level `comptime:` block — the T53 compile-time config form
+    /// (ITER-53B).
+    ///
+    /// The layout twin of [`Stmt::ComptimeBlock`] at declaration position:
+    /// `comptime:` followed by an indented block of compile-time
+    /// statements. Codegen evaluates the block via the comptime machinery
+    /// and emits one Rust `const` item per extracted let-binding; the
+    /// block leaves no runtime trace.
+    ComptimeDecl(ComptimeDecl),
+}
+
+/// Payload of [`Decl::ComptimeDecl`]: a top-level `comptime:` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComptimeDecl {
+    pub body: Block,
+    pub span: Span,
+}
+
+impl fmt::Display for ComptimeDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "comptime {{ {} stmts }}", self.body.stmts.len())
+    }
 }
 
 impl fmt::Display for Decl {
@@ -151,6 +173,7 @@ impl fmt::Display for Decl {
             Decl::ExternFuncDecl(d) => write!(f, "{d}"),
             Decl::ExtendBlock(d) => write!(f, "{d}"),
             Decl::ImplBlock(d) => write!(f, "{d}"),
+            Decl::ComptimeDecl(d) => write!(f, "{d}"),
         }
     }
 }
@@ -176,6 +199,13 @@ impl Decl {
             Decl::ExternFuncDecl(d) => json!({ "type": "ExternFuncDecl", "decl": d.to_json() }),
             Decl::ExtendBlock(d) => json!({ "type": "ExtendBlock", "decl": d.to_json() }),
             Decl::ImplBlock(d) => json!({ "type": "ImplBlock", "decl": d.to_json() }),
+            Decl::ComptimeDecl(d) => json!({
+                "type": "ComptimeDecl",
+                "decl": {
+                    "stmts": d.body.stmts.len(),
+                    "span": { "start": d.span.start, "end": d.span.end },
+                },
+            }),
         }
     }
 }

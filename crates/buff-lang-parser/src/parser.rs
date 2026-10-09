@@ -20,7 +20,7 @@
 //! same per-iteration dispatch logic via the internal [`parse_one_decl`]
 //! helper, so they agree on what counts as a top-level declaration.
 
-use buff_lang_ast::Decl;
+use buff_lang_ast::{ComptimeDecl, Decl};
 use buff_lang_error::{Diagnostic, ParseError, SourceId};
 use buff_lang_lexer::TokenKind;
 
@@ -263,6 +263,20 @@ fn parse_one_decl(stream: &mut TokenStream) -> Result<Option<Decl>, ParseError> 
                 format!("attributes must precede a `func` declaration, found `{found}`"),
                 span,
             )))
+        }
+        // T53/ITER-53B: a top-level `comptime:` block — the compile-time
+        // config form (examples/comptime_config.buff). `comptime` is NOT a
+        // reserved keyword: route only when immediately followed by a block
+        // introducer, mirroring the statement-level rule in parse_statement.
+        Some(TokenKind::Ident(s))
+            if s == "comptime"
+                && matches!(
+                    stream.peek_second_kind(),
+                    Some(TokenKind::Colon) | Some(TokenKind::LBrace)
+                ) =>
+        {
+            let (body, span) = crate::stmt::parse_comptime_block_parts(stream)?;
+            Ok(Some(Decl::ComptimeDecl(ComptimeDecl { body, span })))
         }
         other => {
             let span = stream
