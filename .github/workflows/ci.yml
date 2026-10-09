@@ -116,10 +116,12 @@ jobs:
 
   # ── Test-framework (advisory, ubuntu only) ──────────────────────────────────
   # P0.11: Framework crate tests are continue-on-error (pre-existing API drift).
+  # 25-min cap: any future wedge clean-fails the job instead of stalling to the
+  # 1h run-level cancel (actors shutdown-deadlock incident).
   test-framework:
     name: cargo test (framework)
     continue-on-error: true
-    timeout-minutes: 60
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4 # v4
