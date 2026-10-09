@@ -1128,7 +1128,8 @@ buff-reactive = { path = "crates/buff-reactive" }
 # equivalent). The MVP wraps the `validator` crate's free-standing
 # trait validators (email / url / length / range / regex) — the
 # `derive` macro feature is OFF per the T29 must-not #1 ("no
-# compile-time macro validation"). The `unicode` feature is ON for
+# compile-time macro validation"). The `unic` feature (unicode-aware
+# char counting) is ON for
 # proper char-counting in length rules (mirrors the workspace's
 # unicode-aware stance via `unicode-segmentation`). Pure-Rust, no
 # native C deps, no cc-rs — matches the "no C library, no Docker"
@@ -1146,7 +1147,7 @@ buff-reactive = { path = "crates/buff-reactive" }
 # rand 0.8 conservative-pin philosophy already in use across the
 # workspace). The `card` feature is OFF (no credit-card validation
 # in MVP — not on the T29 surface).
-validator = { version = "0.20", default-features = false, features = ["unicode"] }
+validator = { version = "0.20", default-features = false, features = ["unic"] }
 # T29: `buff-validate` workspace path dep — mirrors the buff-image /
 # buff-audio / buff-dataframe / buff-template / buff-web / buff-
 # reactive pattern so any future consumer (codegen-lowered

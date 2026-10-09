@@ -36,7 +36,7 @@ Total: **~1100 LOC** (well under the 2500 cap).
 | Change the panic-isolation boundary | Cross-reference `crates/buff-lang-ffi-guide/GUIDE.md` R6; every `World::*` body wraps `catch_unwind` |
 | Audit FFI safety | All 6 rules — R1 no raw ptrs, R2 Rust-owned heap, R3 Result mapping, R4 Send+'static, R5 no lifetimes, R6 catch_unwind |
 | Add a snapshot test | `tests/snapshots/<name>.snap` + new `#[test]` in `tests/integration.rs` |
-| Find what backends hecs | `Cargo.toml` (the single `hecs = "0.10"` line) + every `self.inner.*` call in `src/world.rs` |
+| Find what backends hecs | `Cargo.toml` (the single `hecs.workspace = true` line inheriting the root pin) + every `self.inner.*` call in `src/world.rs` |
 
 ## CONVENTIONS (this crate only)
 

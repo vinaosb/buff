@@ -47,7 +47,7 @@ path = "src/lib.rs"
 #
 # - `thiserror` for the `ValidationError` enum derive (mirrors the
 #   buff-image / buff-dataframe / buff-tensor error pattern).
-validator = { version = "0.20", default-features = false, features = ["unic"] }
+validator.workspace = true
 serde_json.workspace = true
 regex.workspace = true
 thiserror.workspace = true

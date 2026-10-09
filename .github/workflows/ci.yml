@@ -68,6 +68,26 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check --all
 
+  # --- Conventions lint (HARD GATE, ITER-41) ---------------------------------
+  # Mechanizes the Cargo.toml conventions previously enforced only by prose
+  # (root AGENTS.md): (1) every dependency entry uses `workspace = true`,
+  # (2) no [features]/[lints]/[profile.*] sections in crate manifests,
+  # (3) version-tier sanity (core 1.2.0 / tooling+framework 1.0.0 /
+  # buff-dataframe 2.0.0), (4) per-crate AGENTS.md presence.
+  # Validator: scripts/check-conventions.ps1 (ASCII-only, PS 5.1-compatible;
+  # runs under pwsh on the Linux runner). Not yet a branch-protection
+  # required check - promoted after it proves stable.
+  conventions-lint:
+    name: Conventions lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4 # v4
+      - name: Run conventions validator
+        shell: pwsh
+        run: ./scripts/check-conventions.ps1
+
   # ── Clippy lint (medium speed) ──────────────────────────────────────────────
   clippy:
     name: cargo clippy

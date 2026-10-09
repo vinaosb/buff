@@ -56,7 +56,8 @@ path = "src/lib.rs"
 # linking boundary (single-file `buff run` rustc path does NOT link hecs;
 # cargo-project wiring is deferred). Snapshots + extern_crates set is the
 # verifiable contract.
-hecs = "0.10"
+# ITER-41: the pin lives in root [workspace.dependencies] (hecs 0.10).
+hecs.workspace = true
 # T12: `thiserror` for the `EcsError` enum (ComponentMissing /
 # EntityMissing / SystemFailed). Mirrors buff-jupyter / buff-repl /
 # buff-lsp / buff-dap precedent: small, focused error enum propagated up
