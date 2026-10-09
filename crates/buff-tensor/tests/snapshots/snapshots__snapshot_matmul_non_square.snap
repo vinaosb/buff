@@ -1,0 +1,6 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 59
+expression: "format!(\"c shape={:?} c data={:?}\", c.shape().as_slice(), c.as_slice(),)"
+---
+c shape=[2, 2] c data=[58.0, 64.0, 139.0, 154.0]

@@ -1,0 +1,6 @@
+---
+source: crates/buff-simd/tests/core.rs
+assertion_line: 196
+expression: "format!(\"{chain}\")"
+---
+28

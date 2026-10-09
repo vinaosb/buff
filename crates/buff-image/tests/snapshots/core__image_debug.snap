@@ -1,0 +1,6 @@
+---
+source: crates/buff-image/tests/core.rs
+assertion_line: 249
+expression: "format!(\"{img}\")"
+---
+Image(4x4, Rgba)

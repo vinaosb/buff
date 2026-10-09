@@ -1,0 +1,6 @@
+---
+source: crates/buff-geo/tests/core.rs
+assertion_line: 270
+expression: "format!(\"{poly}\")"
+---
+Polygon(5 vertices)

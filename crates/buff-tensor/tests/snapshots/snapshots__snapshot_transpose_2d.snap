@@ -1,0 +1,7 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 88
+expression: "format!(\"input shape={:?} input data={:?}\\noutput shape={:?} output data={:?}\",\nt.shape().as_slice(), t.as_slice(), tt.shape().as_slice(), tt.as_slice(),)"
+---
+input shape=[2, 3] input data=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+output shape=[3, 2] output data=[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]

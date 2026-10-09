@@ -1,0 +1,6 @@
+---
+source: crates/buff-resilience/tests/core.rs
+assertion_line: 360
+expression: "format!(\"{p:?}\")"
+---
+Pipeline { retry: Some(RetryPolicy { max_attempts: 3, initial_delay: 50ms, backoff_factor: 2.0 }), circuit_breaker: Some((Closed, 0)), rate_limiter_set: true, timeout: Some(Timeout { duration: 1s }) }

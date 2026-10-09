@@ -1,0 +1,10 @@
+---
+source: crates/buff-i18n/tests/core.rs
+assertion_line: 271
+expression: errs
+---
+invalid locale identifier: BAD!
+no resources loaded for locale: fr
+fluent resource parse error: unexpected token
+fluent resource duplicates existing message ids: hello
+internal error: i18n operation panicked

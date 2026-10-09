@@ -1,0 +1,6 @@
+---
+source: crates/buff-fsm/tests/core.rs
+assertion_line: 315
+expression: "format!(\"{m}\")"
+---
+Machine(current="green", initial="green", states=3, transitions=3)

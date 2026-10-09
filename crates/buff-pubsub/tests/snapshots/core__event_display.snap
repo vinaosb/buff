@@ -1,0 +1,6 @@
+---
+source: crates/buff-pubsub/tests/core.rs
+assertion_line: 483
+expression: "format!(\"{event}\")"
+---
+Event(greeting, "hello")

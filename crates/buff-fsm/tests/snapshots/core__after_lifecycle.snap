@@ -1,0 +1,8 @@
+---
+source: crates/buff-fsm/tests/core.rs
+assertion_line: 371
+expression: "format!(\"states={states}\\nevents={events}\\nterminal={terminal}\")"
+---
+states=green,red,yellow
+events=tick
+terminal=false

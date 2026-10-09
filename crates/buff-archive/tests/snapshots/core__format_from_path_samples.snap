@@ -1,0 +1,13 @@
+---
+source: crates/buff-archive/tests/core.rs
+assertion_line: 378
+expression: rendered
+---
+a.zip -> Some(Zip)
+a.tar -> Some(Tar)
+a.gz -> Some(Gz)
+a.zst -> Some(Zstd)
+a.tar.gz -> Some(Gz)
+a.tar.zst -> Some(Zstd)
+a.txt -> None
+noext -> None

@@ -1,0 +1,9 @@
+---
+source: crates/buff-pubsub/tests/core.rs
+assertion_line: 492
+expression: "format!(\"{e1}\\n{e2}\\n{e3}\\n{e4}\")"
+---
+unknown subscription id: 42
+publish called with empty topic
+subscribe called with empty topic
+internal error: pub/sub operation panicked

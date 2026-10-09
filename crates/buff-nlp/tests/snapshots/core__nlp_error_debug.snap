@@ -1,0 +1,8 @@
+---
+source: crates/buff-nlp/tests/core.rs
+assertion_line: 243
+expression: "format!(\"{err1}\\n{err2}\\n{err3}\")"
+---
+nlp operation called with empty input
+internal error: nlp operation panicked
+stemmer init error for English: test stemmer failure

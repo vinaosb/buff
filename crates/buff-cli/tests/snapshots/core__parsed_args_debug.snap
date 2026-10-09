@@ -1,0 +1,6 @@
+---
+source: crates/buff-cli/tests/core.rs
+assertion_line: 233
+expression: "format!(\"{parsed:?}\")"
+---
+ParsedArgs { subcommand: None, positionals: ["first", "second"] }

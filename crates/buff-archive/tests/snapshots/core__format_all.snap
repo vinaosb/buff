@@ -1,0 +1,6 @@
+---
+source: crates/buff-archive/tests/core.rs
+assertion_line: 318
+expression: "format!(\"{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{}|{}|{}\", Format::Zip, Format::Tar,\nFormat::Gz, Format::Zstd, Format::Zip.extension(), Format::Tar.extension(),\nFormat::Gz.extension(), Format::Zstd.extension(), Format::Zip.is_multifile(),\nFormat::Gz.is_multifile(),)"
+---
+Zip|Tar|Gz|Zstd|zip|tar|gz|zst|true|false

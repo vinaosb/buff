@@ -1,0 +1,6 @@
+---
+source: crates/buff-cache/tests/core.rs
+assertion_line: 183
+expression: "format!(\"{cache:?}\")"
+---
+Cache { entries: 1 }

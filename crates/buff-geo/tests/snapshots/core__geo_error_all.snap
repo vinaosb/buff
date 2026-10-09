@@ -1,0 +1,10 @@
+---
+source: crates/buff-geo/tests/core.rs
+assertion_line: 280
+expression: "format!(\"{e1}\\n{e2}\\n{e3}\\n{e4}\\n{e5}\")"
+---
+geo coordinate list is empty
+geo coordinate list has odd length 7; expected (x, y) pairs
+polygon needs >= 3 distinct vertices, got 1
+latitude 89.5 out of Web Mercator range [-85.05.., 85.05..]
+internal error: geo operation panicked

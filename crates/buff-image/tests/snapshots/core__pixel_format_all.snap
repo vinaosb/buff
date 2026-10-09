@@ -1,0 +1,6 @@
+---
+source: crates/buff-image/tests/core.rs
+assertion_line: 270
+expression: "format!(\"{:?}|{:?}|{}|{}\", PixelFormat::Rgb, PixelFormat::Rgba,\nPixelFormat::Rgb.channels(), PixelFormat::Rgba.channels())"
+---
+Rgb|Rgba|3|4

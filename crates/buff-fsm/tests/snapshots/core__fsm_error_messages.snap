@@ -1,0 +1,10 @@
+---
+source: crates/buff-fsm/tests/core.rs
+assertion_line: 351
+expression: "format!(\"{e1}\\n{e2}\\n{e3}\\n{e4}\\n{e5}\")"
+---
+machine initial state name must not be empty
+event "jump" not valid from state "green"
+guard blocked transition "closed" --"open"--> "opened"
+machine is in terminal state "done" and cannot fire "tick"
+internal error: state machine operation panicked

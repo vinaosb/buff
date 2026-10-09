@@ -1,0 +1,6 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 45
+expression: "format!(\"a shape={:?} b shape={:?} c shape={:?} c data={:?}\",\na.shape().as_slice(), b.shape().as_slice(), c.shape().as_slice(),\nc.as_slice(),)"
+---
+a shape=[2, 2] b shape=[2, 2] c shape=[2, 2] c data=[19.0, 22.0, 43.0, 50.0]

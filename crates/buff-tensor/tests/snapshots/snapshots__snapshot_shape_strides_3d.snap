@@ -1,0 +1,6 @@
+---
+source: crates/buff-tensor/tests/snapshots.rs
+assertion_line: 17
+expression: "format!(\"shape={:?} rank={} num_elements={} strides={:?}\", s.as_slice(),\ns.rank(), s.num_elements(), strs,)"
+---
+shape=[2, 3, 4] rank=3 num_elements=24 strides=[12, 4, 1]

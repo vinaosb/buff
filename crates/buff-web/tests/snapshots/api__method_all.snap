@@ -1,0 +1,6 @@
+---
+source: crates/buff-web/tests/api.rs
+assertion_line: 236
+expression: "format!(\"{:?}|{:?}|{:?}|{:?}|{:?}\", Method::Get, Method::Post, Method::Put,\nMethod::Delete, Method::Patch)"
+---
+Get|Post|Put|Delete|Patch

@@ -1,0 +1,7 @@
+---
+source: crates/buff-simd/tests/core.rs
+assertion_line: 187
+expression: "format!(\"{e1}\\n{e2}\")"
+---
+simd slice too short: got 2 elements, need at least 4
+simd slice contains non-finite value at index 3

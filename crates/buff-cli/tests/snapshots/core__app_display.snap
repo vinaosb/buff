@@ -1,0 +1,6 @@
+---
+source: crates/buff-cli/tests/core.rs
+assertion_line: 210
+expression: "format!(\"{app}\")"
+---
+App(snapshot-tool)

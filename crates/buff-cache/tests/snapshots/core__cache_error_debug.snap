@@ -1,0 +1,9 @@
+---
+source: crates/buff-cache/tests/core.rs
+assertion_line: 192
+expression: "format!(\"{err}\\n{ttl_err}\\n{empty_err}\\n{panic_err}\")"
+---
+cache capacity must be greater than zero (got 0)
+cache TTL must be non-negative (got 0s)
+cache key cannot be empty
+internal error: cache operation panicked

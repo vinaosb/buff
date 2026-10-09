@@ -1,0 +1,8 @@
+---
+source: crates/buff-image/tests/core.rs
+assertion_line: 295
+expression: "format!(\"{err1}\\n{err2}\\n{err3}\")"
+---
+image from_bytes called with empty buffer
+pixel (100, 50) out of bounds for 80x40 image
+invalid dimensions: 0x100

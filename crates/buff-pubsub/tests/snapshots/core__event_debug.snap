@@ -1,0 +1,6 @@
+---
+source: crates/buff-pubsub/tests/core.rs
+assertion_line: 477
+expression: "format!(\"{event:?}\")"
+---
+Event { topic: "snapshot", payload: "payload" }
