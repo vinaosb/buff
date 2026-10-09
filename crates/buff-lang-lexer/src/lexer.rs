@@ -241,7 +241,17 @@ fn lex_range(
                 (bytes.get(pos).copied(), bytes.get(pos + 1).copied()),
                 (Some(b'&'), Some(b'&')) | (Some(b'|'), Some(b'|'))
             );
-            if paren_depth <= 0 && !starts_with_leading_op {
+            // A leading `.` is the method-chain continuation idiom (ITER-53
+            // gap C): `foo()` on one line, a deeper-indented `.bar()` on the
+            // next. A statement can never START with `.`, so such a line is
+            // unambiguously a continuation of the previous expression —
+            // exempt it from the offside check exactly like leading
+            // `&&`/`||`. Without the exemption the tracker pushes a spurious
+            // `Indent` for the dot line and the enclosing block desyncs
+            // ("only function declarations are allowed at top level" on the
+            // line AFTER the chain).
+            let starts_with_leading_dot = bytes.get(pos).copied() == Some(b'.');
+            if paren_depth <= 0 && !starts_with_leading_op && !starts_with_leading_dot {
                 let kinds = indent_tracker.check_line(indent_str, source_id, ws_start)?;
                 for k in kinds {
                     out.push(Token::new(k, Span::new(ws_start, ws_end, source_id)));

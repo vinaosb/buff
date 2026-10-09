@@ -119,6 +119,18 @@ impl<'a> TokenStream<'a> {
         self.peek().map(|t| &t.kind)
     }
 
+    /// The IMMEDIATE next token kind with NO layout skipping (ITER-53).
+    /// Layout-sensitive statements (`return`) use this to detect an
+    /// end-of-line boundary: [`Self::peek`] skips Newline/Dedent, which
+    /// would let a bare `return` swallow the next line's statement as its
+    /// value.
+    pub fn peek_kind_raw(&self) -> Option<&TokenKind> {
+        if let Some(tok) = self.pending_split.front() {
+            return Some(&tok.kind);
+        }
+        self.tokens.get(self.pos).map(|t| &t.kind)
+    }
+
     /// Look at the token *after* the current one (skipping layout). Used to
     /// disambiguate `obj.method` vs `obj.method(...)` without committing.
     pub fn peek_second_kind(&self) -> Option<&TokenKind> {
