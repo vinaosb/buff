@@ -67,7 +67,7 @@ fn temp_root() -> PathBuf {
     if let Some(p) = guard.as_ref() {
         return p.clone();
     }
-    let dir = std::env::temp_dir().join(format!("buff-t127-{}", std::process::id()));
+    let dir = support::temp_root("buff-t127");
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
     *guard = Some(dir.clone());
@@ -517,3 +517,4 @@ async fn publish_without_credentials_errors_with_helpful_message() {
     let _ = fs::remove_dir_all(&home);
     let _ = fs::remove_dir_all(&project);
 }
+mod support;

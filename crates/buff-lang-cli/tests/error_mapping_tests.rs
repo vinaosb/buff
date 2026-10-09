@@ -22,8 +22,7 @@ use buff_lang_cli::error_mapper;
 // ---------------------------------------------------------------------------
 
 fn temp_root() -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("buff-lang-cli-errmap-tests-{}", std::process::id()));
+    let dir = support::temp_root("buff-lang-cli-errmap-tests");
     let _ = fs::create_dir_all(&dir);
     dir
 }
@@ -291,3 +290,4 @@ fn test_end_to_end_runtime_error_mapped_to_buff() {
     cleanup(&file);
     cleanup(&file.with_extension("rs"));
 }
+mod support;

@@ -138,7 +138,7 @@ fn ai_verify_invalid_file_returns_has_errors() {
 
 #[test]
 fn ai_context_output_flag_writes_to_file() {
-    let dir = std::env::temp_dir().join("buff-ai-output-test");
+    let dir = support::temp_root("buff-ai-output-test");
     let _ = std::fs::create_dir_all(&dir);
     let out_path = dir.join("context.md");
 
@@ -247,7 +247,7 @@ fn ai_cli_help_mentions_both_subcommands() {
 // ---------------------------------------------------------------------------
 
 fn write_temp_buff(name: &str, src: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("buff-ai-tests");
+    let dir = support::temp_root("buff-ai-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(name);
     let mut f = std::fs::File::create(&path).expect("create temp file");
@@ -258,3 +258,4 @@ fn write_temp_buff(name: &str, src: &str) -> PathBuf {
 fn cleanup(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
+mod support;

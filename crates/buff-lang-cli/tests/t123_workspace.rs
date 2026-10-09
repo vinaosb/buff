@@ -46,7 +46,7 @@ fn temp_root() -> PathBuf {
     if let Some(p) = guard.as_ref() {
         return p.clone();
     }
-    let dir = std::env::temp_dir().join(format!("buff-t123-{}", std::process::id()));
+    let dir = support::temp_root("buff-t123");
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
     *guard = Some(dir.clone());
@@ -468,3 +468,4 @@ fn integration_runs_cargo_test_at_workspace_root() {
 
     cleanup(&ws_root);
 }
+mod support;

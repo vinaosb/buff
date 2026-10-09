@@ -61,7 +61,7 @@ fn temp_root() -> PathBuf {
     if let Some(p) = guard.as_ref() {
         return p.clone();
     }
-    let dir = std::env::temp_dir().join(format!("buff-t128-{}", std::process::id()));
+    let dir = support::temp_root("buff-t128");
     let _ = fs::remove_dir_all(&dir);
     let _ = fs::create_dir_all(&dir);
     *guard = Some(dir.clone());
@@ -709,3 +709,4 @@ fn outdated_run_empty_message_when_no_registry_deps() {
 
     let _ = fs::remove_dir_all(&project);
 }
+mod support;

@@ -304,7 +304,7 @@ fn check_error_and_warning_yields_has_errors() {
 
 #[test]
 fn check_command_run_on_clean_file_returns_clean() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_clean.buff");
     std::fs::write(&path, "func main():\n    print(\"hi\")\n").expect("write temp");
@@ -317,7 +317,7 @@ fn check_command_run_on_clean_file_returns_clean() {
 
 #[test]
 fn check_command_run_on_type_error_returns_has_errors() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_type_error.buff");
     std::fs::write(
@@ -334,7 +334,7 @@ fn check_command_run_on_type_error_returns_has_errors() {
 
 #[test]
 fn check_command_run_on_camelcase_returns_has_warnings_by_default() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_camelcase.buff");
     std::fs::write(&path, "func myFunc():\n    print(\"hi\")\n").expect("write");
@@ -347,7 +347,7 @@ fn check_command_run_on_camelcase_returns_has_warnings_by_default() {
 
 #[test]
 fn check_command_run_with_deny_warnings_promotes_to_has_errors() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_command_deny_warnings.buff");
     std::fs::write(&path, "func myFunc():\n    print(\"hi\")\n").expect("write");
@@ -370,7 +370,7 @@ fn check_command_run_with_deny_warnings_promotes_to_has_errors() {
 
 #[test]
 fn check_command_run_on_missing_file_propagates_error() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("does_not_exist.buff");
     let _ = std::fs::remove_file(&path);
@@ -389,7 +389,7 @@ fn check_command_run_on_missing_file_propagates_error() {
 
 #[test]
 fn check_rendered_output_includes_severity_and_path() {
-    let dir = std::env::temp_dir().join("buff-check-tests");
+    let dir = support::temp_root("buff-check-tests");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("check_render.buff");
     std::fs::write(&path, "func myFunc():\n    print(\"hi\")\n").expect("write");
@@ -404,3 +404,4 @@ fn check_rendered_output_includes_severity_and_path() {
     assert_eq!(outcome, CheckOutcome::HasWarnings);
     let _ = std::fs::remove_file(&path);
 }
+mod support;

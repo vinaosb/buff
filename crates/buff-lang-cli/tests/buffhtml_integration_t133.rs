@@ -42,10 +42,7 @@ fn examples_dir() -> PathBuf {
 }
 
 fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "buff-lang-cli-buffhtml-t133-tests-{}",
-        std::process::id()
-    ));
+    let dir = support::temp_root("buff-lang-cli-buffhtml-t133-tests");
     let _ = fs::create_dir_all(&dir);
     dir
 }
@@ -252,3 +249,4 @@ fn t133_translate_buffhtml_errors_span_aware_translation() {
 fn t133_buffhtml_ext_constant_is_buffhtml() {
     assert_eq!(BUFFHTML_EXT, "buffhtml");
 }
+mod support;
