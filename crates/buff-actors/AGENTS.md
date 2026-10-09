@@ -73,7 +73,7 @@ Total: ~1320 LOC (well under the 3500 LOC T59 cap).
 - `supervisor.start_child(spec) -> Result<ActorRef, ActorError>`
 - `supervisor.strategy() -> RestartStrategy`
 - `supervisor.child_count() -> usize`
-- `supervisor.shutdown()` — signal monitor + delegate to system shutdown
+- `supervisor.shutdown()` — signal + wake monitor (drop the one-shot ctrl sender), JOIN the monitor thread, then system shutdown (deterministic monitor termination — FIX-D, ITER-39)
 
 `ActorId` is a type alias for `u64` (not a struct). `ActorSystem` / `Supervisor` impl `Clone` (cheap — `Arc`-backed) + `Debug`; `ActorSystem` also impls `Default` + `Display`.
 
@@ -103,6 +103,7 @@ Total: ~1320 LOC (well under the 3500 LOC T59 cap).
 
 - **MSVC host blocker**: `cargo test -p buff-actors` is expected to fail on this Windows host with `LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'` — pre-existing VS 18 Insiders + missing Windows SDK UCRT headers issue (same family that blocks `cargo check --workspace` here, documented in `buff-pubsub`'s + `buff-image`'s AGENTS.md). CI runs on a 3-OS matrix (ubuntu/windows/macos) and does NOT have this issue. `cargo check -p buff-actors --lib` / `--tests` / `--examples` and `cargo clippy -p buff-actors --all-targets -- -D warnings` pass clean.
 - **Per-supervisor monitor (NOT per-child)**: one monitor thread per supervisor drains the shared `exit_rx` channel and applies the restart policy. Per-child monitors would multiply thread count; the single-monitor approach keeps the actor:thread ratio at 1:1 (one actor thread per actor + one monitor thread per supervisor).
+- **Monitor deterministic shutdown (FIX-D, ITER-39)**: the monitor loop waits on `exit_rx` AND a one-shot `ctrl_rx` via `select!` (same shape as `run_actor_loop`). The ctrl sender lives ONLY in the supervisor's internal `MonitorSlots` (never handed to the monitor) — `shutdown` drops it to wake an idle monitor, then joins the stored `JoinHandle`. This is required (not optional) because the monitor itself holds an `exit_tx` clone for restart re-injection, so the exit channel can never disconnect while the monitor lives. Regression tests: `monitor_thread_exits_on_shutdown` (inline in `supervisor.rs`, Arc strong-count probe) + `supervisor_shutdown_completes_after_restart_churn` (`tests/core.rs`).
 - **Restart chain stays supervised**: the monitor holds an `exit_tx` clone and re-injects it on every `spawn_inner` restart, so a re-spawned child's NEXT crash also triggers a restart (recursive supervision chain, no manual re-subscribe needed).
 - **`spawn` discards the `on_exit` notification** (passes `None`); only `spawn_inner` (used by `Supervisor::start_child`) hooks the exit channel. Non-supervised actors exit silently on shutdown (their `JoinHandle` is still joined via `ActorSystem::shutdown`).
 - **`ActorSystem` impls `Default`** as an empty system (used by codegen fallback for panic-free `unwrap_or_default()` paths — matches the Image / DataFrame / Cache / EventBus precedent).

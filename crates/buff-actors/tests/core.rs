@@ -429,6 +429,75 @@ fn supervisor_temporary_does_not_restart_on_crash() {
     sup.shutdown();
 }
 
+// ---- Supervisor: shutdown terminates the monitor -------------------------
+
+#[test]
+fn supervisor_shutdown_completes_after_restart_churn() {
+    struct CrashOnce {
+        sink: Arc<Mutex<u32>>,
+        crashed: Arc<Mutex<bool>>,
+    }
+    impl Actor for CrashOnce {
+        fn handle(&mut self, _msg: Message) -> ActorAction {
+            // The crashed flag is shared across restart instances, so
+            // exactly the first incarnation panics; the restarted one
+            // records messages. The panic must ESCAPE handle so the
+            // loop reports ChildExit::Crashed to the supervisor.
+            let already = {
+                let g = self.crashed.lock().expect("lock");
+                *g
+            };
+            if !already {
+                if let Ok(mut g) = self.crashed.lock() {
+                    *g = true;
+                }
+                panic!("shutdown-after-churn test crash");
+            }
+            if let Ok(mut g) = self.sink.lock() {
+                *g += 1;
+            }
+            ActorAction::Continue
+        }
+    }
+
+    let sys = ActorSystem::new().expect("new");
+    let sup = Supervisor::new(sys.clone()).expect("sup");
+    let sink = Arc::new(Mutex::new(0u32));
+    let crashed = Arc::new(Mutex::new(false));
+    let sink_for_spec = sink.clone();
+    let crashed_for_spec = crashed.clone();
+    let r1 = sup
+        .start_child(
+            ChildSpec::new(move || {
+                Box::new(CrashOnce {
+                    sink: sink_for_spec.clone(),
+                    crashed: crashed_for_spec.clone(),
+                })
+            })
+            .with_name("racer"),
+        )
+        .expect("start_child");
+
+    r1.send(()).expect("send-1");
+    assert!(wait_for(|| sys
+        .lookup("racer")
+        .map(|r| r.id())
+        .unwrap_or(0)
+        != r1.id()));
+
+    // Shutdown joins the monitor thread and every actor thread; it
+    // must return within the same bound ActorSystem::shutdown uses.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    sup.shutdown();
+    assert!(Instant::now() < deadline, "shutdown completed in <2s");
+
+    match r1.send("post-shutdown".to_string()) {
+        Err(ActorError::ActorStopped(_)) => (),
+        other => panic!("expected ActorStopped, got {other:?}"),
+    }
+    sup.shutdown();
+}
+
 // ---- Display + Debug ----------------------------------------------------
 
 #[test]
