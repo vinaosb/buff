@@ -118,6 +118,8 @@ jobs:
   # P0.11: Framework crate tests are continue-on-error (pre-existing API drift).
   # 25-min cap: any future wedge clean-fails the job instead of stalling to the
   # 1h run-level cancel (actors shutdown-deadlock incident).
+  # --no-fail-fast: report every failing crate — fail-fast hid 7/8 debt crates
+  # behind the first alphabetical failure during the P0.11 audit.
   test-framework:
     name: cargo test (framework)
     continue-on-error: true
@@ -132,7 +134,7 @@ jobs:
         with:
           shared-key: test-framework
       - name: Test (framework crates)
-        run: cargo test --workspace --exclude buff-lang-ast --exclude buff-lang-lexer --exclude buff-lang-parser --exclude buff-lang-types --exclude buff-lang-error --exclude buff-lang-codegen-rust --exclude buff-lang-codegen-wgsl --exclude buff-lang-runtime --exclude buff-lang-debug-info --exclude buff-lang-cli
+        run: cargo test --workspace --exclude buff-lang-ast --exclude buff-lang-lexer --exclude buff-lang-parser --exclude buff-lang-types --exclude buff-lang-error --exclude buff-lang-codegen-rust --exclude buff-lang-codegen-wgsl --exclude buff-lang-runtime --exclude buff-lang-debug-info --exclude buff-lang-cli --no-fail-fast
 
   # ── Buff compiler validation (Linux, validates .buff files) ─────────────────
   buff-validation:
