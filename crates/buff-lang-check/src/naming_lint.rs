@@ -111,6 +111,48 @@ pub fn is_pascal_case(s: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric())
 }
 
+/// Returns `true` when `s` is a PascalCase type-position identifier under
+/// the accepted underscore escape conventions.
+///
+/// [`is_pascal_case`] stays strict (no underscores at all); this predicate
+/// additionally accepts the two escape conventions that occur when Buff
+/// code mirrors a Rust identifier that would collide with a prelude name
+/// (Buff has no raw identifiers):
+///
+/// - **Trailing-underscore escape** — `Path_`, `None_`, `Exists_`: the
+///   trailing `_` avoids a collision with the `Path` prelude type, the
+///   `None` Option constructor, or a same-name instance method. Everything
+///   before the trailing underscore run must be strict PascalCase.
+/// - **Flat generic encoding** — `BTreeMap_String_StringVec`: each
+///   `_`-separated segment encodes one component of a Rust generic
+///   (`BTreeMap<String, Vec<String>>`); every segment must be strict
+///   PascalCase.
+///
+/// Names that only differ by a leading underscore, contain an empty `__`
+/// segment, or have any non-PascalCase segment still fail, and so do all
+/// the non-PascalCase shapes [`is_pascal_case`] rejects.
+///
+/// # Examples
+///
+/// ```
+/// # use buff_lang_check::naming_lint::is_pascal_case_escaped;
+/// assert!( is_pascal_case_escaped("Foo"));
+/// assert!( is_pascal_case_escaped("Path_"));
+/// assert!( is_pascal_case_escaped("BTreeMap_String_StringVec"));
+/// assert!(!is_pascal_case_escaped("foo"));
+/// assert!(!is_pascal_case_escaped("fooBar"));
+/// assert!(!is_pascal_case_escaped("Foo__Bar"));
+/// assert!(!is_pascal_case_escaped("_Foo"));
+/// assert!(!is_pascal_case_escaped(""));
+/// ```
+pub fn is_pascal_case_escaped(s: &str) -> bool {
+    // Strip the trailing keyword-escape underscore run first (`Path_` ->
+    // `Path`), then require every remaining `_`-separated segment to be
+    // strict PascalCase.
+    let core = s.trim_end_matches('_');
+    !core.is_empty() && core.split('_').all(is_pascal_case)
+}
+
 // ---------------------------------------------------------------------------
 // Linter entry point.
 // ---------------------------------------------------------------------------
@@ -243,9 +285,10 @@ fn warn_snake(kind: &str, name: &Ident, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Push a Warning diagnostic when `name` is not `PascalCase`.
+/// Push a Warning diagnostic when `name` is not a PascalCase identifier
+/// under the accepted escape conventions ([`is_pascal_case_escaped`]).
 fn warn_pascal(kind: &str, name: &Ident, out: &mut Vec<Diagnostic>) {
-    if !is_pascal_case(&name.name) {
+    if !is_pascal_case_escaped(&name.name) {
         out.push(Diagnostic::warning(
             format!("{kind} `{}` should be PascalCase", name.name),
             name.span,
@@ -615,6 +658,32 @@ mod tests {
         assert!(!is_pascal_case("Foo-Bar"));
     }
 
+    // -- is_pascal_case_escaped: underscore escape conventions (ITER-47) --
+
+    #[test]
+    fn pascal_case_escaped_trailing_underscore() {
+        assert!(is_pascal_case_escaped("Path_"));
+        assert!(is_pascal_case_escaped("None_"));
+        assert!(is_pascal_case_escaped("Exists_"));
+        // Strict PascalCase is still accepted; degenerate shapes are not.
+        assert!(is_pascal_case_escaped("Foo"));
+        assert!(!is_pascal_case_escaped("foo_"));
+        assert!(!is_pascal_case_escaped("_"));
+        assert!(!is_pascal_case_escaped(""));
+    }
+
+    #[test]
+    fn pascal_case_escaped_flat_generic_segments() {
+        assert!(is_pascal_case_escaped("BTreeMap_String_StringVec"));
+        assert!(is_pascal_case_escaped("BTreeMap_String_Literal"));
+        assert!(is_pascal_case_escaped("BTreeSet_String"));
+        assert!(is_pascal_case_escaped("Get_Value"));
+        // Empty segments and leading underscores are not the convention.
+        assert!(!is_pascal_case_escaped("Foo__Bar"));
+        assert!(!is_pascal_case_escaped("_Foo"));
+        assert!(!is_pascal_case_escaped("foo_bar"));
+    }
+
     // -- lint_common_mistakes: built-in constructor calls (ITER-36) --
 
     #[test]
@@ -661,6 +730,82 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("unknown function")),
             "typo'd prelude call must still warn"
+        );
+    }
+
+    // -- naming_lint: underscore escape conventions (ITER-47) --
+
+    #[test]
+    fn naming_lint_accepts_trailing_underscore_type_names() {
+        // Regression (ITER-47): the self-host corpus mirrors Rust
+        // identifiers that collide with prelude names and escapes the
+        // collision with a trailing underscore (`Path_` vs the `Path`
+        // prelude type, `None_` vs the `None` Option constructor,
+        // `Exists_` vs the `exists` method). These used to warn
+        // "should be PascalCase" and fail the CI bootstrap harness
+        // (self-host/types/prelude_instance_fn_impl.buff,
+        // self-host/codegen/race_analysis.buff).
+        let report = crate::check_source(
+            "struct None_:\n    repr: Int\n\nenum PreludeInstanceFn {\n    Path_, Exists_, Match,\n}",
+        );
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == buff_lang_error::Severity::Error),
+            "probe source must parse cleanly (else the test is vacuous)"
+        );
+        let pascal: Vec<&Diagnostic> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("should be PascalCase"))
+            .collect();
+        assert!(
+            pascal.is_empty(),
+            "trailing-underscore escape names must not warn: {pascal:#?}"
+        );
+    }
+
+    #[test]
+    fn naming_lint_accepts_flat_generic_type_names() {
+        // Regression (ITER-47): flat encodings of Rust generic types
+        // (`BTreeMap_String_StringVec` = `BTreeMap<String, Vec<String>>`,
+        // `Get_Value` = the reactive `get_value` family) are the naming
+        // convention for self-host ports of codegen/types crates
+        // (self-host/codegen/{passes,dependency_detection}.buff,
+        // self-host/types/prelude_instance_fn_impl.buff). They used to
+        // warn "should be PascalCase".
+        let report = crate::check_source(
+            "struct BTreeMap_String_Literal:\n    inner: Int\n\nenum Entry {\n    Get_Value, Send_Transaction,\n}",
+        );
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == buff_lang_error::Severity::Error),
+            "probe source must parse cleanly (else the test is vacuous)"
+        );
+        let pascal: Vec<&Diagnostic> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("should be PascalCase"))
+            .collect();
+        assert!(
+            pascal.is_empty(),
+            "flat-generic segment names must not warn: {pascal:#?}"
+        );
+    }
+
+    #[test]
+    fn naming_lint_still_flags_genuinely_non_pascal_type_names() {
+        // Guard: the escape rules must not swallow real violations —
+        // lowercase / camelCase type names keep warning.
+        let report = crate::check_source("struct my_struct:\n    inner: Int");
+        assert!(
+            report.diagnostics.iter().any(|d| d
+                .message
+                .contains("struct `my_struct` should be PascalCase")),
+            "lowercase struct name must still warn"
         );
     }
 }
