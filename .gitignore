@@ -47,3 +47,7 @@ Thumbs.db
 
 # Orchestrator local scratch (machine-local by the .local. convention)
 .sisyphus/ralph-loop.local.md
+
+# Audit run artifacts (v3.2 squad JSONs + consolidated reports; re-generable)
+.audit/
+.sisyphus/reports/
