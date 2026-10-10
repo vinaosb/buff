@@ -82,6 +82,26 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Tensor.len codegen parse: {e}")))
             }
+            M::Matmul => {
+                if args.len() != 1 {
+                    return Err(self.unsupported(&format!(
+                        "matmul() expects exactly 1 argument (the right-hand Tensor), got {}",
+                        args.len()
+                    )));
+                }
+                if !matches!(recv_ty, Type::Tensor) {
+                    return Err(self.unsupported("matmul() is only recognised on Tensor receivers"));
+                }
+                let rhs = self.lower_expr(&args[0])?;
+                // matmul(&self, rhs: &Tensor) -> TensorResult<Tensor>: rhs
+                // is taken by reference, and the fallible Tensor template
+                // needs the Default fallback (ITER-56).
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    #recv.matmul(&#rhs).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.matmul codegen parse: {e}")))
+            }
             M::Format => {
                 if args.len() != 1 {
                     return Err(self.unsupported(&format!(

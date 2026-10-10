@@ -1,0 +1,213 @@
+﻿{
+    "run_id":  "2026-10-10-0336",
+    "schema_version":  "3.2",
+    "started_at":  "2026-10-10T03:36:26-03:00",
+    "last_update":  "2026-10-10T05:14:32-03:00",
+    "phase":  "complete",
+    "config":  {
+                   "argument":  "all",
+                   "mode":  "all-26-squads-user-override",
+                   "output_dir":  ".sisyphus/reports",
+                   "output_formats":  [
+                                          "json",
+                                          "markdown",
+                                          "sarif"
+                                      ],
+                   "validation_sample_percent":  20,
+                   "fail_on":  "none",
+                   "previous":  null,
+                   "baseline":  null,
+                   "coverage_threshold":  30,
+                   "max_resumes":  2,
+                   "no_auto_resume":  false,
+                   "agent_adapter":  "explore-proxy (sq-* subagents unavailable; squads run as background explore agents, orchestrator persists output to disk per template Â§14)",
+                   "note":  "User override: run ALL squads incl. Business/Regulatory (thin surface squads must still persist files_examined + \u003e=3 FNs). sq-test (audit-infra self-check) folded into orchestrator consolidation phase."
+               },
+    "squad_groups":  {
+                         "1-code":  {
+                                        "squads":  [
+                                                       "code-quality",
+                                                       "refactoring",
+                                                       "dependencies",
+                                                       "test-coverage"
+                                                   ],
+                                        "status":  "complete",
+                                        "task_ids":  {
+                                                         "code-quality":  "bg_f63fd0b5",
+                                                         "refactoring":  "bg_00f3016e",
+                                                         "dependencies":  "bg_6ec5e5ce",
+                                                         "test-coverage":  "bg_b62df880"
+                                                     }
+                                    },
+                         "2-architecture":  {
+                                                "squads":  [
+                                                               "architecture",
+                                                               "security",
+                                                               "fault-tolerance",
+                                                               "observability"
+                                                           ],
+                                                "status":  "complete",
+                                                "task_ids":  {
+                                                                 "security":  "bg_68d7b5fb",
+                                                                 "fault-tolerance":  "bg_910951b7",
+                                                                 "architecture":  "bg_0073b3b1",
+                                                                 "observability":  "bg_e401aada",
+                                                                 "code-quality-retry":  "bg_5f368d68"
+                                                             }
+                                            },
+                         "3-business":  {
+                                            "squads":  [
+                                                           "financial-model",
+                                                           "competitive-intel",
+                                                           "acquisition-metrics",
+                                                           "product-roadmap"
+                                                       ],
+                                            "status":  "complete"
+                                        },
+                         "4-compliance":  {
+                                              "squads":  [
+                                                             "tax-fiscal",
+                                                             "license",
+                                                             "privacy-data",
+                                                             "schema-metrics",
+                                                             "ai-cost"
+                                                         ],
+                                              "status":  "complete"
+                                          },
+                         "5-regulatory":  {
+                                              "squads":  [
+                                                             "regulatory-dataprotection",
+                                                             "regulatory-sector",
+                                                             "regulatory-financial",
+                                                             "regulatory-contractual",
+                                                             "regulatory-standards"
+                                                         ],
+                                              "status":  "complete"
+                                          },
+                         "6-meta":  {
+                                        "squads":  [
+                                                       "lmas-traceability",
+                                                       "cicd",
+                                                       "consistency-coherence"
+                                                   ],
+                                        "status":  "complete",
+                                        "note":  "consistency-coherence launches LAST after all other squads\u0027 files are on disk"
+                                    }
+                     },
+    "completed_squads":  [
+                             "test-coverage",
+                             "dependencies",
+                             "refactoring",
+                             "code-quality",
+                             "architecture",
+                             "security",
+                             "fault-tolerance",
+                             "observability",
+                             "financial-model",
+                             "acquisition-metrics",
+                             "competitive-intel",
+                             "product-roadmap",
+                             "tax-fiscal",
+                             "license",
+                             "privacy-data",
+                             "schema-metrics",
+                             "ai-cost",
+                             "regulatory-dataprotection",
+                             "regulatory-financial",
+                             "regulatory-sector",
+                             "regulatory-standards",
+                             "regulatory-contractual",
+                             "lmas-traceability",
+                             "cicd",
+                             "consistency-coherence"
+                         ],
+    "missing_squads":  [
+
+                       ],
+    "squad_files_written":  [
+                                "audit-test-coverage.json",
+                                "audit-dependencies.json",
+                                "audit-refactoring.json",
+                                "audit-code-quality.json",
+                                "audit-architecture.json",
+                                "audit-security.json",
+                                "audit-fault-tolerance.json",
+                                "audit-observability.json",
+                                "audit-financial-model.json",
+                                "audit-acquisition-metrics.json",
+                                "audit-competitive-intel.json",
+                                "audit-product-roadmap.json",
+                                "audit-consistency-coherence.json"
+                            ],
+    "squad_files_missing":  [
+
+                            ],
+    "findings_collected_count":  104,
+    "validation":  {
+                       "sample_percent":  22,
+                       "fp_confirmed":  0,
+                       "validated_finding_ids":  22,
+                       "validated_at":  "2026-10-10T07:35:00-03:00",
+                       "fn_total":  117
+                   },
+    "consolidation":  {
+                          "delta_computed":  true,
+                          "provenance_built":  true,
+                          "coverage_map_computed":  true,
+                          "fp_fn_enumerated":  true,
+                          "schema_rejects":  0,
+                          "fingerprints_computed":  true,
+                          "dag_computed":  true
+                      },
+    "emit":  {
+                 "formats_emitted":  [
+                                         "json",
+                                         "markdown",
+                                         "sarif"
+                                     ],
+                 "final_paths":  [
+                                     ".sisyphus/reports/buff-audit-2026-10-10-0336-v3.json",
+                                     ".sisyphus/reports/buff-audit-2026-10-10-0336-v3.md",
+                                     ".sisyphus/reports/buff-audit-2026-10-10-0336.sarif"
+                                 ]
+             },
+    "failures":  [
+                     {
+                         "squad":  "code-quality",
+                         "attempt":  1,
+                         "reason":  "final-message JSON truncated at 111KB (unbalanced braces); retrying with compact-output contract",
+                         "ts":  "2026-10-10T04:18:00-03:00"
+                     },
+                     {
+                         "squad":  "product-roadmap",
+                         "attempt":  1,
+                         "reason":  "final JSON had double-emission seam + malformed segment; orchestrator hand-normalized from verified narrative (salvage per §6)",
+                         "ts":  "2026-10-10T05:44:00-03:00"
+                     },
+                     {
+                         "squad":  "regulatory-sector",
+                         "attempts":  5,
+                         "ts":  "2026-10-10T06:55:00-03:00",
+                         "reason":  "rate-limit exhaustion; orchestrator-executed inline (mechanical absence verification)",
+                         "outcome":  "salvaged-inline"
+                     },
+                     {
+                         "squad":  "regulatory-standards",
+                         "attempts":  5,
+                         "ts":  "2026-10-10T06:56:00-03:00",
+                         "reason":  "rate-limit exhaustion; orchestrator-executed inline",
+                         "outcome":  "salvaged-inline"
+                     },
+                     {
+                         "squad":  "regulatory-contractual",
+                         "attempts":  5,
+                         "ts":  "2026-10-10T06:57:00-03:00",
+                         "reason":  "rate-limit exhaustion; orchestrator-executed inline (1 finding: broken ./LICENSE link)",
+                         "outcome":  "salvaged-inline"
+                     }
+                 ],
+    "resume_count":  0,
+    "checkpoint_writes_count":  9,
+    "chunked_write_calls_count":  0,
+    "squad_files_persisted_count":  25
+}

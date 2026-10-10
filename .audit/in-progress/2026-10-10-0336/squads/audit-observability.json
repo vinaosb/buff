@@ -1,0 +1,280 @@
+﻿{
+    "squad":  "audit-observability",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-OB-001",
+                         "severity":  "high",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-runtime\\src\\lib.rs",
+                         "line":  137,
+                         "endLine":  143,
+                         "title":  "buff-span panic-trace chain unwired end-to-end: runtime::init() and .buffmap emission have zero callers",
+                         "description":  "The advertised buff-span panic-trace chain (T1/T24, README v1.13 \u0027shipped\u0027) is never wired. buff_lang_runtime::init() â€” documented as \u0027called from generated fn main() startup by the Buff CLI\u0027 â€” has zero callers; codegen emits no init call. generate_rust_with_source_map (codegen lib.rs, documented \u0027The CLI calls this... to emit a .buffmap\u0027) also has zero callers and nothing writes .buffmap sidecars. backtrace.rs\u0027s hook install is an #[allow(dead_code)] scope-keeper. Generated binaries panic with raw Rust traces; buff backtrace always degrades to its no-sidecar warning.",
+                         "root_cause":  "T24 API surface (runtime init fn, codegen source-map wrapper, panic hook, backtrace tool) was built and unit-tested per-piece, but the composition-root call sites in the CLI pipeline and codegen main-body emission were never added; doc comments assert wiring that does not exist.",
+                         "impact":  "Primary runtime diagnostic channel silently fails: every `buff run` panic shows generated-.rs line numbers translated onto the .buff filename via an empty SourceMap (commands/run.rs:186-195), actively misleading users; `buff backtrace` can never find a sidecar in real incidents; shipped-feature claim is false.",
+                         "recommendation":  "Compose the chain: call generate_rust_with_source_map in build/run, serialize the SourceMap to \u003cexe\u003e.buffmap, plumb the real map into translate_panic, and emit a panic-hook init in generated main() (inline stub for single-file rustc builds where buff-lang-runtime is not linked).",
+                         "fix_examples":  {
+                                              "before":  "// commands/run.rs:171-195 â€” child stderr translated with an empty map\nlet source_map = buff_lang_error::SourceMap::new();\nlet translated = crate::error_mapper::translate_panic(\n    \u0026stderr_str, \u0026rust_file_path, file, \u0026source_map,\n);",
+                                              "after":  "// build the real map (API already exists, zero callers today)\nlet (rust_src, sm) = buff_lang_codegen_rust::generate_rust_with_source_map(\n    \u0026decls, file, \u0026source,\n)?;\nstd::fs::write(rust_file_path.with_extension(\"buffmap\"),\n    buff_lang_debug_info::format::serialize_to_string(\u0026sm)?)?;\nlet translated = crate::error_mapper::translate_panic(\n    \u0026stderr_str, \u0026rust_file_path, file, \u0026sm,\n);"
+                                          },
+                         "fix_guide":  [
+                                           "In build/run pipeline, switch to generate_rust_with_source_map and write serialize_to_string output next to the exe as \u003cexe\u003e.buffmap",
+                                           "Pass the real SourceMap into error_mapper::translate_panic in commands/run.rs instead of SourceMap::new()",
+                                           "Emit a panic-hook init statement in generated fn main() when buff-lang-runtime is already an extern crate; otherwise inline a small hook stub so single-file rustc builds still remap",
+                                           "Add an integration test: a panicking program through buff run produces a Buff-mapped trace and buff backtrace locates the sidecar"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  240,
+                                                 "human_readable":  "4 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "sidecar write 60 + SourceMap plumbing 60 + hook-emission design/impl 60 + tests 60"
+                                             },
+                         "technology":  "Rust workspace (buff-lang-cli, buff-lang-pipeline, buff-lang-codegen-rust, buff-lang-runtime, buff-lang-debug-info)",
+                         "category":  "observability",
+                         "detection_method":  {
+                                                  "tool":  "Grep + PowerShell Select-String workspace-wide caller analysis",
+                                                  "query":  "runtime::init\\(\\)|generate_rust_with_source_map\\(|install_panic_hook|buffmap"
+                                              },
+                         "verification_command":  "Get-ChildItem crates -Recurse -Filter *.rs | Select-String -Pattern \u0027runtime::init\\(\\)|generate_rust_with_source_map\\(|install_panic_hook\\(\\)\u0027 | Where-Object { $_.Path -notmatch \u0027tests|examples\u0027 }",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-runtime\\src\\lib.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-codegen-rust\\src\\lib.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\backtrace.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\run.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-debug-info\\src\\panic_hook.rs"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Exhaustive workspace grep shows zero callers for both documented entry points and no .buffmap writers; backtrace install is explicitly dead code; runtime doc comment makes a false claim about CLI behavior."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Both doc comments assert the wiring EXISTS rather than deferring it, so the FP rule (documented deliberate choices) does not apply; verified by exhaustive caller grep plus reading all cited code.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-runtime\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-codegen-rust\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-OB-002",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\src\\lib.rs",
+                         "line":  296,
+                         "endLine":  309,
+                         "title":  "Registry has zero request/error logging; tower-http declared for \u0027tracing middleware\u0027 but never used",
+                         "description":  "buff-registry ships zero runtime observability: app() installs only DefaultBodyLimit + IP rate limiting â€” no tower-http TraceLayer or any request logging â€” while Cargo.toml declares tower-http specifically to \u0027add CORS + tracing middleware\u0027, which src never references (dead dep, stale comment). A 500 (storage failure), 401, or 429 leaves no server-side evidence beyond three startup eprintlns in main.rs; operators cannot diagnose failed publishes, OAuth callback failures, or abuse from server logs.",
+                         "root_cause":  "T57 security hardening added body limits, IP rate limiting, and OAuth, but the tower-http dependency was declared without adopting its trace/cors layers; no logging middleware or handler-level logging was ever added, and no doc defers it.",
+                         "impact":  "Server-side blind spot: publishes that fail validation/auth/rate-limit/storage leave no trace; production incidents and abuse are undiscoverable; the Cargo.toml comment misleads maintainers into believing tracing middleware exists.",
+                         "recommendation":  "Either enable the tower-http trace feature and add TraceLayer::new_for_http() to app(), or remove the dead dependency and correct the comment; add ERROR-level logging in storage-failure and OAuth-callback paths.",
+                         "fix_examples":  {
+                                              "before":  ".layer(DefaultBodyLimit::max(body_limit))\n.layer(from_fn_with_state(state.clone(), ip_rate_limit_middleware))",
+                                              "after":  ".layer(DefaultBodyLimit::max(body_limit))\n.layer(tower_http::trace::TraceLayer::new_for_http()) // enable \"trace\" feature\n.layer(from_fn_with_state(state.clone(), ip_rate_limit_middleware))"
+                                          },
+                         "fix_guide":  [
+                                           "Enable the tower-http \"trace\" feature in root [workspace.dependencies] and add TraceLayer::new_for_http() in app()",
+                                           "Or remove the unused tower-http dep from crates/buff-registry/Cargo.toml and fix the stale comment",
+                                           "Add error-level logging (eprintln or tracing) in handlers.rs storage-failure and oauth.rs callback-failure arms",
+                                           "Extend tests/registry_tests.rs to assert failing publishes surface a server-side log line"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  45,
+                                                 "human_readable":  "45 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "TraceLayer wiring 15 + dep cleanup/comment fix 15 + handler logging/tests 15"
+                                             },
+                         "technology":  "Rust, axum 0.8, tower-http 0.6",
+                         "category":  "observability",
+                         "detection_method":  {
+                                                  "tool":  "Grep for tower_http/TraceLayer/tracing across buff-registry src vs Cargo.toml dependency list",
+                                                  "query":  "tower_http|TraceLayer|tracing::|eprintln!|println!"
+                                              },
+                         "verification_command":  "Get-ChildItem crates\\buff-registry\\src -Recurse -Filter *.rs | Select-String -Pattern \u0027tower_http|TraceLayer|tracing::\u0027; Select-String -Path crates\\buff-registry\\Cargo.toml -Pattern \u0027tower-http\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\Cargo.toml",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\src\\main.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Mechanically verified: zero tower_http references in src while Cargo.toml:23-30 claims it adds CORS + tracing middleware; app() layers read in full."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "The registry AGENTS.md DEFERRED list omits request logging, so silence is not a documented choice; the stale dependency comment actively contradicts the code.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\Cargo.toml",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\src\\lib.rs"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-OB-003",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\mod.rs",
+                         "line":  148,
+                         "endLine":  184,
+                         "title":  "ui dev server terminal-blind: rebuild failures and 404s reach only the browser",
+                         "description":  "The ui_dev rebuild loop reports build failures ONLY to the browser via broadcaster.error() â€” the terminal prints nothing after the three startup lines. Cargo/wasm-bindgen stderr is captured into BuildOutcome::Failed::message (builder.rs) and Buff front-end errors are collected (mod.rs) but never echoed to stderr. Users without an open browser tab see nothing; static_handler 404s are silent too. Watch-mode debugging (\u0027why did it stop reloading?\u0027) requires attaching a browser.",
+                         "root_cause":  "T131 dev server was built broadcast-first: every failure path funnels into ReloadBroadcaster error frames; no stderr mirror was added to rebuild_loop, the builder, or http.rs handlers.",
+                         "impact":  "Developers iterating on .buffhtml apps lose the standard Vite-style terminal feedback loop: cargo/wasm-bindgen failures, front-end compile errors, and missing assets are invisible unless a browser tab happens to be connected and rendering the red banner.",
+                         "recommendation":  "Mirror every rebuild outcome (ok/failed/error) to stderr with the existing [buff ui dev] prefix; optionally log WS connects and 404 paths at debug level in http.rs.",
+                         "fix_examples":  {
+                                              "before":  "match builder.build() {\n    Ok(BuildOutcome::Ok) =\u003e broadcaster.reload(),\n    Ok(BuildOutcome::Failed { message }) =\u003e broadcaster.error(message),\n    Err(e) =\u003e broadcaster.error(e.to_string()),\n}",
+                                              "after":  "match builder.build() {\n    Ok(BuildOutcome::Ok) =\u003e { eprintln!(\"[buff ui dev] build ok\"); broadcaster.reload() }\n    Ok(BuildOutcome::Failed { message }) =\u003e {\n        eprintln!(\"[buff ui dev] build failed:\\n{message}\");\n        broadcaster.error(message)\n    }\n    Err(e) =\u003e { eprintln!(\"[buff ui dev] rebuild error: {e}\"); broadcaster.error(e.to_string()) }\n}"
+                                          },
+                         "fix_guide":  [
+                                           "Echo front-end compile errors (mod.rs errors vector) to stderr before broadcasting",
+                                           "Echo BuildOutcome::Failed messages and builder Err to stderr in rebuild_loop",
+                                           "Add optional request logging (404s, WS connect/disconnect) in ui_dev/http.rs",
+                                           "Add a rebuild_loop test asserting stderr output on failure"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  30,
+                                                 "human_readable":  "30 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "stderr mirrors 15 + optional http logging 10 + tests 5"
+                                             },
+                         "technology":  "Rust, tokio, axum, notify (buff-lang-cli ui_dev module)",
+                         "category":  "observability",
+                         "detection_method":  {
+                                                  "tool":  "Grep of ui_dev sources for terminal writers",
+                                                  "query":  "eprintln!|println!|broadcaster.error|BuildOutcome::Failed"
+                                              },
+                         "verification_command":  "Get-ChildItem crates\\buff-lang-cli\\src\\ui_dev -Filter *.rs | Select-String -Pattern \u0027eprintln!|println!\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\mod.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\builder.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\http.rs"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "rebuild_loop (lines 148-184) read in full: the only outputs are broadcaster calls; builder.rs captures cargo/wasm-bindgen stderr exclusively into the browser message; startup/shutdown are the sole eprintlns."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Module docs describe browser broadcast as the outcome channel but never state terminal silence is deliberate; no convention forbids stderr mirrors; dev-server peers (Vite/trunk) log to terminal, so the gap has real debugging cost.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\mod.rs",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-OB-004",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\build.rs",
+                         "line":  209,
+                         "endLine":  211,
+                         "title":  "No timing or --verbose surface on buff build/run/check",
+                         "description":  "buff build / run / check print no timing or phase information and accept no --verbose flag (the cli.rs Build variant has none; build.rs contains zero Instant/elapsed calls). Despite compile speed being a headline feature (v1.25+ bench-compile, --fast linker work), slow-build reports cannot be reproduced with attribution: users get only \u0027Built \u003cpath\u003e (\u003cmode\u003e)\u0027 with no duration and no per-phase (lex/parse/codegen/rustc) breakdown outside synthetic bench-compile fixtures.",
+                         "root_cause":  "Timing instrumentation was confined to dedicated benchmark subcommands (bench-compile, bench-cold-start, bench-program, bench_harness); the primary user commands never received Instant/elapsed output or a verbose flag.",
+                         "impact":  "Users reporting slow compiles (a core selling point of the language) cannot self-serve attribution; maintainers cannot reproduce phase costs on real projects â€” only on synthetic BenchTier fixtures â€” raising triage cost for every compile-speed regression report.",
+                         "recommendation":  "Wrap compile+rustc in build.rs with Instant::now() and append elapsed seconds to the Built line; add an opt-in --verbose flag on Build/Run/Check in cli.rs that prints per-phase durations.",
+                         "fix_examples":  {
+                                              "before":  "eprintln!(\"Built {} ({})\", stem_output.display(), mode_label(mode));",
+                                              "after":  "let started = std::time::Instant::now();\n// ... compile_to_rust + rustc ...\neprintln!(\n    \"Built {} ({}) in {:.2}s\",\n    stem_output.display(),\n    mode_label(mode),\n    started.elapsed().as_secs_f64()\n);"
+                                          },
+                         "fix_guide":  [
+                                           "Time the compile+rustc span in commands/build.rs (single-file and cargo paths) and append seconds to the Built eprintln",
+                                           "Add #[arg(long)] verbose to Build/Run/Check variants in cli.rs and thread through main.rs dispatch",
+                                           "Print per-phase durations (lex/parse/codegen/rustc) only under --verbose to keep default output clean",
+                                           "Document the flag in --help and the Book build chapter"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  60,
+                                                 "human_readable":  "1 hour",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "timing 20 + flag threading 25 + docs 15"
+                                             },
+                         "technology":  "Rust, clap (buff-lang-cli)",
+                         "category":  "observability",
+                         "detection_method":  {
+                                                  "tool":  "Grep for verbose/Instant/elapsed across cli.rs and command modules",
+                                                  "query":  "verbose|Instant::now|elapsed"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\buff-lang-cli\\src\\commands\\build.rs,crates\\buff-lang-cli\\src\\cli.rs -Pattern \u0027Instant|elapsed|verbose\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\build.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\cli.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\bench_compile.rs"
+                                        ],
+                         "confidence":  {
+                                            "score":  "medium",
+                                            "rationale":  "Absence verified mechanically (no Instant/elapsed/verbose matches in build.rs/cli.rs Build path), but as an absence-of-feature finding it carries moderate classification subjectivity; bench subcommands partially compensate."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "Could be classified as scope rather than defect; however the audit brief explicitly targets compile-diagnostics observability and compile speed is the project\u0027s advertised moat, so the missing timing/verbose surface has real debugging cost and no doc declares it deliberately excluded.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\AGENTS.md",
+                                                                                          "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\cli.rs"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-runtime\\src\\lib.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-codegen-rust\\src\\lib.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\main.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\cli.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\build.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\run.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\backtrace.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\repl.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\project_pipeline.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\mod.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\http.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\ui_dev\\builder.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\src\\error_mapper.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\src\\main.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\src\\lib.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-registry\\Cargo.toml",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-jupyter\\src\\kernel.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-jupyter\\src\\lib.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lsp\\src\\main.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-observe\\src\\lib.rs",
+                                           "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-types\\src\\prelude_types.rs"
+                                       ],
+                    "files_skipped":  [
+                                          "crates/buff-registry/src/{handlers,oauth,storage_sqlite,rate_limit}.rs internals (route surface verified via lib.rs app())",
+                                          "crates/buff-lang-cli/src/coverage/ module internals (T137 mapping, not runtime observability)",
+                                          "crates/buff-lang-cli/src/commands/{bench*,profile,watch,debug,doc}.rs internals (timing exists there; out of primary-path scope)",
+                                          "crates/buff-dap, crates/buff-mcp, crates/buffup, crates/bufflings (secondary tools)",
+                                          "editors/vscode TypeScript, website/, playground/, tree-sitter-buff/, book/ (non-Rust or tooling)"
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     "Registry /health and /ready endpoints EXIST (lib.rs:294-297, P0.18) and are correctly layered before rate limiting â€” scope item 4 answered, no finding",
+                                                     "rustc/cargo stderr is NOT swallowed anywhere checked: pipeline lib.rs:1416-1425 forwards+translates+annotates then bails with status; project_pipeline.rs:289-303 forwards cargo stderr; run.rs:171-196 translates child stderr; ui_dev builder.rs captures cargo/wasm-bindgen stderr into the browser message",
+                                                     "tracing subscriber wiring is correct where tracing is used: codegen auto-emits tracing_subscriber fmt().try_init() (BUFF_LOG EnvFilter) into user programs when Log is present (extern_crate_detection.rs:751, decl_lowering.rs:600, tested in log_codegen.rs); compiler-crate tracing:: matches were doc comments only; tooling binaries consistently use eprintln (no mixed-paradigm binary)",
+                                                     "buff-observe is consumed by no crate, but integration deferral is DOCUMENTED (PreludeType::Observe namespace-only at prelude_types.rs:1205-1212, Type::Unknown, T21 sibling-task boundary per crate AGENTS.md/README) â€” FP per repo rule, not counted",
+                                                     "Jupyter/LSP crash visibility is adequate: kernel survives cell errors with proper iopub error ename/evalue/traceback (kernel.rs tests), unknown msg_types logged+dropped is documented behavior, LSP main.rs surfaces errors on stderr with exit 1; no opaque \u0027internal error\u0027 strings in non-test src"
+                                                 ],
+                    "totals":  {
+                                   "files_examined":  23,
+                                   "findings":  4,
+                                   "critical":  0,
+                                   "high":  1,
+                                   "medium":  3,
+                                   "low":  0,
+                                   "tracing_callsites_src":  5,
+                                   "eprintln_src":  250,
+                                   "println_src":  382
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

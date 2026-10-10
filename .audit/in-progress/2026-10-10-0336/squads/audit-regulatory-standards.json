@@ -1,0 +1,25 @@
+{
+  "report_version": "3.2",
+  "run_id": "2026-10-10-0336",
+  "squad": "audit-regulatory-standards",
+  "project": "buff",
+  "timestamp": "2026-10-10T03:36:26-03:00",
+  "execution_note": "orchestrator-executed inline: subagent retries exhausted on rate limits (5 attempts); mechanical absence verification performed directly",
+  "findings": [],
+  "summary": {
+    "files_examined": [
+      {"path": "AGENTS.md", "lines_read": 60, "bytes_read": 4819, "examined_at": "2026-10-10T06:56:00-03:00", "findings_emitted": 0, "verdict": "clean - FP rule read"},
+      {"path": "README.md + website/benchmarks.html certification sweep", "lines_read": 4, "bytes_read": 0, "examined_at": "2026-10-10T06:56:00-03:00", "findings_emitted": 0, "verdict": "clean FP - 4 raw matches ALL benign substrings verified by matched-text extraction: README:79 'sla' inside 'Protocol translation'; README:291 'rpo' inside 'interpolation'; README:344 + benchmarks.html:312 'nist' inside 'deterministic'. ZERO genuine ISO/SOC2/PCI/NIST/certification/SLA/RPO/RTO claims"},
+      {"path": "book/src/*.md certification sweep", "lines_read": 3, "bytes_read": 0, "examined_at": "2026-10-10T06:56:00-03:00", "findings_emitted": 0, "verdict": "clean FP - 3 raw matches at chapter-2.md:22,98,99, same substring family (translation/deterministic in the codegen chapter); zero certification claims"}
+    ],
+    "files_skipped": [
+      {"path": "docs/*.html full sweep", "reason": "generated error pages + reports; marketing-claim surface (README/website/book) covered; docs are technical reports with no certification vocabulary expected", "lines_not_examined": 0}
+    ],
+    "falseNegativesIdentified": [
+      {"area": "informal compliance language", "reason": "phrases like 'hardened', 'production-grade' were not flagged (present in README v1.10 row 'Production hardening') - these are engineering language, not certification claims; a stricter reading could ask for disclaimer wording"},
+      {"area": "future certification claims", "reason": "if the project later seeks SOC2/ISO for a hosted registry, claims must be re-audited"},
+      {"area": "vendor/dependency attestations", "reason": "cargo-deny/audit advisories posture covered by compliance squads; standards-cert claims of dependencies not in scope"}
+    ],
+    "totals": {"critical": 0, "high": 0, "medium": 0, "low": 0, "files_examined": 3}
+  }
+}

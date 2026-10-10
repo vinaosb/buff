@@ -220,6 +220,9 @@ pub enum PreludeInstanceFn {
     /// `t.rank() -> Int` (Tensor, T8). Zero args. Number of dimensions.
     /// ITER-56 instance surface.
     Rank,
+    /// `a.matmul(b) -> Tensor` (Tensor, T8). One arg (the right-hand
+    /// Tensor). Fallible at the Rust layer (TensorResult).
+    Matmul,
     /// `df.join(other, on) -> DataFrame`. Two args (DataFrame other,
     /// String on-column). Inner equi-join. Wraps
     /// `buff_dataframe::DataFrame::join(recv, other, on)
@@ -893,6 +896,7 @@ impl PreludeInstanceFn {
         PreludeInstanceFn::Year,
         PreludeInstanceFn::Shape,
         PreludeInstanceFn::Rank,
+        PreludeInstanceFn::Matmul,
         PreludeInstanceFn::Month,
         PreludeInstanceFn::Day,
         PreludeInstanceFn::Hour,
@@ -1221,6 +1225,7 @@ impl PreludeInstanceFn {
             PreludeInstanceFn::Year => "year",
             PreludeInstanceFn::Shape => "shape",
             PreludeInstanceFn::Rank => "rank",
+            PreludeInstanceFn::Matmul => "matmul",
             PreludeInstanceFn::Month => "month",
             PreludeInstanceFn::Day => "day",
             PreludeInstanceFn::Hour => "hour",

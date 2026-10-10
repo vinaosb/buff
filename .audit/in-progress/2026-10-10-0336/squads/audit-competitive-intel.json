@@ -1,0 +1,371 @@
+﻿{
+    "squad":  "audit-competitive-intel",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-CI-001",
+                         "severity":  "high",
+                         "file":  "website/index.html",
+                         "line":  34,
+                         "endLine":  323,
+                         "title":  "All playground CTAs on landing page point to a path that does not exist",
+                         "description":  "index.html header nav (line 34), hero CTA (line 54) and all six \u0027Try this in playground\u0027 links (93,130,168,217,276,323) target ./playground/index.html; app.js:47,50 rewrites try-links to the same ./playground/ prefix. No website/playground/ directory exists (website/ has 10 files, no subdir), and website/README.md says deployment is \u0027copying the website/ directory\u0027. benchmarks.html:196 uses ../playground/index.html instead - the two pages contradict each other and index.html is broken under both layouts.",
+                         "root_cause":  "Relative playground path chosen for an in-website copy of the playground that was never created; benchmarks.html later used the correct sibling-relative path without fixing index.html.",
+                         "impact":  "The landing page\u0027s primary conversion action (\u0027Try in playground\u0027, 7 links total) 404s for every visitor under the repo\u0027s own deployment instructions; \u0027Try this\u0027 demo links never open with pre-loaded code.",
+                         "recommendation":  "Change index.html nav/hero and app.js to ../playground/index.html (matching benchmarks.html) and update website/README.md to document that website/ and playground/ must be deployed as sibling directories.",
+                         "fix_examples":  {
+                                              "before":  "\u003ca class=\"nav-btn nav-btn-accent\" href=\"./playground/index.html\"\u003e ... link.href = \"./playground/index.html#s=\" + encoded;",
+                                              "after":  "\u003ca class=\"nav-btn nav-btn-accent\" href=\"../playground/index.html\"\u003e ... link.href = \"../playground/index.html#s=\" + encoded;"
+                                          },
+                         "fix_guide":  "1) In website/index.html replace all 8 occurrences of ./playground/ with ../playground/. 2) In website/app.js lines 47 and 50 do the same. 3) In website/README.md Deploy section, state that playground/ must be copied as a sibling of website/ (or served from repo root). 4) Add a Playwright assertion that the resolved href returns HTTP 200 against the repo-root static server.",
+                         "effort_estimate":  {
+                                                 "minutes":  15,
+                                                 "human_readable":  "15 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "href replacements 5m; app.js 2m; README deploy note 3m; optional Playwright 200-check 5m"
+                                             },
+                         "technology":  "html",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "grep+glob",
+                                                  "query":  "href=\"./playground/index.html\" in website/*; glob website/**/* shows no playground subdir"
+                                              },
+                         "verification_command":  "Select-String -Path website\\index.html,website\\app.js -Pattern \u0027\\./playground/index\\.html\u0027 | Measure-Object | Select-Object Count; Test-Path website\\playground; Select-String -Path website\\benchmarks.html -Pattern \u0027\\.\\./playground/index\\.html\u0027",
+                         "references":  [
+                                            "website/index.html:34",
+                                            "website/index.html:93",
+                                            "website/app.js:47",
+                                            "website/benchmarks.html:196",
+                                            "website/README.md (Deploy section)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Directory absence verified by glob of website/**; internal contradiction between index.html and benchmarks.html paths confirms one is wrong; README deploy model makes ./playground unresolvable."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Only failure mode would be an intended deployment that copies playground/ inside website/, which no doc describes; benchmarks.html using ../ proves the sibling layout is canonical.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "website/README.md",
+                                                                                          "AGENTS.md (root)"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-CI-002",
+                         "severity":  "high",
+                         "file":  "book/src/chapter-4.md",
+                         "line":  58,
+                         "endLine":  76,
+                         "title":  "Book claims plain .map \u0027already fans out across cores\u0027 via Rayon with a runs-today marker; codegen emits no Rayon",
+                         "description":  "Section 4.2 (marked runs end-to-end) states the .map example \u0027already fans out across cores\u0027, that on 8 cores \u0027the eight multiplications literally run on eight cores simultaneously\u0027, and \u0027The compiler inserted all of it\u0027 (Rayon). Grep of crates/buff-lang-codegen-rust/src finds zero par_iter/into_par_iter/rayon emission; rayon exists only in buff-lang-runtime/src/cpu.rs CpuDispatcher, used for runtime dispatch fallback, not for ordinary .map lowering.",
+                         "root_cause":  "Heterogeneous-compute pitch (README:44 \u0027emits both a Rayon path and a WGSL shader\u0027) was carried into the book as a present-tense runs-today claim without verifying what codegen actually emits for un-annotated .map calls.",
+                         "impact":  "Users choosing Buff over Go/Rust for free automatic data parallelism get sequential iterator code today; a factually false performance claim marked as verified-runnable in the official guide.",
+                         "recommendation":  "Rewrite 4.2 to say .map lowers to a sequential iterator today and CPU-parallel (Rayon) execution happens only through the runtime dispatcher (e.g. @prefer(gpu) fallback), or downgrade the section marker from runs-today to partial.",
+                         "fix_examples":  {
+                                              "before":  "This already fans out across cores. On an 8-core machine the eight multiplications literally run on eight cores simultaneously.",
+                                              "after":  "Today this lowers to a sequential iterator. CPU-parallel (Rayon) execution engages via the runtime dispatcher - e.g. when an @prefer(gpu) function falls back to CPU with a large input - not for plain .map calls (see 4.3)."
+                                          },
+                         "fix_guide":  "1) Edit book/src/chapter-4.md lines 56-76 to describe sequential lowering with a pointer to dispatcher-based parallelism. 2) Cross-check README.md:42-46 wording for the same overstatement. 3) Add a codegen snapshot test asserting whether .map emits par_iter, so docs and codegen cannot drift silently.",
+                         "effort_estimate":  {
+                                                 "minutes":  30,
+                                                 "human_readable":  "30 minutes",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "rewrite 10m; README cross-check 5m; optional snapshot test 15m"
+                                             },
+                         "technology":  "markdown",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "grep",
+                                                  "query":  "par_iter|into_par_iter|rayon in crates/buff-lang-codegen-rust/src (0 hits) vs book chapter-4 \u0027fans out across cores\u0027"
+                                              },
+                         "verification_command":  "Select-String -Path book\\src\\chapter-4.md -Pattern \u0027fans out across cores\u0027; Get-ChildItem -Recurse crates\\buff-lang-codegen-rust\\src -Include *.rs | Select-String -Pattern \u0027par_iter|into_par_iter\u0027 | Measure-Object | Select-Object Count",
+                         "references":  [
+                                            "book/src/chapter-4.md:58-76",
+                                            "crates/buff-lang-runtime/src/cpu.rs:19-53",
+                                            "README.md:42-46",
+                                            "crates/buff-lang-runtime/src/hints.rs:40-43"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.85,
+                                            "rationale":  "Zero parallel-iterator emission in codegen src is verified; small residual risk that parallelism enters via a crate the generated code links that was not grepped (e.g. prelude_types runtime references) - hence not 0.95."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Claim text and codegen absence both read directly; only uncertainty is an indirect Rayon path outside codegen src, which would still contradict \u0027plain .map fans out\u0027.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "book/AGENTS.md",
+                                                                                          "crates/buff-lang-runtime/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-CI-003",
+                         "severity":  "medium",
+                         "file":  "website/benchmarks.html",
+                         "line":  224,
+                         "endLine":  226,
+                         "title":  "Benchmarks summary card says 7 fixtures; tables, JSON and harness define 6",
+                         "description":  "The \u0027Fixtures\u0027 summary card shows 7, but the Compile Time / Codegen Hash / Binary Size / Dispatch tables list 6 fixtures, the raw JSON block contains exactly 6 entries, and the producing harness (buff bench, cli.rs:1192-1194) documents \u0027the 6 canonical names\u0027. The page is the project\u0027s public performance-evidence surface.",
+                         "root_cause":  "Card value hand-edited or copied from a different capture run than the embedded JSON/table without reconciliation.",
+                         "impact":  "Data-integrity defect on the marketing benchmarks page: a competitor or evaluator recounting fixtures finds the headline number contradicted by the page\u0027s own data two scroll-lengths below.",
+                         "recommendation":  "Change the summary card to 6, and ideally generate all summary cards from the same embedded JSON so the page cannot self-contradict on future captures.",
+                         "fix_examples":  {
+                                              "before":  "\u003cdiv class=\"summary-card-value\"\u003e7\u003c/div\u003e\n\u003cdiv class=\"summary-card-label\"\u003eFixtures\u003c/div\u003e",
+                                              "after":  "\u003cdiv class=\"summary-card-value\"\u003e6\u003c/div\u003e\n\u003cdiv class=\"summary-card-label\"\u003eFixtures\u003c/div\u003e"
+                                          },
+                         "fix_guide":  "1) Set card value to 6 (or derive counts from the JSON via a tiny script at capture time). 2) Regenerate the page from capture_t22_baseline output so card/table/JSON always agree. 3) Keep the honest capture-date/commit footer as is.",
+                         "effort_estimate":  {
+                                                 "minutes":  5,
+                                                 "human_readable":  "5 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "single-value edit + eyeball re-count"
+                                             },
+                         "technology":  "html",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "read",
+                                                  "query":  "summary-card-value \u00277\u0027 vs \u003ctr\u003e fixture rows and JSON \u0027fixtures\u0027 keys on same page"
+                                              },
+                         "verification_command:\";\"missing":  false,
+                         "note":  "noop",
+                         "verification_command":  "(Select-String -Path website\\benchmarks.html -Pattern \u0027summary-card-value\"\u003e7\u003c/div\u003e\u0027).Count; (Select-String -Path website\\benchmarks.html -Pattern \u0027\u003ctd\u003eclosures\u003c/td\u003e|\u003ctd\u003ecollections\u003c/td\u003e|\u003ctd\u003eerror_handling\u003c/td\u003e|\u003ctd\u003efibonacci\u003c/td\u003e|\u003ctd\u003eola\u003c/td\u003e|\u003ctd\u003epattern_matching\u003c/td\u003e\u0027).Count",
+                         "references":  [
+                                            "website/benchmarks.html:224-226",
+                                            "website/benchmarks.html:257-306",
+                                            "website/benchmarks.html:468-499",
+                                            "crates/buff-lang-cli/src/cli.rs:1192-1194"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.98,
+                                            "rationale":  "Directly counted on one page plus harness doc; no interpretation needed."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Pure arithmetic mismatch inside a single file; \u00277\u0027 cannot be justified by any grouping of the 6 listed rows.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "website/README.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-CI-004",
+                         "severity":  "medium",
+                         "file":  "book/src/chapter-8.md",
+                         "line":  131,
+                         "endLine":  184,
+                         "title":  "Error Code Handbook omits 6 of the 62 stable codes; range headers contradict enum and docs/errors site",
+                         "description":  "Section headers claim \u0027Parsing - E1101-E1109\u0027 (line 131) and \u0027Type-checking - E1201-E1209\u0027 (line 184), but code.rs defines E1110 (comptime malformed, line 119) and E1210-E1214 (comptime eval/IO/reflection, dyn-trait object, lifetime, lines 152-167), and docs/errors/ ships exactly 62 E1xxx pages matching the enum\u0027s 62 variants. The handbook documents 56/62, so its stated ranges are factually stale against the two sources it cites as canonical.",
+                         "root_cause":  "E1110 and E1210-E1214 were appended (v1.13+ comptime and v1.34 dyn-trait work) without updating chapter-8\u0027s section ranges or adding entries.",
+                         "impact":  "Users searching the handbook for comptime (E1110/E1210-E1212) or dyn-trait (E1213/E1214) codes find nothing, undermining the \u0027every code is documented\u0027 stability story the chapter leads with.",
+                         "recommendation":  "Add sections for E1110 and E1210-E1214 (copy explanation/fix from code.rs docs + docs/errors pages) and correct the two range headers to E1101-E1110 and E1201-E1214.",
+                         "fix_examples":  {
+                                              "before":  "## 8.3 Parsing â€” `E1101`â€“`E1109`\n## 8.4 Type-checking â€” `E1201`â€“`E1209`",
+                                              "after":  "## 8.3 Parsing â€” `E1101`â€“`E1110`\n### E1110 â€” malformed `comptime` block or parameter\n## 8.4 Type-checking â€” `E1201`â€“`E1214`\n### E1210â€“E1212 â€” comptime evaluation limits; E1213â€“E1214 â€” dyn-trait restrictions"
+                                          },
+                         "fix_guide":  "1) Insert E1110 subsection from code.rs:119 doc + docs/errors/E1110.html. 2) Insert five subsections for E1210-E1214 from code.rs:152-167 + matching HTML pages. 3) Fix both range headers. 4) Consider a test that diffs chapter-8 code mentions against ErrorCode variants.",
+                         "effort_estimate":  {
+                                                 "minutes":  60,
+                                                 "human_readable":  "1 hour",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "6 subsections x 8m + header edits 5m + link check 7m"
+                                             },
+                         "technology":  "markdown",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "grep+read",
+                                                  "query":  "chapter-8 range headers vs \u0027^    [A-Z]\\w+,$\u0027 count (62) in code.rs and docs/errors glob (62 pages)"
+                                              },
+                         "verification_command":  "(Select-String -Path crates\\buff-lang-error\\src\\code.rs -Pattern \u0027^    [A-Z]\\w+,$\u0027).Count; (Get-ChildItem docs\\errors\\E*.html).Count; Select-String -Path book\\src\\chapter-8.md -Pattern \u0027E1101â€“E1109|E1201â€“E1209\u0027; Select-String -Path book\\src\\chapter-8.md -Pattern \u0027E1110|E1210\u0027 | Measure-Object | Select-Object Count",
+                         "references":  [
+                                            "book/src/chapter-8.md:131",
+                                            "book/src/chapter-8.md:184",
+                                            "crates/buff-lang-error/src/code.rs:119",
+                                            "crates/buff-lang-error/src/code.rs:152-167",
+                                            "docs/errors/E1110.html"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "62 enum variants, 62 HTML pages, and chapter-8\u0027s absent E1110/E1210-E1214 mentions all directly verified by count grep."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Chapter-8 itself declares the enum + site canonical; the mismatch is mechanical, and chapter-8\u0027s \u0027when in doubt, the site wins\u0027 caveat does not make its range headers true.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "book/AGENTS.md",
+                                                                                          "crates/buff-lang-error/AGENTS.md",
+                                                                                          "docs/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-CI-005",
+                         "severity":  "medium",
+                         "file":  "README.md",
+                         "line":  52,
+                         "endLine":  52,
+                         "title":  "\u0027~95% of user code never knows async exists\u0027 is an unverifiable quantitative claim repeated across 6 surfaces",
+                         "description":  "README.md:52, book chapter-6.md:458, chapter-9.md:202, and docs-site/content (onboarding/rust-developers.md:26, language/async.md:23, cookbook/async.md:11) all state ~95% (or \u0027About 95%\u0027/\u0027Around 95%\u0027) of user code never encounters async. No benchmark, corpus analysis, or measurement in the repo substantiates the figure; buff-lang-types/src/async_analysis.rs implements propagation analysis but emits no such statistic.",
+                         "root_cause":  "A rhetorical estimate hardened into a repeated pseudo-precise statistic and copy-pasted across README, book, and docs-site.",
+                         "impact":  "A precise-sounding number with no methodology is exactly the kind of claim competitors and HN-style reviewers discredit; it also risks contradicting future measured data.",
+                         "recommendation":  "Soften to a qualitative claim (\u0027most user code never needs await; async propagates automatically\u0027) or link to a reproducible measurement; keep one canonical wording and reference it from the other five surfaces.",
+                         "fix_examples":  {
+                                              "before":  "~95% of user code never knows async exists.",
+                                              "after":  "Most user code never knows async exists â€” no `await`, no colored functions; async propagates up the call graph automatically."
+                                          },
+                         "fix_guide":  "1) Pick the qualitative wording in README.md:52. 2) Apply the same wording in book/src/chapter-6.md:458, chapter-9.md:202, docs-site/content/onboarding/rust-developers.md:26, docs-site/content/language/async.md:23, docs-site/content/cookbook/async.md:11. 3) If a number is desired, add a scripts/ analysis over examples/ and cite it.",
+                         "effort_estimate":  {
+                                                 "minutes":  20,
+                                                 "human_readable":  "20 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "6 files x 3m wording + consistency pass"
+                                             },
+                         "technology":  "markdown",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "grep",
+                                                  "query":  "95% across *.md,*.html (6 hits, no measurement backing in-repo)"
+                                              },
+                         "verification_command":  "Select-String -Path README.md,book\\src\\chapter-6.md,book\\src\\chapter-9.md,docs-site\\content\\onboarding\\rust-developers.md,docs-site\\content\\language\\async.md,docs-site\\content\\cookbook\\async.md -Pattern \u002795%\u0027; Get-ChildItem -Recurse -Include *.md,*.rs | Select-String -Pattern \u002795\\s*(percent|%)\u0027 | Where-Object {$_.Filename -notmatch \u0027README|chapter|async|rust-developers|cookbook\u0027} | Measure-Object | Select-Object Count",
+                         "references":  [
+                                            "README.md:52",
+                                            "book/src/chapter-6.md:458",
+                                            "book/src/chapter-9.md:202",
+                                            "docs-site/content/language/async.md:23"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.8,
+                                            "rationale":  "Absence of any backing measurement verified by repo-wide grep for the figure; residual chance a plan doc derives it heuristically, which would still not be a measurement."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Flagging only the unverifiable precision, not the qualitative async story, which is real (async_analysis.rs exists); aspirational-vs-factual framing is clearly separated in the recommendation.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "book/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-CI-006",
+                         "severity":  "medium",
+                         "file":  "README.md",
+                         "line":  42,
+                         "endLine":  59,
+                         "title":  "GPU dispatch marketed in present tense while the book admits it is not wired end-to-end",
+                         "description":  "README:42-46 says the compiler \u0027emits both a Rayon path and a WGSL shader, then the runtime picks at execution time\u0027 and :56-59 promises binaries that \u0027dispatch hot loops to the GPU\u0027; website/index.html:48-51 echoes it. But book chapter-4.md:115-119 (marked partial) states \u0027End-to-end GPU dispatch from buff run requires the wgpu runtime linkage wired through the CLI\u0027s single-file pipeline\u0027, and the project\u0027s own benchmarks page records \u00270 GPU dispatches\u0027. WGSL codegen + runtime are real and unit-tested, but the shipped buff run path does not execute GPU shaders.",
+                         "root_cause":  "v1.0 positioning copy predates the honest partial-capability markers added in the book; the README/website were not synced when the end-to-end wiring was found unfinished.",
+                         "impact":  "Positioning incoherence for a dev tool competing on capability: a user trying the headline GPU feature gets CPU fallback silently; the discrepancy between README/website and the book/benchmarks is discoverable within minutes.",
+                         "recommendation":  "Add a status qualifier to README idea 3 and the website hero (\u0027GPU dispatch: shader codegen + runtime shipped; end-to-end buff run wiring in progress\u0027), and link chapter-4\u0027s partial marker so all four surfaces tell one story.",
+                         "fix_examples":  {
+                                              "before":  "Invisible heterogeneous computing. The same Buff function can run on CPU or be dispatched to GPU automatically â€” the compiler analyzes arithmetic intensity and emits both a Rayon path and a WGSL shader, then the runtime picks at execution time.",
+                                              "after":  "Invisible heterogeneous computing (in progress). The compiler emits a WGSL shader next to your function and the runtime routes CPU/GPU; shader codegen + runtime are shipped and tested â€” end-to-end GPU execution through `buff run` is the last wiring step (see Book ch. 4)."
+                                          },
+                         "fix_guide":  "1) Qualify README.md:42-46 and :56-59. 2) Add one line to website/index.html hero body near line 48-51. 3) Verify chapter-4:115-119 stays the canonical status note and link it. 4) Re-run website Playwright tests (copy-only change).",
+                         "effort_estimate":  {
+                                                 "minutes":  25,
+                                                 "human_readable":  "25 minutes",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "README edits 10m; website edit 5m; cross-link + review 10m"
+                                             },
+                         "technology":  "markdown",
+                         "category":  "competitive-intel",
+                         "detection_method":  {
+                                                  "tool":  "read+grep",
+                                                  "query":  "README present-tense GPU claims vs chapter-4 partial marker and benchmarks.html \u00270 GPU dispatches\u0027"
+                                              },
+                         "verification_command":  "Select-String -Path README.md -Pattern \u0027dispatched to GPU automatically|dispatches hot loops\u0027; Select-String -Path book\\src\\chapter-4.md -Pattern \u0027End-to-end GPU dispatch\u0027; Select-String -Path website\\benchmarks.html -Pattern \u0027GPU dispatches\u0027 -Context 1,1",
+                         "references":  [
+                                            "README.md:42-46",
+                                            "README.md:56-59",
+                                            "book/src/chapter-4.md:115-119",
+                                            "website/benchmarks.html:228-233",
+                                            "website/index.html:48-51"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.85,
+                                            "rationale":  "The book\u0027s own partial marker plus 0-dispatch benchmark evidence make the overstatement unambiguous; uncertainty only on whether an unreleased local build wires GPU end-to-end."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Not claiming the feature is fake - WGSL/runtime crates and tests exist; flagging only present-tense marketing of a not-yet-wired path, which the repo\u0027s own ch4 marker confirms.",
+                                                         "verified_against_conventions":  "yes",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "book/AGENTS.md",
+                                                                                          "website/README.md"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           "AGENTS.md",
+                                           "README.md",
+                                           "website/index.html",
+                                           "website/benchmarks.html",
+                                           "website/app.js",
+                                           "website/README.md",
+                                           "book/src/SUMMARY.md",
+                                           "book/src/chapter-1.md",
+                                           "book/src/chapter-4.md",
+                                           "book/src/chapter-8.md",
+                                           "book/src/chapter-10.md",
+                                           "book/README.md",
+                                           "book/AGENTS.md",
+                                           "docs/binary-size.md",
+                                           "docs/AGENTS.md",
+                                           "docs/errors/ (62 E1xxx pages, counted via glob)",
+                                           "crates/buff-lang-error/src/code.rs",
+                                           "crates/buff-lang-error/AGENTS.md",
+                                           "crates/buff-lang-lexer/src/token.rs",
+                                           "crates/buff-lang-lexer/AGENTS.md",
+                                           "crates/buff-lang-cli/src/cli.rs",
+                                           "crates/buff-lang-cli/AGENTS.md",
+                                           "crates/buff-lang-runtime/src/hints.rs",
+                                           "crates/buff-lang-runtime/src/cpu.rs",
+                                           "crates/buff-lang-codegen-rust/src (rayon/par_iter/buff_lang_runtime greps)",
+                                           "examples/ glob (77 .buff files)",
+                                           "examples/use-cases/ (19 files incl. _sample.buff)",
+                                           "examples/rust-vs-buff/ (43 files)",
+                                           "scripts/ (26 scripts incl. test-use-cases.ps1)"
+                                       ],
+                    "files_skipped":  [
+                                          "book/src/chapter-0,2,3,5,6,7,9.md (chapter-6/9 sampled via 95% grep only)",
+                                          "docs/errors/E*.html individual contents (62 pages counted, not read page-by-page)",
+                                          "website/tests/website.spec.cjs",
+                                          "playground/* (out of claimed-surfaces scope; linked-from checks only)",
+                                          "editors/vscode README (no comparative claims surfaced in scope greps)",
+                                          ".sisyphus/plans/* (evidence/ is gitignored; harness code verified via cli.rs + capture_t22_baseline.rs instead)"
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     "book/src/chapter-1.md:128 says \u0027One of Buff\u0027s 30 keywords\u0027 but token.rs:355-362 all_keywords() has exactly 31 (README:294 says 31, correct); verified but cut by the 6-finding cap - low materiality wording fix",
+                                                     "Stale book references: chapter-1.md:81 sample output \u0027buff-lang-cli 1.24.0\u0027 (repo at v1.39) and v1x-frameworks branch links (chapter-1.md:51,87; chapter-8.md:29,495) vs main-branch links elsewhere (chapter-10, README badges) - plausibly dead/stale URLs, not flagged within cap",
+                                                     "crates/buff-lang-cli/AGENTS.md claims \u002721 subcommands\u0027 while the Command enum defines ~37 - internal repo doc (not one of the 5 public surfaces in scope), not flagged",
+                                                     "\u0027~95%\u0027 also appears in 3 docs-site/content files - folded into AUD-CI-005 references rather than a separate finding",
+                                                     "website/benchmarks.html capture metadata (commit 40ca974, 2026-07-24) predates HEAD (bcbb711) but is honestly labeled with capture date - not flagged",
+                                                     "No TAM/SAM/SOM or market-sizing docs exist - per audit instructions this absence is normal for OSS and no business-doc finding was fabricated"
+                                                 ],
+                    "totals":  {
+                                   "findings":  6,
+                                   "high":  2,
+                                   "medium":  4,
+                                   "low":  0,
+                                   "claims_inventoried":  14,
+                                   "claims_verified_clean":  6,
+                                   "files_examined":  29,
+                                   "error_pages_matched":  "62/62 enum-to-site (clean)"
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

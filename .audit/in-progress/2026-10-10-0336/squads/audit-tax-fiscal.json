@@ -1,0 +1,40 @@
+{
+  "report_version": "3.2",
+  "run_id": "2026-10-10-0336",
+  "squad": "audit-tax-fiscal",
+  "project": "buff",
+  "timestamp": "2026-10-10T03:36:26-03:00",
+  "findings": [],
+  "summary": {
+    "files_examined": [
+      {"path": "AGENTS.md", "lines_read": 245, "bytes_read": 25394, "examined_at": "2026-10-10T03:36:26-03:00", "findings_emitted": 0, "verdict": "clean - mandatory FP-rule read; 73-crate MIT OR Apache-2.0 OSS compiler, no revenue/monetization/fiscal content"},
+      {"path": ".github/FUNDING.yml", "lines_read": 4, "bytes_read": 135, "examined_at": "2026-10-10T03:37:02-03:00", "findings_emitted": 0, "verdict": "clean - all 4 lines commented out (# github: [vinaosb], # custom: [https://buff-lang.org]); zero active funding keys; only FUNDING.yml in repo"},
+      {"path": "crates/buff-fsm/examples/fsm_order_status.rs", "lines_read": 71, "bytes_read": 1900, "examined_at": "2026-10-10T03:38:40-03:00", "findings_emitted": 0, "verdict": "clean - closest e-commerce candidate read in full: T40 pedagogical state-machine demo (string states cart/paid/shipped/delivered); no payment gateway, no money movement"},
+      {"path": "grep-sweep://repo/broad-substring tax|vat|icms|iss|withhold|fiscal|invoice|nfe|1099|w-9|w-8ben over *.{md,rs,html,toml,yml,yaml}", "lines_read": 631, "bytes_read": 0, "examined_at": "2026-10-10T03:36:30-03:00", "findings_emitted": 0, "verdict": "noise-only - 631 of 1388 in-scope files matched via substrings (iss in issue/missing, tin in parsing, tax in syntax); no standalone fiscal term behind the noise"},
+      {"path": "grep-sweep://repo/word-boundary tax|taxes|taxation|taxable", "lines_read": 4, "bytes_read": 0, "examined_at": "2026-10-10T03:36:45-03:00", "findings_emitted": 0, "verdict": "benign - 4 hits in 3 doc files, all developer-experience metaphors (err != nil tax; typing tax; tooling tax; Node startup tax); zero fiscal usage"},
+      {"path": "grep-sweep://repo/word-boundary vat|icms|fiscal|invoice|nfe|withhold|nota fiscal", "lines_read": 2, "bytes_read": 0, "examined_at": "2026-10-10T03:36:52-03:00", "findings_emitted": 0, "verdict": "benign - only buff-email/examples/attachment.rs L22,L24 'Invoice attached' demo email string; no invoice numbering, no VAT/ICMS/withholding logic"},
+      {"path": "grep-sweep://repo/word-boundary iss|tin|ein", "lines_read": 2, "bytes_read": 0, "examined_at": "2026-10-10T03:36:58-03:00", "findings_emitted": 0, "verdict": "benign - only iss = JWT issuer claim in buff-auth/src/jwt.rs L43 + buff-auth/AGENTS.md L77; unrelated to Brazilian ISS tax"},
+      {"path": "grep-sweep://repo/word-boundary 1099|w-9|w-8ben", "lines_read": 0, "bytes_read": 0, "examined_at": "2026-10-10T03:37:05-03:00", "findings_emitted": 0, "verdict": "clean - zero US tax-form identifiers"},
+      {"path": "grep-sweep://repo/br-fiscal-ids cnpj|cpf|cofins|nfse|danfe", "lines_read": 0, "bytes_read": 0, "examined_at": "2026-10-10T03:37:10-03:00", "findings_emitted": 0, "verdict": "clean - zero Brazilian taxpayer IDs or fiscal-document identifiers"},
+      {"path": "grep-sweep://repo/ecommerce checkout|cart|payment|stripe|paypal|billing|price|purchase|monetiz", "lines_read": 88, "bytes_read": 0, "examined_at": "2026-10-10T03:37:15-03:00", "findings_emitted": 0, "verdict": "no e-commerce checkout logic - 88 hits in 24 files all characterized: git checkout VCS ops, actions/checkout@v4 CI steps, price as Decimal demo variable, XML parser sample data, FSM demo; no cart management or payment processing"},
+      {"path": "grep-sweep://dotgithub hidden-dir fiscal terms incl workflows yml", "lines_read": 0, "bytes_read": 0, "examined_at": "2026-10-10T03:37:20-03:00", "findings_emitted": 0, "verdict": "clean - all 9 .github yml files enumerated via -Force; zero fiscal hits"},
+      {"path": "grep-sweep://dotsisyphus hidden-dir fiscal terms", "lines_read": 2, "bytes_read": 0, "examined_at": "2026-10-10T03:37:25-03:00", "findings_emitted": 0, "verdict": "benign - 2 metaphor hits only (error-conversion tax, DX tax/tooling tax in decisions/)"},
+      {"path": "grep-sweep://repo/funding-channels sponsor|donate|funding|patreon|opencollective|kofi|sponsors", "lines_read": 1, "bytes_read": 0, "examined_at": "2026-10-10T03:39:10-03:00", "findings_emitted": 0, "verdict": "clean - single hit is CHANGELOG.md L23 recording FUNDING.yml was added as inert infra; no active sponsorship channel"},
+      {"path": "coverage-census://repo/in-scope-file-count", "lines_read": 0, "bytes_read": 0, "examined_at": "2026-10-10T03:39:30-03:00", "findings_emitted": 0, "verdict": "coverage evidence - 1388 in-scope files enumerated incl. hidden dirs (-Force): 875 .rs, 348 .md, 85 .toml, 71 .html, 9 .yml"}
+    ],
+    "files_skipped": [
+      {"path": "crates/** (~720 in-scope files with zero word-boundary fiscal matches)", "reason": "covered by 6 word-boundary sweeps; only matched files read/characterized", "lines_not_examined": 0},
+      {"path": "website/**/*.js + playground/**/*.js", "reason": "JS outside scope extensions; adjacent HTML swept clean", "lines_not_examined": 0},
+      {"path": "playground/pkg/*.wasm + editors/vscode build outputs", "reason": "binary/generated artifacts outside scope extensions", "lines_not_examined": 0},
+      {"path": "tree-sitter-buff/src/parser.c + scanner.c", "reason": "generated/hand-written C outside scope extensions", "lines_not_examined": 0},
+      {"path": "target/** + .git/**", "reason": "gitignored build artifacts and VCS internals", "lines_not_examined": 0}
+    ],
+    "falseNegativesIdentified": [
+      {"area": "Maintainer-side Brazilian tax obligations (IRPF/MEI, municipal ISS on software services, GitHub Sponsors payouts via Stripe Connect)", "reason": "repository content cannot evidence off-repo fiscal duties; content-only audit"},
+      {"area": "Cross-border payment and treaty documentation (W-8BEN-E, Brazil-US double-taxation treaty, 1099/1042-S exposure)", "reason": "no fiscal documents exist in repo by design; would require financial-records review if monetization begins"},
+      {"area": "Future monetization surfaces (paid registry tier, sponsorship activation, paid courses)", "reason": "FUNDING.yml fully commented; any future paid tier would invalidate this zero-finding result"},
+      {"area": "Out-of-scope file formats (*.json, *.js/ts bundles, *.wasm, *.buff/.buffhtml, tree-sitter C sources)", "reason": "scope fixed to md/rs/html/toml/yml per spec"}
+    ],
+    "totals": {"critical": 0, "high": 0, "medium": 0, "low": 0, "files_examined": 14}
+  }
+}

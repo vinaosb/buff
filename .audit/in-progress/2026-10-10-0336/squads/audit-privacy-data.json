@@ -1,0 +1,311 @@
+﻿{
+    "squad":  "audit-privacy-data",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-PRIV-001",
+                         "severity":  "high",
+                         "file":  "crates/buff-registry/src/storage.rs",
+                         "line":  76,
+                         "endLine":  80,
+                         "title":  "Raw publish bearer tokens serialized publicly in GET /api/v1/package response",
+                         "description":  "VersionInfo is #[derive(Serialize)] and documented as the GET /api/v1/package/{name} JSON body (storage.rs:56-90). publish() sets author to the raw bearer token when no OAuth session exists (handlers.rs:440-443), persisted in versions.author and loaded back into the response (storage_sqlite.rs:316-330). Any anonymous client can therefore read every static-token publisher\u0027s plaintext credential with one curl. The field doc itself states \u0027The author (publish token)\u0027.",
+                         "root_cause":  "T70 quality-signals wiring routed author through the public VersionInfo DTO for server-side badge computation without separating identity (github login) from secret (publish token).",
+                         "impact":  "Public unauthenticated credential disclosure: one leaked metadata scrape yields publish rights + org identity for every static-token publisher; tokens are long-lived with no rotation tooling.",
+                         "recommendation":  "Add #[serde(skip_serializing)] to VersionInfo.author; store only SHA-256(token) (or github login) in versions.author; rotate existing tokens; add integration test asserting package metadata never contains a seeded token.",
+                         "fix_examples":  {
+                                              "before":  "/// T70: The author (publish token) that published this version,\n#[serde(skip_serializing_if = \"Option::is_none\")]\npub author: Option\u003cString\u003e,",
+                                              "after":  "/// T70: Author identity for server-side badge checks only.\n/// NEVER serialized to anonymous clients (token stored hashed).\n#[serde(skip_serializing)]\npub author: Option\u003cString\u003e,"
+                                          },
+                         "fix_guide":  "1) Add #[serde(skip_serializing)] to VersionInfo.author (storage.rs:79). 2) In handlers.rs publish (line ~443) and multipart publish (~812), replace .or_else(|| Some(token.to_string())) with sha256-hex of the token (sha2 already a workspace dep). 3) Key is_verified_author on the digest. 4) Migration: UPDATE versions SET author to digest or NULL. 5) Extend tests/registry_tests.rs: seed token, GET package, assert token absent.",
+                         "effort_estimate":  {
+                                                 "minutes":  60,
+                                                 "human_readable":  "1 hour",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "DTO flag 5m; digest helper 15m; two handler sites 15m; migration+test 25m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "axum",
+                                            "serde"
+                                        ],
+                         "category":  "privacy-data",
+                         "detection_method":  {
+                                                  "tool":  "grep+read",
+                                                  "query":  "author.*publish token; VersionInfo Serialize derive; or_else(|| Some(token.to_string()))"
+                                              },
+                         "verification_command":  "Select-String -Path \"crates\\buff-registry\\src\\storage.rs\",\"crates\\buff-registry\\src\\handlers.rs\" -Pattern \"publish token\",\"or_else\\(\\|\\| Some\\(token.to_string\" -Context 1,3",
+                         "references":  [
+                                            "crates/buff-registry/src/storage.rs:56-90",
+                                            "crates/buff-registry/src/handlers.rs:437-455",
+                                            "crates/buff-registry/src/storage_sqlite.rs:316-330",
+                                            "OWASP API Security API3:2019 Broken Object Property Level Authorization"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Direct read confirmed Serialize derive on VersionInfo, handler storing raw token as author, and get_package loading that column into the public response"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Code comments explicitly admit the field carries the publish token; no AGENTS.md/convention documents public exposure as a deliberate choice",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-registry/AGENTS.md",
+                                                                                          ".sisyphus/plans/buff-conventions.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-PRIV-002",
+                         "severity":  "high",
+                         "file":  "crates/buff-lang-cli/src/commands/registry.rs",
+                         "line":  231,
+                         "endLine":  241,
+                         "title":  "~/.buff/credentials bearer token written plaintext with no restrictive permissions",
+                         "description":  "save_credentials_to serializes the bearer token to TOML and writes it with plain fs::write (registry.rs:236-239); no 0600/ACL hardening. On Unix a default umask yields world-readable 0644. The docstring defers only atomicity (\u0027a future hardening pass can swap in a temp-file + rename\u0027), not permissions. Prior squads flagged this; it remains unhardened.",
+                         "root_cause":  "v1.6 milestone simplicity; the credential-store helper was never revisited when registry auth became real (T57 SQLite/OAuth).",
+                         "impact":  "Stolen token grants publish rights and registry identity impersonation. Readily exposed on multi-user Unix hosts, via backup jobs, dotfile sync, or any local process reading the user profile.",
+                         "recommendation":  "Set 0600 permissions on Unix via std::os::unix::fs::PermissionsExt after write; document Windows user-profile ACL behavior inline; warn when an existing credentials file is group/world-readable; consider OS keyring long-term.",
+                         "fix_examples":  {
+                                              "before":  "fs::write(path, text)\n    .with_context(|| format!(\"failed to write credentials to {}\", path.display()))?;",
+                                              "after":  "fs::write(path, \u0026text)\n    .with_context(|| format!(\"failed to write credentials to {}\", path.display()))?;\n#[cfg(unix)]\n{\n    use std::os::unix::fs::PermissionsExt;\n    fs::set_permissions(path, fs::Permissions::from_mode(0o600))\n        .with_context(|| format!(\"failed to restrict {}\", path.display()))?;\n}"
+                                          },
+                         "fix_guide":  "1) After fs::write in save_credentials_to, apply mode 0600 on unix targets (cfg-gated; Windows inherits user-profile ACL â€” add a doc comment). 2) In load_credentials_from, stat the file and bail/warn if unix mode has group/other read bits. 3) Extend tests credentials_round_trip_through_disk to assert the mode on unix. 4) Note in buff-lang-cli/AGENTS.md so the choice is recorded.",
+                         "effort_estimate":  {
+                                                 "minutes":  45,
+                                                 "human_readable":  "45 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "write+chmod 10m; read-side check 15m; tests 15m; docs 5m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "std::fs"
+                                        ],
+                         "category":  "privacy-data",
+                         "detection_method":  {
+                                                  "tool":  "read",
+                                                  "query":  "save_credentials_to fs::write permission handling"
+                                              },
+                         "verification_command":  "Select-String -Path \"crates\\buff-lang-cli\\src\\commands\\registry.rs\" -Pattern \"fs::write\",\"Permissions\" -Context 3,3",
+                         "references":  [
+                                            "crates/buff-lang-cli/src/commands/registry.rs:222-241",
+                                            "OWASP Secrets Management CheatSheet"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "fs::write with no permission-setting call verified by direct read; Windows path inherits profile ACL, Unix path does not"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "Plaintext TOML simplicity IS documented (\u0027kept dead-simple for the v1.6 milestone\u0027), but the docstring defers atomicity only; no convention declares no-permission-hardening deliberate, and a prior squad already flagged it",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-lang-cli/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-PRIV-003",
+                         "severity":  "medium",
+                         "file":  "crates/buff-registry/src/storage_sqlite.rs",
+                         "line":  88,
+                         "endLine":  110,
+                         "title":  "Publish + session tokens stored unhashed (plaintext) in SQLite at rest",
+                         "description":  "tokens and sessions tables store raw token strings as PRIMARY KEY (storage_sqlite.rs:88-90, 106-110); add_token INSERTs plaintext (:208-216) and create_session INSERTs the raw UUID session token (:569-576). No hashing anywhere in the crate. WAL mode (init, :194) additionally spreads live copies into registry.db-wal side files.",
+                         "root_cause":  "Static-token MVP kept tokens as direct lookup keys; T57 sessions reused the same plaintext-key pattern for OAuth session tokens.",
+                         "impact":  "Any read of the DB file, WAL, or a backup (host compromise, leaked backup, debug access) yields every publish credential and live session cookie in cleartext â€” mass account takeover with no further attack step.",
+                         "recommendation":  "Store SHA-256 digests as the keys; hash the presented token and compare digests on validate_token/validate_session; migrate existing rows (or force re-login); consider SQLCipher only if threat model demands.",
+                         "fix_examples":  {
+                                              "before":  "INSERT OR IGNORE INTO tokens (token) VALUES (?1)",
+                                              "after":  "INSERT OR IGNORE INTO tokens (token_hash) VALUES (?1) -- ?1 = sha256_hex(token)\n-- lookup: SELECT 1 FROM tokens WHERE token_hash = ?1 (hash the bearer first)"
+                                          },
+                         "fix_guide":  "1) Rename columns to token_hash / recreate tables (CREATE TABLE IF NOT EXISTS won\u0027t alter existing DBs â€” add a small ALTER/migration step). 2) Add fn hash_token(\u0026str) -\u003e String using sha2 (workspace dep). 3) Hash in add_token/create_session; hash-before-query in validate_token/validate_session/try_record_publish/delete_session. 4) Buff login client is unaffected (server-side change only). 5) Test: raw token string never appears in the DB file bytes.",
+                         "effort_estimate":  {
+                                                 "minutes":  120,
+                                                 "human_readable":  "2 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "hash helper 15m; 6 storage methods 45m; migration 30m; tests 30m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "rusqlite",
+                                            "sha2"
+                                        ],
+                         "category":  "privacy-data",
+                         "detection_method":  {
+                                                  "tool":  "read",
+                                                  "query":  "INSERT INTO tokens / INSERT INTO sessions plaintext"
+                                              },
+                         "verification_command":  "Select-String -Path \"crates\\buff-registry\\src\\storage_sqlite.rs\" -Pattern \"INSERT OR IGNORE INTO tokens\",\"INSERT INTO sessions\",\"journal_mode\" -Context 2,3",
+                         "references":  [
+                                            "crates/buff-registry/src/storage_sqlite.rs:72-130",
+                                            "crates/buff-registry/src/storage_sqlite.rs:203-216",
+                                            "crates/buff-registry/src/storage_sqlite.rs:545-577",
+                                            "OWASP Authentication CheatSheet - store hashed"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Schema and both INSERT sites read directly; grep found no hashing anywhere in buff-registry"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "buff-registry AGENTS.md documents static tokens via add_token and in-memory MVP as deliberate for T126, but says nothing sanctioning plaintext persistence after T57 added durable SQLite + OAuth sessions",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-registry/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-PRIV-004",
+                         "severity":  "medium",
+                         "file":  "crates/buff-registry/src/storage_sqlite.rs",
+                         "line":  579,
+                         "endLine":  595,
+                         "title":  "OAuth sessions never expire - no TTL column or time check",
+                         "description":  "sessions schema holds only (token, user_id, created_at) (storage_sqlite.rs:106-110); validate_session (:579-595) performs no time-based check, despite the Storage trait doc promising Ok(None) for \u0027unknown / expired\u0027 (storage.rs:325-331). The buff_session cookie also sets no Max-Age (oauth.rs:290). A leaked cookie is valid indefinitely; logout is the only lifecycle event.",
+                         "root_cause":  "T57 session MVP implemented create/validate/delete without a retention policy; the trait contract mentions expiry that was never implemented.",
+                         "impact":  "Indefinite identity-token lifetime defeats breach containment; stolen buff_session = permanent GitHub-identity access to publish/org surfaces. Unbounded sessions rows also retain identity linkage forever.",
+                         "recommendation":  "Add expires_at column (e.g. created_at + 7 days), enforce in validate_session, periodically DELETE expired rows; document an ALTER TABLE migration for existing databases and a SESSION_TTL env override.",
+                         "fix_examples":  {
+                                              "before":  "SELECT u.github_login, u.github_id FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ?1",
+                                              "after":  "DELETE FROM sessions WHERE expires_at \u003c ?2; -- lazy sweep, ?2 = now\nSELECT u.github_login, u.github_id FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ?1 AND s.expires_at \u003e ?2"
+                                          },
+                         "fix_guide":  "1) ALTER TABLE sessions ADD COLUMN expires_at INTEGER (guard for existing DBs). 2) create_session: insert now + ttl (new SESSION_TTL_ENV, default 604800s). 3) validate_session: add AND expires_at \u003e now + lazy sweep. 4) oauth.rs callback comment update. 5) Test: backdated session validates to None.",
+                         "effort_estimate":  {
+                                                 "minutes":  90,
+                                                 "human_readable":  "1.5 hours",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "migration 20m; two queries 20m; env config 15m; tests 35m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "rusqlite",
+                                            "axum"
+                                        ],
+                         "category":  "privacy-data",
+                         "detection_method":  {
+                                                  "tool":  "grep+read",
+                                                  "query":  "expir|ttl|max_age in buff-registry; sessions schema"
+                                              },
+                         "verification_command":  "Select-String -Path \"crates\\buff-registry\\src\\storage_sqlite.rs\",\"crates\\buff-registry\\src\\storage.rs\" -Pattern \"CREATE TABLE IF NOT EXISTS sessions\",\"unknown / expired\",\"SELECT u.github_login\" -Context 1,6",
+                         "references":  [
+                                            "crates/buff-registry/src/storage_sqlite.rs:106-110",
+                                            "crates/buff-registry/src/storage.rs:325-331",
+                                            "crates/buff-registry/src/oauth.rs:282-298",
+                                            "OWASP Session Management CheatSheet"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Zero expir/ttl matches in storage_sqlite.rs; validate_session read in full and contains no time comparison"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "No documentation anywhere claims session expiry is deferred or deliberate; the trait doc actively claims behavior that does not exist",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-registry/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-PRIV-005",
+                         "severity":  "low",
+                         "file":  "crates/buff-registry/src/lib.rs",
+                         "line":  279,
+                         "endLine":  302,
+                         "title":  "No user-data deletion path - users table rows are immutable",
+                         "description":  "The route table exposes no DELETE endpoint for accounts or user rows (lib.rs:279-302); only /auth/logout removes a session (oauth.rs:316-334 -\u003e storage_sqlite.rs:597-605). users rows (github_login, github_id, created_at; storage_sqlite.rs:100-105) and versions.author identities persist indefinitely with no erasure or export mechanism, leaving LGPD Art. 16/18 requests technically unfulfillable.",
+                         "root_cause":  "Registry MVP scope stopped at publish/download/auth; no data-lifecycle endpoints were planned when identity storage (users/orgs/allowlist) landed in T57.",
+                         "impact":  "Data-subject erasure cannot be honored once a real deployment exists; identity linkage (login + id + publish history) retained forever enlarges breach blast radius.",
+                         "recommendation":  "Ship authenticated DELETE /auth/account: delete sessions + org_members + users row; NULL/redact versions.author; keep package/version integrity. Link a one-paragraph privacy notice (what is stored, retention, deletion) from the OAuth consent/docs.",
+                         "fix_examples":  {
+                                              "before":  ".route(\"/auth/whoami\", get(oauth::whoami))",
+                                              "after":  ".route(\"/auth/whoami\", get(oauth::whoami))\n.route(\"/auth/account\", delete(oauth::delete_account)) // deletes sessions + user row, redacts versions.author"
+                                          },
+                         "fix_guide":  "1) Storage trait fn delete_account(github_login) with CASCADE deletes + UPDATE versions SET author = NULL WHERE author = login. 2) Handler requires valid session, deletes, clears cookie. 3) Short privacy notice page (website or docs) linked from the OAuth app description. 4) Integration test: after delete, whoami 401 and user row gone.",
+                         "effort_estimate":  {
+                                                 "minutes":  180,
+                                                 "human_readable":  "3 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "trait+sqlite impl 60m; handler+route 30m; notice page 45m; tests 45m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "axum",
+                                            "rusqlite"
+                                        ],
+                         "category":  "privacy-data",
+                         "detection_method":  {
+                                                  "tool":  "grep+read",
+                                                  "query":  "route( listing; DELETE FROM scan in buff-registry"
+                                              },
+                         "verification_command":  "Select-String -Path \"crates\\buff-registry\\src\\lib.rs\" -Pattern \"\\.route\\(\"; Select-String -Path \"crates\\buff-registry\\src\\storage_sqlite.rs\" -Pattern \"DELETE FROM\"",
+                         "references":  [
+                                            "crates/buff-registry/src/lib.rs:277-303",
+                                            "crates/buff-registry/src/storage_sqlite.rs:100-105",
+                                            "LGPD Lei 13.709/2018 Art. 16 (data deletion)"
+                                        ],
+                         "confidence":  {
+                                            "score":  "high",
+                                            "rationale":  "Full route table and all DELETE statements enumerated; no account/user deletion exists"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "Registry is pre-deployment MVP (invite-only allowlist, loopback default) and AGENTS.md documents deferred features broadly, so severity stays low; but nothing documents data-subject deletion as intentionally deferred, and the surface collects GitHub identities",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-registry/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           "crates/buff-lang-cli/src/commands/registry.rs",
+                                           "crates/buff-registry/src/storage_sqlite.rs",
+                                           "crates/buff-registry/src/storage.rs",
+                                           "crates/buff-registry/src/oauth.rs",
+                                           "crates/buff-registry/src/handlers.rs",
+                                           "crates/buff-registry/src/lib.rs",
+                                           "crates/buff-registry/src/rate_limit.rs",
+                                           "crates/buff-registry/src/main.rs",
+                                           "crates/buff-registry/src/quality.rs",
+                                           "crates/buff-registry/src/error.rs",
+                                           "website/index.html",
+                                           "website/benchmarks.html"
+                                       ],
+                    "files_skipped":  [
+                                          "crates/buff-fake/** (faker synthetic-data doc-examples)",
+                                          "crates/buff-email/** (SMTP library examples)",
+                                          "crates/buff-web3/** (Ethereum address handling)",
+                                          "crates/buff-jupyter/** (connection files = standard Jupyter protocol, local-only)",
+                                          "playground/** (prior squads verified zero beacons)"
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     "PII grep (?i)(email|phone|address|first.?name|last.?name|birth|cpf|cnpj|ssn) across crates/*/src: 819 matches triaged - ALL are doc-examples/libraries (buff-fake faker generators, buff-email SMTP examples, buff-validate rules, buff-web3 eth addresses, buff-i18n translation strings, buff-db example SQL). Registry itself stores only GitHub login + numeric id (oauth.rs:70-74). No PII collection found - expectation confirmed.",
+                                                     "No PII/token logging: buff-registry logs only backend path + bind address via eprintln (main.rs:52,60,66); zero println/tracing/log statements in handlers.rs, oauth.rs, or rate_limit.rs - bearer tokens and usernames are never logged.",
+                                                     "IP handling is privacy-clean: per-IP limiter is an in-memory HashMap pruned on every check (rate_limit.rs:44,67), never persisted; the SQLite rate_log table stores token+ts_ms (NOT IP) and is pruned (storage_sqlite.rs:427). X-Forwarded-For spoofability (rate_limit.rs:113) is a rate-limit-bypass security issue, not privacy - out of squad scope.",
+                                                     "Website privacy-notice absence judged NOT a top-5 finding: static no-collection site (only Google Fonts third-party requests, website/index.html:11-13); however the OAuth consent flow has no linked privacy notice - folded into AUD-PRIV-005 recommendation.",
+                                                     "buff_oauth_state CSRF cookie lacks the Secure flag (oauth.rs:199) unlike buff_session (oauth.rs:290) - negligible: state also travels in the URL, TTL 300s, double-submit validation.",
+                                                     "buff-jupyter connection files contain HMAC key material but follow the standard Jupyter kernel protocol contract (ipykernel parity), local-file surface only - no finding.",
+                                                     "Download counts are aggregate-only (downloads table: name/version/count, storage_sqlite.rs:124-129,691-701) - no per-IP or per-user download tracking exists, confirming prior squads."
+                                                 ],
+                    "totals":  {
+                                   "findings":  5,
+                                   "high":  2,
+                                   "medium":  2,
+                                   "low":  1,
+                                   "files_examined":  12,
+                                   "pii_matches_triaged":  819
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

@@ -947,6 +947,9 @@ pub fn instance_fn_return_type(
         (Type::Tensor, PreludeInstanceFn::Len) => Some(Type::Int {
             width: crate::ty::IntWidth::W64,
         }),
+        // matmul returns a fresh Tensor (TensorResult at the Rust layer;
+        // the codegen arm applies the Default fallback).
+        (Type::Tensor, PreludeInstanceFn::Matmul) => Some(Type::Tensor),
         (Type::Date, PreludeInstanceFn::Format) => Some(Type::String),
         (Type::Time, PreludeInstanceFn::Format) => Some(Type::String),
 

@@ -1,0 +1,504 @@
+﻿{
+    "squad":  "audit-architecture",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-AR-001",
+                         "severity":  "medium",
+                         "file":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lsp/src/lib.rs",
+                         "line":  1,
+                         "endLine":  1,
+                         "title":  "10 crates silently opt out of the workspace-wide clippy -D warnings gate via undocumented crate-level allow(clippy::all, dead_code)",
+                         "description":  "Crate-level #![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)] in buff-lsp, buff-mcp, buff-geo, buff-game, buff-auth, buff-db, buff-email, buff-config, buff-scrape, buff-image (all at src/lib.rs line 1). CI runs \u0027cargo clippy $CI_CRATES --all-targets -- -D warnings\u0027 over the FULL workspace (since ITER-32), so these 10 crates are effectively exempt from every clippy lint plus dead-code detection. No rationale comment accompanies the allows, and no AGENTS.md documents them; contrast the documented per-crate #![allow(clippy::result_large_err)] which always carries inline justification.",
+                         "root_cause":  "Copy-pasted scaffold header propagated across crates (2 tooling + 8 framework), likely committed from a local-dev state where lints were suppressed to unblock iteration; never revisited during the v1.24/v1.26 hygiene waves.",
+                         "impact":  "Real lint violations and dead code accumulate invisibly in 10/73 crates; the architectural invariant \u0027one uniform quality gate across the workspace\u0027 is eroded; future refactors of these crates get no clippy safety net; inconsistent enforcement misleads contributors about actual code health.",
+                         "recommendation":  "Delete allow(clippy::all) from all 10 crates, run clippy per crate, fix or individually justify surviving lints with targeted inline allows carrying rationale comments (matching the result_large_err precedent). If triage is large for a crate, allow only specific lint groups temporarily with a tracking comment.",
+                         "fix_examples":  {
+                                              "before":  "#![allow(clippy::all, dead_code, unused_imports, mismatched_lifetime_syntaxes)]\n//! `buff-lsp` â€” Language Server Protocol server for the Buff language.",
+                                              "after":  "//! `buff-lsp` â€” Language Server Protocol server for the Buff language.\n// Boxing the LSP error type would reshape the public `run_stdio` surface.\n#![allow(clippy::result_large_err)]"
+                                          },
+                         "fix_guide":  [
+                                           "Run: cargo clippy -p \u003ccrate\u003e --all-targets -- -D warnings for each of the 10 crates",
+                                           "Fix genuine findings; for justified survivors add narrow inline allows with rationale comments",
+                                           "Remove the crate-level allow(clippy::all, dead_code, ...) line from each src/lib.rs",
+                                           "Verify via Select-String sweep that zero allow(clippy::all remains workspace-wide"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  360,
+                                                 "human_readable":  "~6 hours total (10 crates x 30-40 min lint triage + fix + verify)",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "triage 180min, fixes 120min, verification 60min"
+                                             },
+                         "technology":  "rust/edition-2021/clippy/cargo-workspace",
+                         "category":  "architecture",
+                         "detection_method":  {
+                                                  "tool":  "grep (content sweep over crates/*/src/lib.rs)",
+                                                  "query":  "#!\\[allow\\(clippy::all"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\*\\src\\lib.rs -Pattern \u0027#!\\[allow\\(clippy::all\u0027 | Select-Object Path, LineNumber",
+                         "references":  [
+                                            "C:/Users/vsbb1/source/repos/buff/AGENTS.md (NOTES: CI clippy FULL workspace -D warnings since ITER-32)",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-mcp/src/lib.rs:1",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-geo/src/lib.rs:1",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-config/src/lib.rs:1"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.97,
+                                            "rationale":  "Direct file-content evidence at exact line; CI gate scope verified from root AGENTS.md; absence of any documenting AGENTS.md checked per crate"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "The allows exist verbatim; the only FP path would be a documented justification elsewhere, and no crate-level or root AGENTS.md mentions allow(clippy::all); documented-allow precedent (result_large_err) always carries comments, these do not",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root, CONVENTIONS+NOTES)",
+                                                                                          "crates/buff-lsp/AGENTS.md",
+                                                                                          "crates/buff-lang-cli/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AR-002",
+                         "severity":  "low",
+                         "file":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/AGENTS.md",
+                         "line":  12,
+                         "endLine":  34,
+                         "title":  "buff-lang-cli AGENTS.md and lib.rs doc comment describe pipeline modules extracted to sibling crates in P0.26",
+                         "description":  "AGENTS.md STRUCTURE lists src files that no longer exist: pipeline.rs (line 12), fmt.rs, check.rs, error_mapper.rs, naming_lint.rs, compile_speed.rs, incremental.rs, rustc_invoke.rs (lines 13-23). All are now \u0027pub use\u0027 re-exports of buff-lang-pipeline/buff-lang-check/buff-lang-fmt in src/lib.rs (verified: Test-Path on pipeline.rs is False; actual src = 8 files + dirs). main.rs is claimed \u002787 lines\u0027 but is 315 (still pure dispatch â€” convention holds). \u002721 subcommands\u0027 vs ~37 actual Command variants. lib.rs crate doc comment still claims \u0027standalone typecheck pass is post-v1.0 work\u0027, explicitly marked OUTDATED by two AGENTS.md files.",
+                         "root_cause":  "P0.26 sibling-crate extraction (arch-003 remediation) moved pipeline/fmt/check/rustc_invoke/error_mapper/compile_speed/incremental out of the CLI crate but the crate\u0027s AGENTS.md structure table and lib.rs doc comment were not updated in the same change.",
+                         "impact":  "Agents and contributors navigating the composition root target nonexistent files (e.g. editing crates/buff-lang-cli/src/pipeline.rs), mis-assess blast radius (believing CLI owns rustc-invocation logic), and resurrect the known-outdated \u0027post-v1.0 typecheck\u0027 claim; knowledge-base trust degrades.",
+                         "recommendation":  "Rewrite the STRUCTURE section to the actual 8-file layout (main.rs 315L dispatch, lib.rs re-export shim listing the four P0.26 re-export families, project_pipeline.rs, scaffold.rs, test_runner.rs, bench_harness.rs, cli.rs, config.rs + commands/config/ui_dev/coverage dirs); update subcommand count; delete the stale \u0027post-v1.0 typecheck\u0027 paragraph in lib.rs doc comment.",
+                         "fix_examples":  {
+                                              "before":  "â”œâ”€â”€ pipeline.rs           # 867 lines â€” compile_to_rust + compile_rust_to_exe + compile_buffhtml_to_rust + BuildMode\nâ”œâ”€â”€ fmt.rs                # 1839 lines â€” T57 Formatter with comment-preservation",
+                                              "after":  "Pipeline/rustc-invoke/error-mapper/fmt/check logic lives in sibling crates (P0.26):\nâ”‚   pub use buff_lang_pipeline as pipeline;  // lib.rs â€” includes rustc_invoke, error_mapper,\nâ”‚   pub use buff_lang_fmt as fmt;            //   compile_speed, incremental re-exports\nâ”‚   pub use buff_lang_check as check;        // + buff_lang_check::naming_lint"
+                                          },
+                         "fix_guide":  [
+                                           "List actual src/ contents: Get-ChildItem crates\\buff-lang-cli\\src -Recurse",
+                                           "Update STRUCTURE table + subcommand list from cli.rs Command enum",
+                                           "Remove \u0027standalone typecheck pass is post-v1.0 work\u0027 paragraph from src/lib.rs doc comment",
+                                           "Cross-check against root AGENTS.md \u002737 subcommands\u0027 claim"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  30,
+                                                 "human_readable":  "30 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "inventory 10min, rewrite 15min, review 5min"
+                                             },
+                         "technology":  "markdown/rustdoc/documentation",
+                         "category":  "architecture",
+                         "detection_method":  {
+                                                  "tool":  "read + Test-Path cross-check of AGENTS.md structure claims vs filesystem",
+                                                  "query":  "Test-Path crates\\buff-lang-cli\\src\\pipeline.rs (False) vs AGENTS.md line 12"
+                                              },
+                         "verification_command":  "Test-Path crates\\buff-lang-cli\\src\\pipeline.rs; (Get-Content crates\\buff-lang-cli\\src\\main.rs | Measure-Object -Line).Lines; Select-String -Path crates\\buff-lang-cli\\AGENTS.md -Pattern \u0027pipeline\\.rs|87 lines|21 subcommands\u0027",
+                         "references":  [
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/src/lib.rs (P0.26 re-export block)",
+                                            "C:/Users/vsbb1/source/repos/buff/AGENTS.md (37 subcommands; \u0027CLI re-exports pipeline; no own pipeline module\u0027)",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/AGENTS.md (CONVENTIONS: typecheck-post-v1.0 claim is OUTDATED)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Every cited drift point verified by direct read/Test-Path/line-count; only the exact line of the lib.rs stale paragraph is approximate (doc comment region 29-33)"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Staleness is objectively verifiable (files absent, counts differ); deliberately-not-a-finding: main.rs at 315L still satisfies \u0027thin in responsibility\u0027 â€” flagged only the doc drift, not the design",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md (root)",
+                                                                                          "crates/buff-lang-cli/AGENTS.md",
+                                                                                          "crates/buff-lang-pipeline/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AR-003",
+                         "severity":  "low",
+                         "file":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-lexer/src/lib.rs",
+                         "line":  20,
+                         "endLine":  22,
+                         "title":  "Lexer publicly exports indent/string_interp internals that have zero cross-crate consumers",
+                         "description":  "buff-lang-lexer/src/lib.rs declares \u0027pub mod indent;\u0027 and \u0027pub mod string_interp;\u0027 (lines 20, 22), exposing the offside-rule indent tracker and string-interpolation scanner as public API. A workspace-wide grep for buff_lang_lexer::(indent|string_interp) finds zero consumers outside the lexer crate itself; the crate\u0027s own AGENTS.md documents the public surface as only \u0027tokenize, Token, TokenKind, LexerError\u0027. The parser consumes Indent/Dedent tokens purely via the tokenize() stream, never the tracker directly.",
+                         "root_cause":  "lib.rs uses blanket \u0027pub mod\u0027 for all five modules rather than restricting internal machinery to pub(crate); the module docs were written for the narrower intended surface and never reconciled with the actual exports.",
+                         "impact":  "Offside-rule algorithm internals (ITER-36 dedent invariants) and interpolation scanning become de-facto public API: any external/crate consumer could start depending on them, turning internal-algorithm changes into breaking API changes and widening the lexer\u0027s blast radius beyond its designed \u0027tokenize\u0027 seam.",
+                         "recommendation":  "Demote both modules: \u0027pub(crate) mod indent;\u0027 and \u0027pub(crate) mod string_interp;\u0027 (keep \u0027pub mod token/lexer/error\u0027), re-run cargo check/test for the lexer, parser, and workspace to confirm no hidden consumer exists, and update the per-crate AGENTS.md public-API list if it diverges further.",
+                         "fix_examples":  {
+                                              "before":  "pub mod error;\npub mod indent;\npub mod lexer;\npub mod string_interp;\npub mod token;",
+                                              "after":  "pub mod error;\npub(crate) mod indent;   // offside-rule internals; exposed via tokenize() stream only\npub mod lexer;\npub(crate) mod string_interp; // interpolation scanning is internal to tokenize()\npub mod token;"
+                                          },
+                         "fix_guide":  [
+                                           "Change the two pub mod declarations to pub(crate) mod",
+                                           "Run cargo check --workspace and cargo test -p buff-lang-lexer -p buff-lang-parser",
+                                           "If a consumer surfaces, evaluate it explicitly instead of keeping the export",
+                                           "Update crates/buff-lang-lexer/AGENTS.md public-surface line if needed"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  15,
+                                                 "human_readable":  "15 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "edit 2min, workspace check/test 10min, docs 3min"
+                                             },
+                         "technology":  "rust/visibility/module-boundaries",
+                         "category":  "architecture",
+                         "detection_method":  {
+                                                  "tool":  "read + grep for external consumers",
+                                                  "query":  "buff_lang_lexer::(indent|string_interp) across crates/**/*.rs â†’ 0 matches"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\buff-lang-lexer\\src\\lib.rs -Pattern \u0027pub mod\u0027; Get-ChildItem crates -Recurse -Filter *.rs | Select-String -Pattern \u0027buff_lang_lexer::(indent|string_interp)\u0027",
+                         "references":  [
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-lexer/AGENTS.md (public surface = tokenize/Token/TokenKind/LexerError)",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-parser/AGENTS.md (parser consumes Indent/Dedent via token stream)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.9,
+                                            "rationale":  "Zero-consumer claim rests on a full-workspace grep of .rs files; doc-vs-code divergence verified by direct read; small residual risk that a macro-generated path or re-export chain references the modules without the literal prefix"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Pure API-surface observation, no behavior claim; FP only if some consumer exists outside literal-grep reach (unlikely in this repo\u0027s import style)",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "crates/buff-lang-lexer/AGENTS.md",
+                                                                                          "AGENTS.md (root CONVENTIONS)"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AR-004",
+                         "severity":  "low",
+                         "file":  "C:/Users/vsbb1/source/repos/buff/ARCHITECTURE.md",
+                         "line":  157,
+                         "endLine":  189,
+                         "title":  "ARCHITECTURE.md dependency-exception inventory omits four verified production edges",
+                         "description":  "ARCHITECTURE.md line 157-160 asserts the framework group has \u0027exactly three intra-framework edges ... plus buff-plugins\u0027, and lines 171-189 present a four-item \u0027Known exceptions, all deliberate and documented\u0027 list presented as complete. Manifest-verified production edges missing from the inventory: buff-mock -\u003e buff-lang-ast (crates/buff-mock/Cargo.toml:36), buff-fuzz -\u003e buff-lang-ast (crates/buff-fuzz/Cargo.toml:44), buff-pipeline -\u003e buff-lang-runtime (crates/buff-pipeline/Cargo.toml:34), and tooling edge buff-mcp -\u003e buff-lsp (crates/buff-mcp/Cargo.toml:26). Each edge IS documented in its own crate manifest/AGENTS.md; the gap is in the authoritative structural doc only.",
+                         "root_cause":  "ARCHITECTURE.md\u0027s exception list was curated around compiler-crate layering exceptions; framework-\u003ecompiler-core helper edges (T25/T27 codegen-helper pattern) and the mcp-\u003elsp pairing were added in later waves without folding them into the central inventory.",
+                         "impact":  "Readers treat the four-item list as the complete deviation set; future audits and \u0027cargo tree\u0027 reviews will flag the four edges as undocumented violations, and the \u0027exactly three intra-framework edges\u0027 claim invites false confidence about framework coupling.",
+                         "recommendation":  "Extend the Known-exceptions list with the four edges (one line each, citing the manifest line), and reword the framework-group paragraph to \u0027three intra-framework edges plus three framework-\u003ecompiler-core helper edges (mock-\u003east, fuzz-\u003east, pipeline-\u003eruntime) all following the T25/T27 codegen-helper pattern\u0027.",
+                         "fix_examples":  {
+                                              "before":  "5. (nothing â€” list ends at buff-mcp -\u003e buff-lang-cli)",
+                                              "after":  "5. **Framework codegen-helper edges** â€” `buff-mock` -\u003e `buff-lang-ast` (mock/Cargo.toml:36),\n   `buff-fuzz` -\u003e `buff-lang-ast` (fuzz/Cargo.toml:44): lowering helpers consume\n   TraitDecl/FuncDecl per the T25/T27 runtime-workaround pattern.\n6. **`buff-pipeline` -\u003e `buff-lang-runtime`** (pipeline/Cargo.toml:34) for `Channel\u003cT\u003e`.\n7. **`buff-mcp` -\u003e `buff-lsp`** (mcp/Cargo.toml:26) â€” reuses lsp-types position/location types."
+                                          },
+                         "fix_guide":  [
+                                           "Add exceptions 5-7 to the \u0027Known exceptions\u0027 list with manifest line citations",
+                                           "Adjust the \u0027exactly three intra-framework edges\u0027 sentence to include the helper edges",
+                                           "Re-verify with the workspace-dep grep sweep after edits"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  20,
+                                                 "human_readable":  "20 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "draft 10min, cite-verify 5min, review 5min"
+                                             },
+                         "technology":  "markdown/documentation",
+                         "category":  "architecture",
+                         "detection_method":  {
+                                                  "tool":  "grep of all 73 crate manifests for internal workspace deps, diffed against ARCHITECTURE.md inventory",
+                                                  "query":  "^(buff-[a-z-]+|buff-lang-[a-z-]+)\\.workspace = true across crates/*/Cargo.toml (105 edges/29 files)"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\buff-mock\\Cargo.toml,crates\\buff-fuzz\\Cargo.toml,crates\\buff-pipeline\\Cargo.toml,crates\\buff-mcp\\Cargo.toml -Pattern \u0027^buff-\u0027; Select-String -Path ARCHITECTURE.md -Pattern \u0027exactly three intra-framework\u0027",
+                         "references":  [
+                                            "C:/Users/vsbb1/source/repos/buff/ARCHITECTURE.md (Dependency-direction rules + Crate taxonomy)",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-mock/Cargo.toml:26-39 (T25 documented rationale)",
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-pipeline/Cargo.toml:29-34 (Channel rationale)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.93,
+                                            "rationale":  "All four edges verified as production ([dependencies]) entries by direct manifest read; FP risk only if ARCHITECTURE.md wording is read as covering intra-framework edges exclusively â€” but the mcp-\u003elsp and helper edges belong in an inventory claiming completeness"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "The finding is doc-completeness, not code: the edges themselves are deliberate and documented per-crate (FP rule respected â€” code is NOT flagged); flagged solely the central inventory gap, which the doc\u0027s own \u0027entry point for structural questions\u0027 claim makes load-bearing",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "ARCHITECTURE.md",
+                                                                                          "AGENTS.md (root, framework list)",
+                                                                                          "crates/buff-mock/AGENTS.md",
+                                                                                          "crates/buff-fuzz/AGENTS.md",
+                                                                                          "crates/buff-pipeline/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AR-005",
+                         "severity":  "low",
+                         "file":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-error/AGENTS.md",
+                         "line":  29,
+                         "endLine":  29,
+                         "title":  "Leaf-crate convention \u0027ZERO internal deps â€” only thiserror\u0027 contradicted by T1-sanctioned serde/serde_json",
+                         "description":  "crates/buff-lang-error/AGENTS.md line 29 states the convention \u0027ZERO internal deps â€” only thiserror ... do not add crate deps without strong reason\u0027, while the crate manifest ([dependencies] lines 16-17) carries serde + serde_json, added in v1.25 T1 (JSON diagnostic output) with inline manifest documentation calling them \u0027the only non-thiserror deps on this leaf crate â€” explicitly sanctioned\u0027. The manifest is self-consistent; the AGENTS.md convention line was never updated, so the leaf crate\u0027s guardrail now reads as permanently violated.",
+                         "root_cause":  "T1 added serde/serde_json with rationale documented in Cargo.toml comments but did not amend the per-crate AGENTS.md CONVENTIONS block, leaving doc and manifest in direct contradiction on the workspace\u0027s most depended-on crate (22 dependents).",
+                         "impact":  "Agents auditing or extending the leaf crate get contradictory guardrails: either they \u0027restore\u0027 the convention by removing sanctioned deps (breaking buff check --error-format json), or they learn AGENTS.md guardrails are advisory, weakening all other leaf-crate rules.",
+                         "recommendation":  "Update the convention line to \u0027External deps: thiserror + serde/serde_json (T1 JSON diagnostics, manifest-documented). ZERO internal workspace deps â€” this is the foundation; do not add crate deps without strong reason + inline manifest rationale.\u0027 This preserves the real invariant (no internal edges) while matching the manifest.",
+                         "fix_examples":  {
+                                              "before":  "- **ZERO internal deps** â€” only `thiserror`. This is the foundation; do not add crate deps without strong reason.",
+                                              "after":  "- **ZERO internal workspace deps**. External deps: `thiserror` + `serde`/`serde_json`\n  (T1 JSON diagnostic output â€” rationale inline in Cargo.toml). Do not add deps\n  without strong reason documented inline in the manifest."
+                                          },
+                         "fix_guide":  [
+                                           "Edit the single convention bullet at line 29",
+                                           "Optionally add a pointer to the manifest\u0027s T1 comment block",
+                                           "Spot-check sibling leaf-crate AGENTS.md files (ast-rsx, ffi-guide) for similar drift"
+                                       ],
+                         "effort_estimate":  {
+                                                 "minutes":  5,
+                                                 "human_readable":  "5 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "edit 3min, review 2min"
+                                             },
+                         "technology":  "markdown/documentation",
+                         "category":  "architecture",
+                         "detection_method":  {
+                                                  "tool":  "read (AGENTS.md) + read (Cargo.toml) cross-check",
+                                                  "query":  "Select-String \u0027ZERO internal deps\u0027 vs manifest [dependencies] section"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\buff-lang-error\\AGENTS.md -Pattern \u0027ZERO internal deps\u0027; Select-String -Path crates\\buff-lang-error\\Cargo.toml -Pattern \u0027serde\u0027",
+                         "references":  [
+                                            "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-error/Cargo.toml:9-17 (T1 sanction comment)",
+                                            "C:/Users/vsbb1/source/repos/buff/ARCHITECTURE.md:166 (error depends on nothing internal â€” still true)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.98,
+                                            "rationale":  "Both artifacts read directly; contradiction is verbatim; note the underlying architectural invariant (no internal deps) HOLDS â€” only the external-deps wording is stale"
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Pure documentation contradiction, both sides read in full; deliberately NOT flagged as a dependency violation because the manifest documents the T1 sanction (FP rule)",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "crates/buff-lang-error/AGENTS.md",
+                                                                                          "crates/buff-lang-error/Cargo.toml",
+                                                                                          "ARCHITECTURE.md"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/AGENTS.md\",lines_read:245,bytes_read:21000,examined_at:\"2026-10-10T03:38:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” mandatory read; FP-rule source"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/ARCHITECTURE.md\",lines_read:224,bytes_read:12300,examined_at:\"2026-10-10T03:39:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "finding AUD-AR-004 (inventory gap)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-error/Cargo.toml\",lines_read:21,bytes_read:760,examined_at:\"2026-10-10T03:40:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "edges clean; doc-drift AUD-AR-005"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-ast/Cargo.toml\",lines_read:19,bytes_read:620,examined_at:\"2026-10-10T03:40:10-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (error only; serde_json documented P0.1.2b)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-lexer/Cargo.toml\",lines_read:13,bytes_read:390,examined_at:\"2026-10-10T03:40:20-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-parser/Cargo.toml\",lines_read:17,bytes_read:560,examined_at:\"2026-10-10T03:40:30-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (dev types back-edge documented)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-types/Cargo.toml\",lines_read:19,bytes_read:640,examined_at:\"2026-10-10T03:40:40-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (parser prod dep = documented exception 1)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-codegen-rust/Cargo.toml\",lines_read:51,bytes_read:1900,examined_at:\"2026-10-10T03:41:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (debug-info consumer pattern documented)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-codegen-wgsl/Cargo.toml\",lines_read:13,bytes_read:360,examined_at:\"2026-10-10T03:41:10-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-codegen-buffhtml/Cargo.toml\",lines_read:18,bytes_read:530,examined_at:\"2026-10-10T03:41:20-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-ast-rsx/Cargo.toml\",lines_read:9,bytes_read:250,examined_at:\"2026-10-10T03:41:30-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean leaf"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-buffhtml-parser/Cargo.toml\",lines_read:13,bytes_read:390,examined_at:\"2026-10-10T03:41:40-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-runtime/Cargo.toml\",lines_read:24,bytes_read:830,examined_at:\"2026-10-10T03:41:50-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (wgsl dev-only verified)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-debug-info/Cargo.toml\",lines_read:34,bytes_read:1650,examined_at:\"2026-10-10T03:42:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (downward: error+ast)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-pipeline/Cargo.toml\",lines_read:30,bytes_read:1050,examined_at:\"2026-10-10T03:42:10-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-fmt/Cargo.toml\",lines_read:12,bytes_read:350,examined_at:\"2026-10-10T03:42:20-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-check/Cargo.toml\",lines_read:16,bytes_read:510,examined_at:\"2026-10-10T03:42:30-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (buffhtml+plugins deps documented)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-ffi-guide/Cargo.toml\",lines_read:8,bytes_read:250,examined_at:\"2026-10-10T03:42:40-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean (zero deps)"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/Cargo.toml\",lines_read:201,bytes_read:9600,examined_at:\"2026-10-10T03:43:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” composition root, all edges downward"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-mock/Cargo.toml\",lines_read:67,bytes_read:2450,examined_at:\"2026-10-10T03:43:20-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "edge documented per-crate; cited in AUD-AR-004"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-fuzz/Cargo.toml\",lines_read:71,bytes_read:2600,examined_at:\"2026-10-10T03:43:30-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "edge documented per-crate; cited in AUD-AR-004"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-pipeline/Cargo.toml\",lines_read:77,bytes_read:2850,examined_at:\"2026-10-10T03:43:40-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "runtime edge documented; cited in AUD-AR-004"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-eval/src/lib.rs\",lines_read:863,bytes_read:33000,examined_at:\"2026-10-10T03:44:30-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” scope-7 verified thin, single-source-of-truth delegation"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/src/lib.rs\",lines_read:44,bytes_read:2096,examined_at:\"2026-10-10T03:45:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "P0.26 re-export shim confirmed; stale doc in AUD-AR-002"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/src/main.rs\",lines_read:318,bytes_read:11766,examined_at:\"2026-10-10T03:45:20-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” dispatch-only, convention holds"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-ast/src/lib.rs\",lines_read:47,bytes_read:1700,examined_at:\"2026-10-10T03:45:40-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” glob re-exports documented; no Serialize derives"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-types/src/lib.rs\",lines_read:171,bytes_read:8900,examined_at:\"2026-10-10T03:46:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” pub surface documented deliberate"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-lexer/src/lib.rs\",lines_read:27,bytes_read:1150,examined_at:\"2026-10-10T03:46:20-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "finding AUD-AR-003"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-parser/src/stream.rs\",lines_read:120,bytes_read:4300,examined_at:\"2026-10-10T03:46:40-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” opaque Token use; synthetic-token mechanism documented inline"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lsp/src/lib.rs\",lines_read:88,bytes_read:3400,examined_at:\"2026-10-10T03:47:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "finding AUD-AR-001"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-codegen-rust/src/lib.rs\",lines_read:120,bytes_read:5600,examined_at:\"2026-10-10T03:47:20-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean â€” curated re-exports, documented result_large_err"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-error/AGENTS.md\",lines_read:34,bytes_read:1400,examined_at:\"2026-10-10T03:47:40-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "finding AUD-AR-005"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/AGENTS.md\",lines_read:40,bytes_read:2200,examined_at:\"2026-10-10T03:48:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "finding AUD-AR-002"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-mcp/Cargo.toml\",lines_read:12,bytes_read:400,examined_at:\"2026-10-10T03:48:20-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "grep-examined (lsp/cli/error edges); cited in AUD-AR-004"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates (73 manifests, internal-dep sweep)\",lines_read:105,bytes_read:3000,examined_at:\"2026-10-10T03:49:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "grep sweep: 105 internal edges/29 files, all DAG-conformant"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates (allow(clippy::all) sweep)\",lines_read:10,bytes_read:800,examined_at:\"2026-10-10T03:49:30-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "grep sweep: 10 crates; AUD-AR-001"
+                                           },
+                                           {
+                                               "path":  "C:/Users/vsbb1/source/repos/buff/crates (six main.rs line census)\",lines_read:6,bytes_read:300,examined_at:\"2026-10-10T03:50:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "lsp=24 mcp=11 registry=64 buffup=42 bufflings=7 cli=315; dual bin+lib pattern holds"
+                                           }
+                                       ],
+                    "files_skipped":  [
+                                          {
+                                              "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-eval/selfhost/\",reason:\"self-host port sources; dependency/thinness conclusion fully determined by Cargo.toml + src/lib.rs (only src file); duplication status of self-host ports vs compiler front-end not assessed\",lines_not_examined:\"unknown (~1000+)"
+                                          },
+                                          {
+                                              "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-codegen-rust/src/rust_codegen/\",reason:\"19-file submodule split; wildcard use super::* delegation between split files is documented deliberate (FP rule); only lib.rs + manifest audited\",lines_not_examined:\"~19000"
+                                          },
+                                          {
+                                              "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lang-cli/src/commands/\",reason:\"dispatch targets behind verified dispatch-only main.rs; per-subcommand logic out of edge-audit scope\",lines_not_examined:\"~12000"
+                                          },
+                                          {
+                                              "path":  "C:/Users/vsbb1/source/repos/buff/crates (44 framework src/ trees)\",reason:\"manifests + intra-framework edges verified; per-file source content audit beyond budget for this squad\",lines_not_examined:\"~40000"
+                                          },
+                                          {
+                                              "path":  "C:/Users/vsbb1/source/repos/buff/crates/buff-lsp/src/{handlers,analysis,server}.rs\",reason:\"boundary invariant (lsp-types confined, diagnostics converted at boundary) verified at manifest + lib.rs level; handler bodies not line-audited\",lines_not_examined:\"~3000"
+                                          }
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     {
+                                                         "area":  "resolved dependency graph\",reason:\"All edges verified by manifest-text grep (.workspace = true syntax), not cargo metadata/cargo tree resolution; a path-dependency not using workspace syntax or a cfg-gated target-specific internal dependency (cf. CLI\u0027s unix-gated pprof, external) would evade the sweep. Likelihood low â€” repo convention mandates workspace deps â€” but unproven by resolution."
+                                                     },
+                                                     {
+                                                         "area":  "intra-crate visibility hygiene\",reason:\"Item-level pub leaks inside the large module splits (codegen-rust rust_codegen/ 19 files, parser stmt/stmt_decl/, types 22 modules) were not individually audited; only crate-boundary edges and entry lib.rs files were examined. Item-level findings may exist that wildcard use super::* delegation (documented deliberate) conceals."
+                                                     },
+                                                     {
+                                                         "area":  "framework crate source coupling\",reason:\"44 framework crates verified at edge level only; source bodies could couple to compiler internals more tightly than their manifests imply (e.g. deep AST-shape dependencies in mock/fuzz lowering) â€” such coupling would not surface without reading each src/ tree."
+                                                     },
+                                                     {
+                                                         "area":  "DTO serialization surfaces in tooling\",reason:\"AST crate verified free of serde derives and serde_json usage is the documented deterministic to_json only; but per-handler serialization behavior inside buff-lsp/buff-mcp/buff-dap (protocol DTO construction from AST types) was checked at invariant level, not line level â€” a leak of Span/Decl into a serialized protocol DTO could be missed."
+                                                     }
+                                                 ],
+                    "totals":  {
+                                   "critical":  0,
+                                   "high":  0,
+                                   "medium":  1,
+                                   "low":  4,
+                                   "files_examined":  36
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

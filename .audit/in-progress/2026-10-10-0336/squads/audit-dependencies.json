@@ -1,0 +1,656 @@
+﻿{
+    "squad":  "audit-dependencies",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-DEP-001",
+                         "severity":  "high",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.cargo\\audit.toml",
+                         "line":  29,
+                         "endLine":  32,
+                         "title":  "Direct dependency rsa 0.9.10 ships with open timing side-channel advisory RUSTSEC-2023-0071 (Marvin Attack), permanently ignored",
+                         "description":  "rsa = \"0.9\" is a DIRECT workspace dependency (root Cargo.toml line 1886, consumed by crates/buff-crypto-extras for the Buff-visible RSA.* surface: RsaPrivateKey::new, to_pkcs8_pem, pkcs1v15 SigningKey/VerifyingKey sign/verify). Cargo.lock confirms a single resolved instance rsa 0.9.10. RUSTSEC-2023-0071 (Marvin Attack, timing side-channel key recovery) is in the cargo-audit hard gate\u0027s ignore list with the comment \u0027NO FIX AVAILABLE... Tracked in DR-019\u0027. Unlike the other 23 ignores which are transitive/unmaintained notices, this is a cryptographic-vulnerability advisory on a first-party-declared dep that the workspace builds into every artifact.",
+                         "root_cause":  "Upstream RustCrypto has not patched Marvin for the 0.9 line; the project accepted the risk via DR-019 and suppressed the advisory rather than isolating or replacing the primitive.",
+                         "impact":  "Any Buff program using RSA.* via buff-crypto-extras links vulnerable code. Documented exposure is limited to sign/verify (no decryption lowering found in the root Cargo.toml T49 comment), which reduces but does not eliminate Marvin-class risk; the ignore is indefinite with no re-review trigger.",
+                         "recommendation":  "Keep the ignore but convert the indefinite suppression into a tracked, time-boxed decision: (1) add an expiry/re-review note to DR-019 and a comment in audit.toml naming the DR file path; (2) evaluate gating buff-crypto-extras RSA.sign behind an explicit opt-in or switching the signature surface to ed25519-dalek (already workspace-pinned for buff-audit) as the documented default; (3) watch for a fixed rsa release (0.9.x patch or 1.0) and bump immediately.",
+                         "fix_examples":  {
+                                              "before":  "# rsa 0.9.10 - direct workspace dep (rsa = \"0.9\"). NO FIX AVAILABLE.\n# RUSTSEC-2023-0071: Marvin Attack (timing sidechannel key recovery).\n# Upstream has not released a fix. Tracked in DR-019.\n\"RUSTSEC-2023-0071\",",
+                                              "after":  "# rsa 0.9.10 - direct workspace dep (rsa = \"0.9\"). NO FIX AVAILABLE.\n# RUSTSEC-2023-0071: Marvin Attack (timing sidechannel key recovery).\n# Upstream has not released a fix. ACCEPTED DEBT: .sisyphus/decisions/DR-019-rsa-marvin.md\n# RE-REVIEW BY: 2027-01-10 (quarterly) or on any rsa 0.9.x/1.x release.\n\"RUSTSEC-2023-0071\","
+                                          },
+                         "fix_guide":  "1) Locate the DR-019 record under .sisyphus/decisions/ (or create it if DR-019 is only referenced informally). 2) Add re-review cadence + replacement criteria (ed25519 default, RSA as opt-in). 3) Update the audit.toml ignore comment to point at the DR file so the rationale is discoverable from the gate failure path. 4) Add \u0027rsa RUSTSEC-2023-0071\u0027 to any release-checklist doc so major bumps re-run the decision. 5) cargo test -p buff-crypto-extras after any rsa bump.",
+                         "effort_estimate":  {
+                                                 "minutes":  240,
+                                                 "human_readable":  "4 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "triage+DR update 60m; upstream/release-watch setup 30m; ed25519-default evaluation spike 90m; doc+CI touch-ups 60m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo",
+                                            "cargo-audit",
+                                            "RustCrypto"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Read + Select-String",
+                                                  "query":  "Select-String -Path .cargo\\audit.toml -Pattern \u0027RUSTSEC-2023-0071\u0027 -Context 3,0; Select-String -Path Cargo.toml -Pattern \u0027^rsa \u0027; Select-String -Path Cargo.lock -Pattern \u0027name = \"rsa\"\u0027 -Context 0,1"
+                                              },
+                         "verification_command":  "Select-String -Path .cargo\\audit.toml -Pattern \u0027RUSTSEC-2023-0071\u0027 -Context 3,0; Select-String -Path Cargo.toml -Pattern \u0027^rsa = \u0027; Select-String -Path Cargo.lock -Pattern \u0027name = \"rsa\"\u0027 -Context 0,1",
+                         "references":  [
+                                            ".cargo/audit.toml lines 29-32",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml line 1886 (rsa pin, T49 comment lines 1837-1894)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-crypto-extras (consumer)",
+                                            "RUSTSEC-2023-0071 (Marvin Attack, as recorded in .cargo/audit.toml)",
+                                            "AGENTS.md \u0027Pure-Rust preference\u0027 / conservative-pin philosophy"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Advisory presence, direct-dep status, and single locked version all verified from audit.toml, root Cargo.toml, and Cargo.lock. Exposure limited to sign/verify per documented API surface, which is why severity is high not critical."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "The pin itself is documented (DR-019) so it is exempt under the FP rule as a \u0027deliberate pin\u0027 ONLY where it carries no real risk; a crypto side-channel advisory on a direct dep is real risk, which the FP rule explicitly carves out. Finding attacks the unbounded ignore + missing re-review trigger, not the pin choice.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-002",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.cargo\\audit.toml",
+                         "line":  17,
+                         "endLine":  20,
+                         "title":  "quick-xml direct pin 0.37.5 sits below the RUSTSEC-2026-0194/0195 fix line (\u003e=0.41.0) while the ignore rationale mislabels it \u0027transitive\u0027",
+                         "description":  "Cargo.lock resolves FOUR quick-xml instances: 0.26.0, 0.37.5, 0.40.1, 0.41.0. The 0.37.5 instance is the workspace\u0027s DIRECT pin (root Cargo.toml line 862, quick-xml = \"0.37\", consumed by crates/buff-xml/Cargo.toml line 26 which parses user-supplied XML). audit.toml ignores RUSTSEC-2026-0194 (quadratic run time) and RUSTSEC-2026-0195 (unbounded namespace allocation) with the comment \u0027transitive dep, fix = upgrade to \u003e=0.41.0\u0027 - but for the direct instance a fix IS available (bump the pin to 0.41), and the ignore comment mischaracterizes it as transitive. 0.41.0 already exists in the lock graph, proving ecosystem compatibility.",
+                         "root_cause":  "The ignore entry was written against the transitive quick-xml consumers and never revisited when quick-xml became a direct buff-xml dependency in T50.",
+                         "impact":  "DoS-class advisories (quadratic CPU, unbounded memory) on XML input parsing remain active in buff-xml; the hard-gate audit will never flag the direct instance because both advisories are blanket-ignored, and the stale rationale hides a one-line remediation.",
+                         "recommendation":  "Bump quick-xml = \"0.37\" to \"0.41\" at the workspace level, fix any 0.37-to-0.41 API drift in crates/buff-xml/src (Reader/Event API is stable across the range), then narrow the audit.toml ignore comments to name only the genuine transitive instances (0.26.0/0.40.1) or remove the ignores entirely once the resolved minimum reaches 0.41.",
+                         "fix_examples":  {
+                                              "before":  "quick-xml = \"0.37\"",
+                                              "after":  "quick-xml = \"0.41\""
+                                          },
+                         "fix_guide":  "1) Edit root Cargo.toml line 862: quick-xml = \"0.41\". 2) cargo check -p buff-xml and cargo test -p buff-xml; fix any API drift in src/lib.rs (Reader::from_str / read_event_into / Event enum are stable 0.36-0.41 per the root pin comment). 3) Re-run Select-String on Cargo.lock: the buff-xml instance should resolve to 0.41.x. 4) Update .cargo/audit.toml lines 17-20: reword to \u0027transitive instances \u003c0.41 only\u0027 and verify the audit_toml_reasons test still passes. 5) Update the pin-rationale comment (0.37 -\u003e 0.41, released with the security fixes).",
+                         "effort_estimate":  {
+                                                 "minutes":  45,
+                                                 "human_readable":  "45 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "bump 5m; API-drift fix+tests 25m; audit.toml + comment updates 10m; cargo tree duplicate check 5m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo",
+                                            "cargo-audit",
+                                            "quick-xml"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Select-String + Grep",
+                                                  "query":  "Select-String -Path Cargo.lock -Pattern \u0027name = \"quick-xml\"\u0027 -Context 0,1; Select-String -Path .cargo\\audit.toml -Pattern \u0027RUSTSEC-2026-0194|quick-xml\u0027; Select-String -Path crates\\buff-xml\\Cargo.toml -Pattern \u0027quick-xml\u0027"
+                                              },
+                         "verification_command":  "Select-String -Path Cargo.lock -Pattern \u0027name = \"quick-xml\"\u0027 -Context 0,1; Select-String -Path Cargo.toml -Pattern \u0027^quick-xml\u0027; Select-String -Path .cargo\\audit.toml -Pattern \u0027quick-xml\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml line 862 (T50 quick-xml pin)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.cargo\\audit.toml lines 17-20",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-xml\\Cargo.toml line 26",
+                                            "Cargo.lock lines 7605-7632 (four quick-xml instances)",
+                                            "RUSTSEC-2026-0194 / RUSTSEC-2026-0195 (as recorded in .cargo/audit.toml)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.9,
+                                            "rationale":  "Four lock instances, the 0.37.5 direct instance, the \u003e=0.41 fix line, and the \u0027transitive\u0027 mislabel are all directly verified. Residual uncertainty: whether 0.37.5 specifically falls inside both advisory version ranges (assumed yes per the audit.toml\u0027s own fix statement \u0027\u003e =0.41.0\u0027)."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Not a documented deliberate pin: the conservative-pin philosophy covers staying on long-standing majors, but the repo\u0027s own audit ignore text concedes the fix is \u0027upgrade to \u003e=0.41.0\u0027 - an available upgrade not taken, plus a factually wrong \u0027transitive\u0027 rationale. 0.41.0 is already resolved elsewhere in the lock, so the bump is ecosystem-proven.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-003",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml",
+                         "line":  756,
+                         "endLine":  756,
+                         "title":  "nalgebra workspace pin has zero consumers while root comment, crate AGENTS.md, and README all claim buff-science actively uses it",
+                         "description":  "Root Cargo.toml declares nalgebra = \"0.33\" (line 756) with a 10-line comment (lines 747-756) stating it is \u0027Used by buff-science for matrix inverse, determinant, solve, and LU decomposition\u0027 and listing the exact API surface (DMatrix::from_row_slice / Matrix::try_inverse / determinant / solve / transpose). Verified: NO crate manifest in the 73-crate workspace declares nalgebra (.workspace = true); crates/buff-science/Cargo.toml depends only on buff-tensor + thiserror + rayon; grep for \u0027nalgebra\u0027 across crates/buff-science/src returns zero matches; the manifest\u0027s own description says it uses \u0027pure-Rust Gauss-Jordan / LU\u0027 instead. buff-science\u0027s AGENTS.md DEPS section (\u0027nalgebra (workspace 0.33) - DMatrix for inverse/determinant/solve\u0027) and README (\u0027inverse(m) | nalgebra::DMatrix::try_inverse\u0027) are both wrong. Additionally the ndarray T8 comment block immediately below contains the second documented forward-pin rationale, so this pin looks deliberate but its documented consumer contract is false.",
+                         "root_cause":  "T13 implementation diverged from its spec: nalgebra delegation was replaced by hand-rolled linalg, but the root pin, the root comment, and both per-crate docs were never reconciled.",
+                         "impact":  "Dead workspace metadata plus three documents that will misdirect any contributor: a developer extending buff-science per AGENTS.md will assume nalgebra is wired and DMatrix-backed (numerically pivoted LU), while the actual hand-rolled Gauss-Jordan may have different numerical-stability properties than documented. It also inflates the apparent dependency surface of the \u0027pure-Rust\u0027 matrix story.",
+                         "recommendation":  "Pick one and execute: (A) honor the docs - add nalgebra.workspace = true to crates/buff-science/Cargo.toml and delegate inverse/determinant/solve to DMatrix as documented; or (B) honor the code - delete the nalgebra pin + comment from root Cargo.toml and correct crates/buff-science/AGENTS.md + README.md to describe the hand-rolled implementation. Given the AGENTS.md \u0027WHY nalgebra\u0027 section argues pivoted LU for numerical stability, option A is the stronger fix; option B is the minimal one.",
+                         "fix_examples":  {
+                                              "before":  "[dependencies]\n# T13: buff-tensor for the primary Tensor\u003cf32\u003e matrix type.\nbuff-tensor.workspace = true",
+                                              "after":  "[dependencies]\n# T13: buff-tensor for the primary Tensor\u003cf32\u003e matrix type.\nbuff-tensor.workspace = true\n# T13: nalgebra DMatrix for inverse/determinant/solve (pivoted LU).\nnalgebra.workspace = true"
+                                          },
+                         "fix_guide":  "Option A: 1) Add \u0027nalgebra.workspace = true\u0027 to crates/buff-science/Cargo.toml [dependencies]. 2) Rewrite src/linalg.rs inverse/determinant/solve to wrap DMatrix::from_row_slice + try_inverse/determinant/solve per the documented API. 3) cargo test -p buff-science (15+ unit tests incl. proptest roundtrips are the safety net). Option B: 1) Delete root Cargo.toml lines 747-756. 2) Fix crates/buff-science/AGENTS.md (DEPS + WHY-nalgebra sections) and README.md API table. 3) Remove \u0027Audit nalgebra extern surface\u0027 row from the WHERE-TO-LOOK table.",
+                         "effort_estimate":  {
+                                                 "minutes":  60,
+                                                 "human_readable":  "1 hour (docs-only path) / 4 hours (nalgebra wiring path)",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "docs-fix path: root comment removal 10m, AGENTS.md+README 30m, verification 20m; wiring path: dep add 10m, linalg rewrite 150m, tests 80m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo",
+                                            "nalgebra"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "PowerShell scripted consumer scan + Grep",
+                                                  "query":  "foreach key in workspace.dependencies: Get-ChildItem crates -Filter Cargo.toml -Recurse | Select-String -Pattern (\u0027^\\\\s*\u0027 + key + \u0027(\\\\s*=|\\\\.workspace\\\\s*=)\u0027) ; grep pattern \u0027nalgebra\u0027 in crates/buff-science/src"
+                                              },
+                         "verification_command":  "Select-String -Path Cargo.toml -Pattern \u0027^nalgebra\u0027; Get-ChildItem crates -Filter Cargo.toml -Recurse | Select-String -Pattern \u0027^\\s*nalgebra(\\s*=|\\.workspace\\s*=?=?)\u0027; Select-String -Path crates\\buff-science\\Cargo.toml -Pattern \u0027nalgebra\u0027; Select-String -Path crates\\buff-science\\src\\*.rs -Pattern \u0027nalgebra\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml lines 747-756",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-science\\Cargo.toml lines 7-11 (hand-rolled LU description) and 21-34 (actual deps)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-science\\AGENTS.md DEPS section",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-science\\README.md API table"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.93,
+                                            "rationale":  "Zero-consumer status proven by exhaustive manifest scan (73 manifests, dot-syntax pattern validated against known-good consumers like jsonwebtoken.workspace) plus zero source references. Comment-vs-code mismatch quoted verbatim from four documents."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Documented forward-pins are FP-exempt, but this is not a forward-pin: the comment asserts PRESENT-TENSE active consumption (\u0027Used by buff-science\u0027, API surface listed) that is provably false in code and manifest. The finding is the doc/code contract break, not the pin\u0027s existence.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-004",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml",
+                         "line":  511,
+                         "endLine":  511,
+                         "title":  "reqwest_011 alias pin is dead: zero consumers, and its T48-fix rationale claims buff-web3 calls reqwest_011::Client::new() which it does not",
+                         "description":  "Root Cargo.toml line 511 declares reqwest_011 = { package = \"reqwest\", version = \"0.11\", ... } with a 7-line rationale (lines 504-511) stating \u0027To let buff-web3 (T48) call Http::new(reqwest_011::Client::new()) for its panic-free Provider::default fallback, we expose reqwest 0.11 under the alias reqwest_011\u0027. Verified: no manifest in the workspace declares reqwest_011 (.workspace = true); grep for \u0027reqwest_011\u0027 across crates/buff-web3/src returns zero matches; crates/buff-web3/Cargo.toml (lines 53-70) explicitly lists the crates lib.rs \u0027uses directly\u0027 - serde_json, hex, rand_08, url - and reqwest_011 is not among them. The T48-fix pattern did land for rand_08 (which HAS a consumer) but not for reqwest_011. buff-web3 reaches reqwest 0.11 only transitively through ethers.",
+                         "root_cause":  "buff-web3\u0027s implementation evolved (Provider fallback via ethers\u0027 Http + catch_unwind, per crates/buff-web3/AGENTS.md) and dropped the direct reqwest_011 usage, but the workspace alias pin and its rationale comment were left behind.",
+                         "impact":  "Inert workspace metadata that keeps reqwest 0.11 (an EOL major with the documented h2 0.3 advisory chain, see .sisyphus/decisions/accepted-debt-ethers-oauth2.md and RUSTSEC-2026-0258 ignore) looking like a deliberately direct-supported surface. A future reader may \u0027safely\u0027 build against reqwest_011 believing it maintained, or cargo-deny/maintenance reviews waste time re-deriving its purpose.",
+                         "recommendation":  "Delete the reqwest_011 pin and its comment block (root Cargo.toml lines 504-511). The transitive reqwest 0.11 via ethers is unaffected - pins are only meaningful for direct manifest consumers. If the T48-fix alias pattern is worth preserving as documentation, fold one sentence into the existing accepted-debt DR instead.",
+                         "fix_examples":  {
+                                              "before":  "# T48-fix: ethers 2.0.14 internally pins `reqwest` to 0.11 (its\n# `Http::new(reqwest::Client)` ctor expects the 0.11 type). The workspace\n# `reqwest = \"0.12\"` (above) is API-incompatible. To let `buff-web3` (T48)\n# call `Http::new(reqwest_011::Client::new())` for its panic-free\n# `Provider::default` fallback, we expose reqwest 0.11 under the alias\n# `reqwest_011`. Both versions coexist (ethers pulls 0.11 transitively).\n# Pure-Rust via the `rustls-tls` feature (no native-tls, no cc-rs).\nreqwest_011 = { package = \"reqwest\", version = \"0.11\", default-features = false, features = [\"json\", \"rustls-tls\"] }",
+                                              "after":  "# T48 note: buff-web3 consumes reqwest 0.11 ONLY transitively via ethers 2\n# (no direct alias pin - the earlier reqwest_011 alias was removed when\n# Provider::default stopped constructing its own client). See\n# .sisyphus/decisions/accepted-debt-ethers-oauth2.md for the 0.11-line debt."
+                                          },
+                         "fix_guide":  "1) Remove line 511 and comment lines 504-510 from root Cargo.toml. 2) cargo check --workspace to confirm resolution (no manifest references it, so removal is inert). 3) Optionally add the one-sentence note above so the ethers-\u003ereqwest-0.11 chain stays discoverable from the root file. 4) Re-run the conventions validator: ./scripts/check-conventions.ps1.",
+                         "effort_estimate":  {
+                                                 "minutes":  30,
+                                                 "human_readable":  "30 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "edit+comment 10m; workspace check 10m; conventions-lint re-run 10m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "PowerShell scripted consumer scan + Grep",
+                                                  "query":  "Get-ChildItem crates -Filter Cargo.toml -Recurse | Select-String -Pattern \u0027reqwest_011\u0027 ; grep pattern \u0027reqwest_011\u0027 in crates/buff-web3/src/*.rs"
+                                              },
+                         "verification_command":  "Select-String -Path Cargo.toml -Pattern \u0027reqwest_011\u0027; Get-ChildItem crates -Filter Cargo.toml -Recurse | Select-String -Pattern \u0027reqwest_011\u0027; Get-ChildItem crates\\buff-web3 -Recurse -Include *.rs | Select-String -Pattern \u0027reqwest_011\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml lines 504-511",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-web3\\Cargo.toml lines 53-70 (explicit direct-dep list omitting reqwest_011)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.sisyphus\\decisions\\accepted-debt-ethers-oauth2.md (referenced from root Cargo.toml lines 35-36)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.cargo\\audit.toml lines 66-72 (h2 0.3 chain via ethers)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Triple-verified: zero manifest consumers (validated scan methodology), zero source references in the claimed consumer crate, and the claimed consumer\u0027s manifest explicitly enumerates its direct deps without reqwest_011. rand_08 sibling pin having a live consumer confirms the scan detects the dot-syntax correctly."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Forward-pin rationale (\u0027so a future consumer can reuse\u0027) would be FP-exempt, but this pin\u0027s own comment claims a PRESENT consumer by name and call-site, which is verifiably false. The finding targets the stale claim and dead metadata, not a deliberate conservative pin.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-005",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\ci.yml",
+                         "line":  65,
+                         "endLine":  68,
+                         "title":  "Toolchain and checkout actions use mutable major-tag refs while all sibling actions are SHA-pinned; AGENTS.md still claims CI uses unpinned @master",
+                         "description":  "ci.yml (7 occurrences: lines 65, 97, 128, 150, 165, 280, 318) and security.yml (lines 23, 54) reference dtolnay/rust-toolchain@v1 and actions/checkout@v4 (also 11 occurrences) - mutable major tags that can be retargeted upstream. Every OTHER third-party action in these workflows IS commit-SHA-pinned with a version comment: EmbarkStudios/cargo-deny-action@3c63498..., Swatinem/rust-cache@e18b49..., docker/setup-buildx@8d2750c..., docker/build-push-action@ca052bb..., actions/upload-artifact@ea165f8..., softprops/action-gh-release@3bb1273.... Additionally AGENTS.md line 229 asserts \u0027.github/workflows/ci.yml uses dtolnay/rust-toolchain@master\u0027 - stale; the actual ref is @v1, and rust-toolchain.toml/CI both agree on toolchain: 1.95.0, so the documented \u0027toolchain mismatch\u0027 risk is misdescribed while the real (smaller) mutable-ref exposure goes undocumented.",
+                         "root_cause":  "A hardening pass SHA-pinned the newer/less-common actions but left the two most common ones (checkout, rust-toolchain) on mutable tags; AGENTS.md was written against an older @master state and not updated after the move to @v1.",
+                         "impact":  "A upstream tag retarget or compromise of dtolnay/rust-toolchain or actions/checkout injects arbitrary code into every CI job that installs the toolchain - the highest-privilege step in the pipeline. Inconsistent pinning also undermines the audit trail the SHA-pinned actions were pinned for. The stale AGENTS.md note means contributors auditing supply-chain will look for a risk that no longer exists and miss the one that does.",
+                         "recommendation":  "Pin dtolnay/rust-toolchain and actions/checkout to full commit SHAs with \u0027# v1\u0027 / \u0027# v4\u0027 comments matching the existing house style (or adopt Dependabot/renovate with \u0027pin GitHub Actions\u0027 to maintain SHAs automatically). Then update AGENTS.md NOTES line 229 to state the @v1 + SHA-pin arrangement and drop the obsolete @master mismatch paragraph.",
+                         "fix_examples":  {
+                                              "before":  "- uses: actions/checkout@v4 # v4\n- uses: dtolnay/rust-toolchain@v1\n  with:\n    toolchain: 1.95.0\n    components: rustfmt",
+                                              "after":  "- uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4\n- uses: dtolnay/rust-toolchain\u003csha-of-v1-tip\u003e # v1\n  with:\n    toolchain: 1.95.0\n    components: rustfmt"
+                                          },
+                         "fix_guide":  "1) Resolve current SHAs: git ls-remote https://github.com/actions/checkout v4 and git ls-remote https://github.com/dtolnay/rust-toolchain v1 (or take them from the workflow run logs\u0027 \u0027Download action repository\u0027 lines). 2) Replace @v4/@v1 with @\u003csha\u003e plus trailing \u0027# v4\u0027/\u0027# v1\u0027 comments in ci.yml (11 + 7 spots) and security.yml (2 + 2 spots); release.yml/pages.yml/docker.yml if they use the same actions. 3) Update AGENTS.md line 229 to describe the SHA-pinned setup and delete the @master claim. 4) Optionally add .github/dependabot.yml with package-ecosystem \u0027github-actions\u0027 + allow \u0027pinned\u0027 to keep SHAs fresh.",
+                         "effort_estimate":  {
+                                                 "minutes":  40,
+                                                 "human_readable":  "40 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "SHA resolution 10m; edit 4 workflow files 15m; AGENTS.md update 5m; verify one CI run 10m"
+                                             },
+                         "technology":  [
+                                            "github-actions",
+                                            "supply-chain",
+                                            "rust-toolchain"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Read + Select-String",
+                                                  "query":  "Select-String -Path .github\\workflows\\*.yml -Pattern \u0027uses: .*@\u0027; compare SHA-pinned vs tag-pinned refs"
+                                              },
+                         "verification_command":  "Select-String -Path .github\\workflows\\ci.yml,.github\\workflows\\security.yml -Pattern \u0027uses: \u0027; Select-String -Path AGENTS.md -Pattern \u0027rust-toolchain@\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\ci.yml lines 53-68 (contrast SHA-pinned cargo-deny-action line 54 vs checkout@v4 line 53/rust-toolchain@v1 line 65)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md line 229",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\rust-toolchain.toml line 2",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\security.yml lines 22-25, 53-56"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.9,
+                                            "rationale":  "All refs enumerated directly from the workflow files; the inconsistency is mechanically verifiable. Severity held at medium because the toolchain VERSION itself is consistently 1.95.0 everywhere (no version drift), so exposure is limited to action-code supply chain, not toolchain-version surprises."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "The audit brief framed this as \u0027@master unpinned major\u0027 - reality is @v1, which is still a mutable ref; either way the internal inconsistency against the repo\u0027s own SHA-pinning house style is objective, and the AGENTS.md staleness is quoted verbatim. No project convention endorses mutable tags for the already-SHA-pinned siblings.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-006",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                         "line":  236,
+                         "endLine":  236,
+                         "title":  "AGENTS.md dioxus caret-pin drift warning is obsolete: workspace uses exact =0.7.9 pins since T29, and no CI re-test guard exists or is needed",
+                         "description":  "AGENTS.md line 236 warns \u0027dioxus = \"0.7\" and dioxus-ssr = \"0.7\" are workspace caret pins... re-test on every minor bump\u0027. Reality (root Cargo.toml lines 540-563): T29 (v1.25 tech-debt batch) upgraded both to EXACT pins dioxus = \"=0.7.9\" and dioxus-ssr = \"=0.7.9\" specifically \u0027to prevent surprise breakage from dioxus-rsx proc-macro changes\u0027. The caret scenario the warning describes cannot occur - no minor bump can be resolved silently. The companion question from the audit scope (\u0027is the re-test guard documented in CI?\u0027): no dioxus-specific job exists in ci.yml; dioxus breakage would surface only via the clippy hard gate (compile-time) and the advisory continue-on-error test jobs.",
+                         "root_cause":  "T29 changed the pins but the AGENTS.md NOTES section (which the same T29-era edits touched elsewhere) kept the older caret-pin text.",
+                         "impact":  "Low: documentation overstates a risk that has been mitigated. Harm is indirect - reviewers may distrust the dependency story (\u0027caret risk!\u0027) during audits/launch reviews, and the true residual risk (proc-macro behavior changes on a DELIBERATE manual bump of =0.7.9, caught only by advisory tests) is not stated anywhere actionable.",
+                         "recommendation":  "Rewrite AGENTS.md line 236 to: (a) state the exact =0.7.9 pins and their T29 rationale; (b) re-point the re-test obligation at MANUAL bumps - \u0027when bumping the =0.7.9 pins, run buff-ui-dioxus + ssr tests and the wasm build, since dioxus-rsx internals are not semver-covered\u0027; (c) optionally note that ci.yml clippy is the only hard gate covering dioxus compile breakage.",
+                         "fix_examples":  {
+                                              "before":  "- **Dioxus 0.7 version drift risk**: `dioxus = \"0.7\"` and `dioxus-ssr = \"0.7\"` are workspace caret pins. dioxus-rsx proc-macro internals are NOT covered by semver guarantees - re-test on every minor bump. See `.sisyphus/decisions/dioxus-feasibility.md` (T121b spike).",
+                                              "after":  "- **Dioxus 0.7 exact pins**: `dioxus = \"=0.7.9\"` and `dioxus-ssr = \"=0.7.9\"` (T29 exact pins - dioxus-rsx proc-macro internals are NOT covered by semver guarantees). When bumping the pin MANUALLY: re-run buff-ui-dioxus + `buff ssr` tests and the wasm32 build; ci.yml clippy is the only hard gate on compile breakage. See `.sisyphus/decisions/dioxus-feasibility.md` (T121b spike)."
+                                          },
+                         "fix_guide":  "1) Edit AGENTS.md line 236 per the example. 2) Cross-check line 134/238 tier text while in the file (see AUD-DEP-007). 3) No code or CI change required; optionally add a comment at root Cargo.toml lines 556/563 pointing back at the refreshed NOTES entry.",
+                         "effort_estimate":  {
+                                                 "minutes":  10,
+                                                 "human_readable":  "10 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "edit 5m; cross-check against root pins 5m"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo",
+                                            "dioxus",
+                                            "documentation"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Read + Select-String",
+                                                  "query":  "Select-String -Path AGENTS.md -Pattern \u0027dioxus\u0027; Select-String -Path Cargo.toml -Pattern \u0027^dioxus\u0027"
+                                              },
+                         "verification_command":  "Select-String -Path Cargo.toml -Pattern \u0027^dioxus\u0027; Select-String -Path AGENTS.md -Pattern \u0027Dioxus 0.7\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md line 236",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml lines 540-563 (T29 exact-pin rationale) and 556/563 (pins)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.sisyphus\\decisions\\dioxus-feasibility.md (referenced)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\ci.yml (no dioxus-specific guard)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Pin text quoted verbatim from both files; the exact-pin upgrade is self-documented in the root file\u0027s T29 comment, making the AGENTS.md staleness unambiguous."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "The underlying caret risk the audit brief asked about does NOT exist in code - reporting it as a dependency risk would itself be a false positive; the verified finding is the stale documentation, which is real and quotable. Doc drift is a genuine low-severity audit output, not a convention violation.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-007",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                         "line":  134,
+                         "endLine":  134,
+                         "title":  "AGENTS.md version-tier claim \u00271.2.0 (17 core compiler crates)\u0027 contradicts reality (8 crates) and its own line 238",
+                         "description":  "AGENTS.md line 134 states \u0027Three version tiers: 1.2.0 (17 core compiler crates), 1.0.0 (11 tooling crates...)\u0027. Measured across crates/*/Cargo.toml: exactly 8 crates carry version = \"1.2.0\" (buff-lang-error/ast/lexer/parser/types/codegen-rust/codegen-wgsl/runtime) - the other 9 buff-lang-* crates (check, fmt, pipeline, debug-info, ffi-guide, ast-rsx, buffhtml-parser, codegen-buffhtml, cli) are at 1.0.0. AGENTS.md line 238 states the tier correctly (\u00271.2.0 for the core compiler crates (ast/lexer/parser/types/codegen-rust/codegen-wgsl/runtime/error)\u0027), so the document contradicts itself, and the root Cargo.toml tier comment (lines 5-27) agrees with line 238. The conventions-lint CI job (scripts/check-conventions.ps1) enforces the per-crate tiers mechanically, so this is documentation-only.",
+                         "root_cause":  "The \u002717\u0027 figure counts all buff-lang-* crates (compiler-adjacent included) while the 1.2.0 tier only covers the 8 foundational pipeline crates; the line was written from crate-count instead of tier membership.",
+                         "impact":  "Cosmetic-to-moderate: contributors following line 134 would version a new core-adjacent crate (e.g. a new buff-lang-* crate) at 1.2.0 and have the conventions-lint reject it, or misjudge which crates need a coordinated tier bump at release time.",
+                         "recommendation":  "Change line 134 to \u00271.2.0 (8 core pipeline crates: error/ast/lexer/parser/types/codegen-rust/codegen-wgsl/runtime)\u0027 or simply reference line 238\u0027s enumeration so the two entries cannot diverge again.",
+                         "fix_examples":  {
+                                              "before":  "- **Edition 2021, license `MIT OR Apache-2.0`**. Three version tiers: `1.2.0` (17 core compiler crates), `1.0.0` (11 tooling crates: ...) + 44 framework crates.",
+                                              "after":  "- **Edition 2021, license `MIT OR Apache-2.0`**. Three version tiers: `1.2.0` (8 core pipeline crates: error/ast/lexer/parser/types/codegen-rust/codegen-wgsl/runtime), `1.0.0` (tooling + remaining buff-lang-* crates + 44 framework crates)."
+                                          },
+                         "fix_guide":  "1) Edit AGENTS.md line 134. 2) Verify: Get-ChildItem crates\\*\\Cargo.toml | Select-String \u0027^version = \"1\\.2\\.0\"\u0027 | Measure-Object =\u003e 8. 3) No other file references the \u002717 crates\u0027 tier figure (grep to confirm before merging).",
+                         "effort_estimate":  {
+                                                 "minutes":  10,
+                                                 "human_readable":  "10 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "edit 5m; verification grep 5m"
+                                             },
+                         "technology":  [
+                                            "documentation",
+                                            "cargo"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Select-String + PowerShell count",
+                                                  "query":  "Select-String -Path AGENTS.md -Pattern \u002717 core|1\\.2\\.0\u0027; (Get-ChildItem crates\\*\\Cargo.toml | Select-String -Pattern \u0027^version = \"1\\.2\\.0\"\u0027).Count"
+                                              },
+                         "verification_command":  "Select-String -Path AGENTS.md -Pattern \u002717 core\u0027; (Get-ChildItem crates\\*\\Cargo.toml | Select-String -Pattern \u0027^version = \"1\\.2\\.0\"\u0027 | Measure-Object).Count",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md lines 134 and 238 (self-contradiction)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml lines 5-27 (authoritative tier comment)",
+                                            ".github/workflows/ci.yml lines 71-89 (conventions-lint enforcing tiers)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.97,
+                                            "rationale":  "Pure arithmetic: 8 manifests match version = \"1.2.0\"; the contradicting in-document line 238 is quoted; root Cargo.toml comment agrees with 238."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Zero-risk doc arithmetic error; no convention declares 17 crates at 1.2.0 and the enforcement script follows the real tiers, so the finding cannot be a misreading of a deliberate convention.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-008",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml",
+                         "line":  785,
+                         "endLine":  803,
+                         "title":  "ndarray T8 rationale comment block duplicated verbatim in workspace.dependencies (lines 762-780 and 785-803)",
+                         "description":  "The 19-line comment block beginning \u0027# T8 (buff-tensor): the canonical Rust N-dimensional array crate.\u0027 (including the (a)/(b)/(c) forward-pin rationale and the \u0027Mirrors the chrono/tokio/regex codegen-only linking boundary\u0027 tail) appears TWICE back-to-back: lines 762-780 and lines 785-803, separated only by the one-line T9 note (\u0027T9: buff-image and T11 buff-dsp workspace deps... are added by those sibling tasks downstream\u0027). The ndarray key itself is declared once (line 781). The duplicate arose when the T9 note was spliced between a pasted copy of the block and the original.",
+                         "root_cause":  "Copy-paste splice error during the T9 comment insertion; the block was duplicated instead of the note being inserted between distinct comments.",
+                         "impact":  "None at build time (comments only). Documentation cost: the file is the project\u0027s canonical T-numbered rationale registry (AGENTS.md: \u0027add to root [workspace.dependencies] first (heavily documented)\u0027); duplicated rationale invites divergent future edits and makes diff review of this hot-file noisier.",
+                         "recommendation":  "Delete the second occurrence (lines 785-803), keeping the T9 cross-reference note and the single ndarray comment + pin.",
+                         "fix_examples":  {
+                                              "before":  "# T9: `buff-image` and `buff-dsp` workspace deps (image, rustfft, realfft, apodize) are added by those sibling tasks downstream in\n# this file - T8 does NOT duplicate them here.\n# T8 (buff-tensor): the canonical Rust N-dimensional array crate.\n# ... (19 duplicated lines) ...\nndarray = { version = \"0.16\", default-features = false }",
+                                              "after":  "# T9: `buff-image` and `buff-dsp` workspace deps (image, rustfft, realfft, apodize) are added by those sibling tasks downstream in\n# this file - T8 does NOT duplicate them here.\nndarray = { version = \"0.16\", default-features = false }"
+                                          },
+                         "fix_guide":  "1) Open root Cargo.toml at line 784; delete lines 785-803 (the second \u0027# T8 (buff-tensor): the canonical Rust...\u0027 block through its \u0027linking boundary\u0027 tail, i.e. everything between the T9 note and the ndarray key\u0027s position such that exactly one comment block remains directly above the ndarray key). 2) Verify with Select-String -Path Cargo.toml -Pattern \u0027canonical Rust N-dimensional array crate\u0027 | Measure-Object =\u003e 1. 3) cargo check --workspace (sanity only; comments have no semantic effect).",
+                         "effort_estimate":  {
+                                                 "minutes":  10,
+                                                 "human_readable":  "10 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "delete 3m; verify count 2m; sanity check 5m"
+                                             },
+                         "technology":  [
+                                            "cargo",
+                                            "documentation"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Read (full-file) + Select-String",
+                                                  "query":  "Select-String -Path Cargo.toml -Pattern \u0027canonical Rust N-dimensional array crate\u0027"
+                                              },
+                         "verification_command":  "Select-String -Path Cargo.toml -Pattern \u0027canonical Rust N-dimensional array crate\u0027 | ForEach-Object { $_.LineNumber }",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml lines 762-803 (duplicate blocks) and 781 (ndarray key)",
+                                            "AGENTS.md \u0027Workspace dependency resolution\u0027 convention (rationale-comments registry role)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.99,
+                                            "rationale":  "Verbatim duplication observed directly in the full-file read; mechanical verification is a one-liner that currently returns two line numbers (762, 785)."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Purely textual duplication with zero semantic surface; no convention sanctions (or forbids) duplicate rationale blocks, so nothing deliberate is being second-guessed.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-DEP-009",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\release.yml",
+                         "line":  7,
+                         "endLine":  7,
+                         "title":  "Documented \u0027reserved\u0027 crates-io/ directory does not exist on disk and no crates.io publish workflow exists despite README promising future crates.io installation",
+                         "description":  "AGENTS.md (STRUCTURE and NOTES) documents \u0027crates-io/ - EMPTY (reserved for future crates.io publishing)\u0027 and the anti-patterns list forbids populating it without coordination. Verified: Test-Path crates-io =\u003e False (the directory is not present on disk and not tracked). Additionally, README.md Option 5 tells users they can eventually \u0027cargo install buff-cli --locked\u0027 from crates.io, but .github/workflows contains no publish workflow: release.yml only builds 5-target binaries and publishes a GitHub Release (line 7 \u0027publishes them to a GitHub Release\u0027, line 130 \u0027Publish GitHub Release\u0027); no \u0027cargo publish\u0027 / crates.io step exists in any workflow (ci/security/release/pages/docker/bufflings).",
+                         "root_cause":  "The reserved directory was never committed (empty dirs are not tracked by git without a placeholder), and crates.io publishing was deferred but the README future-tense and AGENTS.md reservation were left pointing at infrastructure that does not exist yet.",
+                         "impact":  "Cosmetic/coordination only: no build or release path breaks today. Risks are (a) contributors creating crates-io/ content per AGENTS.md will find the dir absent and may scatter files elsewhere; (b) when crates.io publishing day arrives, there is no scaffolded workflow and the README claim is unbacked; (c) the repo\u0027s OWN publishing story (dual-licensed, repository/keywords/categories metadata already present in every crate manifest - e.g. buff-web3 lines 13-15) implies publish-readiness that the pipeline does not deliver.",
+                         "recommendation":  "Add a placeholder to make the reservation real (crates-io/README.md with the reservation text + .gitkeep semantics), and either add a stub .github/workflows/publish.yml (manual_dispatch, requiring CARGO_REGISTRY_TOKEN secret, starting with a single low-risk crate such as buff-lang-error) or add one sentence to README Option 5 stating crates.io publishing is not yet available. Align AGENTS.md wording with whichever choice is made.",
+                         "fix_examples":  {
+                                              "before":  "# release.yml (only publishing path today)\nname: Publish GitHub Release",
+                                              "after":  "# NEW FILE: .github/workflows/publish.yml (stub)\nname: Publish crates.io\non:\n  workflow_dispatch:\n    inputs:\n      crate:\n        description: \u0027Workspace crate to publish (must be released on GitHub first)\u0027\n        required: true\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@\u003csha\u003e # v4\n      - uses: dtolnay/rust-toolchain@\u003csha\u003e # v1\n        with:\n          toolchain: 1.95.0\n      - run: cargo publish --dry-run -p ${{ github.event.inputs.crate }}\n      # wire real `cargo publish -p ...` + CARGO_REGISTRY_TOKEN when crates.io launch is scheduled"
+                                          },
+                         "fix_guide":  "1) Create crates-io/README.md: \u0027# Reserved for future crates.io publishing - do not populate without coordination (see AGENTS.md anti-patterns)\u0027; commit it so the dir exists in fresh clones. 2) Either add the publish.yml stub above or amend README Option 5 with \u0027not yet published to crates.io\u0027. 3) Update AGENTS.md STRUCTURE row for crates-io/ to reflect the placeholder. 4) If the stub lands, keep it dry-run-only until the registry launch decision (v1.28 infra wave) is executed.",
+                         "effort_estimate":  {
+                                                 "minutes":  60,
+                                                 "human_readable":  "1 hour",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "placeholder + docs 15m; publish.yml stub 25m; AGENTS.md/README alignment 10m; dry-run verification 10m"
+                                             },
+                         "technology":  [
+                                            "cargo",
+                                            "crates.io",
+                                            "github-actions",
+                                            "documentation"
+                                        ],
+                         "category":  "dependencies",
+                         "detection_method":  {
+                                                  "tool":  "Test-Path + Get-ChildItem + Select-String",
+                                                  "query":  "Test-Path crates-io; Select-String -Path .github\\workflows\\*.yml -Pattern \u0027cargo publish|crates\\.io\u0027; Select-String -Path AGENTS.md -Pattern \u0027crates-io\u0027"
+                                              },
+                         "verification_command":  "Test-Path crates-io; Select-String -Path .github\\workflows\\release.yml -Pattern \u0027crates\\.io|cargo publish|GitHub Release\u0027; Select-String -Path AGENTS.md -Pattern \u0027crates-io\u0027",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md (STRUCTURE \u0027crates-io/ EMPTY (reserved)\u0027 + NOTES + anti-patterns entry)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\release.yml lines 7, 130",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\README.md Installation Option 5 (\u0027once published to crates.io\u0027)",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-web3\\Cargo.toml lines 13-15 (publish-ready metadata already present)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.85,
+                                            "rationale":  "Directory absence and publish-workflow absence are mechanically verified; rated low confidence of being a \u0027problem\u0027 rather than a known deferred state - emitted only because the audit scope explicitly requested item (7) and the doc/dir mismatch (AGENTS.md describes a directory that does not exist) is objectively true."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "The reservation itself is documented and deliberate (FP-exempt as a pin equivalent); the finding is limited to the doc/dir mismatch and the unbacked README claim, explicitly filed at low severity per the scope\u0027s own calibration. If the team considers \u0027reserved\u0027 to mean \u0027not yet created\u0027, this can be dismissed with a one-line doc tweak.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "Cargo.toml"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.toml",
+                                               "lines_read":  2246,
+                                               "bytes_read":  131250,
+                                               "examined_at":  "2026-10-10T03:38:00-03:00",
+                                               "findings_emitted":  3,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\deny.toml",
+                                               "lines_read":  150,
+                                               "bytes_read":  7485,
+                                               "examined_at":  "2026-10-10T03:37:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\rust-toolchain.toml",
+                                               "lines_read":  3,
+                                               "bytes_read":  66,
+                                               "examined_at":  "2026-10-10T03:37:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\ci.yml",
+                                               "lines_read":  335,
+                                               "bytes_read":  14515,
+                                               "examined_at":  "2026-10-10T03:39:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\security.yml",
+                                               "lines_read":  64,
+                                               "bytes_read":  2186,
+                                               "examined_at":  "2026-10-10T03:44:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\release.yml",
+                                               "lines_read":  15,
+                                               "bytes_read":  6200,
+                                               "examined_at":  "2026-10-10T03:48:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                               "lines_read":  210,
+                                               "bytes_read":  25394,
+                                               "examined_at":  "2026-10-10T03:47:00-03:00",
+                                               "findings_emitted":  3,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.cargo\\audit.toml",
+                                               "lines_read":  73,
+                                               "bytes_read":  3234,
+                                               "examined_at":  "2026-10-10T03:46:00-03:00",
+                                               "findings_emitted":  2,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-web3\\Cargo.toml",
+                                               "lines_read":  74,
+                                               "bytes_read":  3225,
+                                               "examined_at":  "2026-10-10T03:45:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-science\\Cargo.toml",
+                                               "lines_read":  43,
+                                               "bytes_read":  1702,
+                                               "examined_at":  "2026-10-10T03:45:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-xml\\Cargo.toml",
+                                               "lines_read":  27,
+                                               "bytes_read":  944,
+                                               "examined_at":  "2026-10-10T03:46:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\*\\Cargo.toml (73 manifests, scripted scan: version/edition/license greps + 179-key workspace-dep consumer analysis)",
+                                               "lines_read":  2850,
+                                               "bytes_read":  119448,
+                                               "examined_at":  "2026-10-10T03:42:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           }
+                                       ],
+                    "files_skipped":  [
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\Cargo.lock",
+                                              "reason":  "10,881 lines; only targeted Select-String probes run (quick-xml x4, rsa x1, rust-toolchain n/a); full dependency-graph re-resolution not performed (would require cargo tree/metadata execution)",
+                                              "lines_not_examined":  10700
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\bufflings.yml",
+                                              "reason":  "Exercise-runner workflow; no dependency-gate content expected per scope",
+                                              "lines_not_examined":  20
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\docker.yml",
+                                              "reason":  "Docker build workflow; base-image pin review deemed out of the 7-item dependency scope",
+                                              "lines_not_examined":  60
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\pages.yml",
+                                              "reason":  "Pages deploy workflow; no Cargo dependency surface",
+                                              "lines_not_examined":  90
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\scripts\\check-conventions.ps1",
+                                              "reason":  "Conventions validator referenced by ci.yml conventions-lint job; enforcement assumed from job comments, script body not read",
+                                              "lines_not_examined":  200
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\editors\\vscode\\package.json",
+                                              "reason":  "npm ecosystem explicitly outside this dependency audit\u0027s Cargo scope",
+                                              "lines_not_examined":  60
+                                          },
+                                          {
+                                              "path":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-science\\src\\*.rs",
+                                              "reason":  "Grep-verified nalgebra absence only; full source read unnecessary for the manifest-level finding",
+                                              "lines_not_examined":  800
+                                          }
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     {
+                                                         "area":  "Advisory ignores beyond the four analyzed",
+                                                         "reason":  ".cargo/audit.toml contains 24 RUSTSEC ignores; only RUSTSEC-2023-0071 (rsa), RUSTSEC-2026-0194/0195 (quick-xml), and the h2/ring chain were traced to their consumers. The remaining ~20 (rkyv RUSTSEC-2026-0235, async-std, fxhash, instant, paste, proc-macro-error, rustls-pemfile, unic-*, event-listener, webpki set) were read and confirmed documented, but their transitive consumer paths were not individually re-derived via cargo tree - deeper vulnerable-reachable-code analysis deferred."
+                                                     },
+                                                     {
+                                                         "area":  "35 zero-dependent buff-* leaf framework crates",
+                                                         "reason":  "The scripted scan found 35 workspace path pins (buff-dataframe, buff-audio, buff-dsp, buff-geo, etc.) consumed by no other manifest. All spot-checked ones carry the documented \u0027so any future consumer resolves to the same in-tree version\u0027 forward-registration rationale, so they were FP-exempted as a documented deliberate pattern rather than individually audited; if any lacks its root comment, it would be an additional finding."
+                                                     },
+                                                     {
+                                                         "area":  "deny.toml [sources] / unknown-registry guard",
+                                                         "reason":  "deny.toml has no [sources] section, but CI invokes only \u0027cargo deny check bans licenses\u0027, so sources checking is out of scope of the existing gate by construction; judged not-a-gap under current CI wiring rather than a finding, but becomes one if \u0027check sources\u0027 is ever enabled without a config."
+                                                     },
+                                                     {
+                                                         "area":  "Exact resolved-version tier validation",
+                                                         "reason":  "Version-tier consistency was verified from manifests + the root tier comment; a resolver-level confirmation (cargo metadata --no-deps / cargo check) was not executed, so a semver-incompatible cross-crate requirement introduced without a matching lock update would be missed by this text-level audit (conventions-lint CI claims coverage)."
+                                                     },
+                                                     {
+                                                         "area":  "Transitive duplicate-version chains",
+                                                         "reason":  "Root Cargo.toml documents accepted duplicates (windows-sys x5, hashbrown x5, tungstenite x4, darling x3, spin x3, quick-xml x4 discovered independently). Current duplicate inventory was NOT re-derived from Cargo.lock; new duplicates added since the debt-zero W4 audit would not be flagged."
+                                                     },
+                                                     {
+                                                         "area":  "Non-Cargo dependency surfaces",
+                                                         "reason":  "editors/vscode npm packages, tree-sitter-buff generated parser provenance, docker base images, installers/homebrew formula, and website/playground JS were all excluded as out of the declared 7-item Cargo scope."
+                                                     }
+                                                 ],
+                    "totals":  {
+                                   "critical":  0,
+                                   "high":  1,
+                                   "medium":  4,
+                                   "low":  4,
+                                   "files_examined":  12
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

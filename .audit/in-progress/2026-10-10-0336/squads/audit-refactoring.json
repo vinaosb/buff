@@ -1,0 +1,477 @@
+﻿{
+    "squad":  "audit-refactoring",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-RF-001",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\src\\error_mapper.rs",
+                         "line":  431,
+                         "endLine":  449,
+                         "title":  "Byte-offset-to-line/col lookup reimplemented in 5 crates despite canonical buff-lang-error::SourceFile",
+                         "description":  "The line-start-table + binary-search byte-offset-to-(line,col) algorithm exists in SIX independent implementations: (1) canonical crates\\buff-lang-error\\src\\source_map.rs:67-75 compute_line_starts + :45-63 SourceFile::lookup (char-counted columns); (2) crates\\buff-lang-pipeline\\src\\error_mapper.rs:431-449 private byte_line_starts + byte_offset_to_line_col; (3) crates\\buff-dap\\src\\translation.rs:276 compute_line_starts + :290 line_start_offset (reverse direction); (4) crates\\buff-lang-cli\\src\\commands\\coverage.rs:287 line_starts; (5) crates\\buff-lang-cli\\src\\commands\\refactor.rs:502-523 private LineTable struct; (6) crates\\buff-lsp\\src\\position.rs:36-93 (EXCLUDED from the finding â€” self-documented in-module as the deliberate LSP-specific counterpart). buff-lang-error is the leaf crate every workspace member already depends on, and SourceFile::new/lookup are public; duplicates 2-5 could construct a SourceFile and delegate. Column semantics have already drifted between copies (char-counted in error crate, byte-based in error_mapper, line-only in LineTable), which is the classic divergence cost of copy-paste infrastructure.",
+                         "root_cause":  "Tooling crates (error_mapper, dap, coverage, refactor) were each built in separate T-numbered tasks; each task re-solved the offset-to-line problem locally instead of extending the leaf crate. buff-lang-error does not expose a path-parameter-free constructor or a public line-to-offset (reverse) API, which made reuse marginally inconvenient and invited reimplementation.",
+                         "impact":  "Five maintenance surfaces for one algorithm; future fixes (e.g. CRLF handling, UTF-16 columns for LSP parity, O(log n) reverse lookup) must be applied five times or the tools silently diverge in reported line/col numbers for the same .buff source. Diagnostic line numbers are user-facing â€” divergence between buff check, buff coverage and buff refactor output erodes trust.",
+                         "recommendation":  "Consolidate on buff-lang-error::SourceFile: (a) add a path-optional constructor (SourceFile::from_str(content) with empty path) and a public line_start_offset(line) reverse method for buff-dap; (b) replace error_mapper.rs byte_line_starts/byte_offset_to_line_col, translation.rs compute_line_starts/line_start_offset, coverage.rs line_starts, and refactor.rs LineTable with SourceFile construction + lookup calls; (c) leave buff-lsp position.rs as-is (documented deliberate counterpart) but note in its doc comment which semantics differ.",
+                         "fix_examples":  {
+                                              "before":  "// crates\\buff-lang-pipeline\\src\\error_mapper.rs:431\nfn byte_line_starts(src: \u0026str) -\u003e Vec\u003cusize\u003e {\n    let mut starts = vec![0usize];\n    for (i, b) in src.bytes().enumerate() {\n        if b == b\u0027\\n\u0027 { starts.push(i + 1); }\n    }\n    starts\n}\nfn byte_offset_to_line_col(offset: usize, line_starts: \u0026[usize]) -\u003e Option\u003c(usize, usize)\u003e { /* binary search + col */ }",
+                                              "after":  "// crates\\buff-lang-pipeline\\src\\error_mapper.rs\nuse buff_lang_error::SourceFile;\n\nfn line_col_of(source_file: \u0026SourceFile, offset: usize) -\u003e Option\u003c(usize, usize)\u003e {\n    source_file.lookup(offset)\n}"
+                                          },
+                         "fix_guide":  "1) In buff-lang-error/src/source_map.rs add `pub fn from_content(content: String) -\u003e Self` (path: PathBuf::new()) and `pub fn line_start_offset(\u0026self, line: usize) -\u003e Option\u003cusize\u003e` (inverse of lookup via line_starts index). 2) Keep the existing SourceFile::lookup signature â€” it is the byteâ†’(line,col) primitive both directions need. 3) Migrate one consumer per commit with its tests green (error_mapper â†’ coverage â†’ refactor â†’ dap), keeping behavior byte-identical: note error_mapper counted BYTE columns while SourceFile::lookup counts CHAR columns â€” for ASCII sources identical; verify the buffhtml fixtures still pass, and if byte-column behavior is load-bearing, add a byte_col variant rather than silently changing output. 4) Do NOT touch buff-lsp/src/position.rs (documented LSP-specific counterpart per its module doc). 5) Add a line to buff-lang-error/AGENTS.md declaring SourceFile the single text-position primitive.",
+                         "effort_estimate":  {
+                                                 "minutes":  90,
+                                                 "human_readable":  "~1.5-2 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "20 min SourceFile API additions + 40 min four consumer migrations + 20 min test verification incl. column-semantics check + 10 min AGENTS.md note"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "edition-2021",
+                                            "cargo-workspace"
+                                        ],
+                         "category":  "refactoring",
+                         "detection_method":  {
+                                                  "tool":  "PowerShell Get-ChildItem + Select-String cross-crate scan",
+                                                  "query":  "Get-ChildItem crates -Recurse -Filter *.rs | Select-String -Pattern \u0027fn (compute_line_starts|byte_line_starts|line_starts)\\(\u0027"
+                                              },
+                         "verification_command":  "Get-ChildItem crates -Recurse -Filter *.rs | Select-String -Pattern \"fn (compute_line_starts|byte_line_starts|line_starts)\\(\" | ForEach-Object { \"$($_.Path):$($_.LineNumber): $($_.Line.Trim())\" }",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-error\\src\\source_map.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\src\\error_mapper.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-dap\\src\\translation.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\coverage.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\commands\\refactor.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-error\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.9,
+                                            "rationale":  "All six sites verified by direct read or line-precise grep; the four undocumented duplicates are plain-code identical algorithms. Only residual uncertainty is whether byte-vs-char column semantics are load-bearing for some consumer, which affects the migration recipe, not the existence of the duplication."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Four of five duplicate sites carry no documentation claiming deliberateness; the one documented counterpart (buff-lsp position.rs) was explicitly excluded. buff-lang-error AGENTS.md says \u0027Don\u0027t introduce a competing location type\u0027 â€” the private duplicates contradict that spirit.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates\\buff-lang-error\\AGENTS.md",
+                                                                                          "crates\\buff-lsp\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-RF-002",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-types\\src\\ty.rs",
+                         "line":  18,
+                         "endLine":  2488,
+                         "title":  "ty.rs is now the largest workspace file (2,488 lines) â€” split target missed by the ITER-31..52 hygiene campaign",
+                         "description":  "crates\\buff-lang-types\\src\\ty.rs is 2,488 lines / 120,495 bytes â€” larger than rust_codegen.rs (2,459) which the project already split across 20+ submodules, and larger than the old stmt_decl.rs. Verified structure: `pub enum Type` spans lines 18-1247 (~1,230 lines with 40+ variant docs, including all framework prelude types), IntWidth/FloatWidth at 1249-1263, `impl Type` at 1265-2461 of which lines ~1436-2447 are ~60 mechanically repeated constructor/predicate pairs (fn tensor() + fn is_prelude_tensor(), fn faker() + fn is_prelude_faker(), ... covering datetime, regex, url, path, process, socket, image, faker, cache, i18n, dataframe, audio, ecs, validator, smtp, xml, msgpack, protobuf, geo, simd, actors, tensor, dsp, web, strategy, oauth2, rbac, nlp, chat, web3, crypto families). The file already contains `mod display;` (line 12) and `mod tests;` (line 2488) â€” the module-dir pattern is established but the body was never split.",
+                         "root_cause":  "The v1.25+ code-hygiene campaign (ITER-31..44 for codegen-rust, ITER-52 for parser stmt_decl) targeted codegen and parser but never buff-lang-types. Each framework-wave task (T124 series, v1.19-v1.23 waves) appended its constructor/predicate pair to the same file, growing it additively.",
+                         "impact":  "Every new prelude type forces an edit to the single most-contended file in the workspace (Type is the compile-time currency all compiler crates share); merge conflicts, review blast radius, and compile-time incremental-unit granularity all degrade. The repo\u0027s own convention now is that no file should hold what ty.rs holds.",
+                         "recommendation":  "Replicate the stmt_decl.rs split precedent (commit 8293a99): convert ty.rs to ty/mod.rs keeping the Type enum + IntWidth/FloatWidth + core impl (is_numeric/is_gpu_eligible/constructors for builtin variants), and extract lines ~1436-2447 into ty/prelude_constructors.rs (the ~60 prelude-type constructor/predicate pairs). display.rs and tests.rs stay as siblings.",
+                         "fix_examples":  {
+                                              "before":  "// crates\\buff-lang-types\\src\\ty.rs (single 2,488-line file)\nmod display;\npub enum Type { /* 1,230 lines */ }\nimpl Type {\n    pub fn int_default() -\u003e Self { /* ... */ }\n    pub fn tensor() -\u003e Self { /* ... */ }\n    pub fn is_prelude_tensor(\u0026self) -\u003e bool { /* ... */ }\n    // ~60 more prelude pairs ...\n}\nmod tests;",
+                                              "after":  "// crates\\buff-lang-types\\src\\ty\\mod.rs\nmod display;\nmod prelude_constructors;\npub enum Type { /* unchanged */ }\nimpl Type {\n    pub fn int_default() -\u003e Self { /* ... */ }\n    // builtin-variant impls only; prelude pairs delegate:\n    pub fn tensor() -\u003e Self { prelude_constructors::tensor() }\n    pub fn is_prelude_tensor(\u0026self) -\u003e bool { prelude_constructors::is_prelude_tensor(self) }\n}\n// crates\\buff-lang-types\\src\\ty\\prelude_constructors.rs (free fns, ~1,000 lines)"
+                                          },
+                         "fix_guide":  "1) mkdir src/ty; git mv ty.rs ty/mod.rs. 2) Cut lines ~1436-2447 (the paired prelude constructors/predicates, from fn datetime() through fn is_prelude_rsa_keypair()) into ty/prelude_constructors.rs as pub(crate) free fns; keep thin delegating inherent methods in mod.rs so the public API (Type::tensor(), etc.) and all downstream call sites are byte-identical â€” zero ripple to parser/types/codegen. 3) Public API unchanged: methods stay on Type via delegation; only file layout changes. 4) Run cargo test -p buff-lang-types and cargo check --workspace (Type is depended on by all). 5) Update the per-crate AGENTS.md STRUCTURE block (its line numbers are stale anyway â€” see AUD-RF-004). 6) Optional follow-up: same treatment for infer.rs (2,363 lines) once ty.rs proves the pattern.",
+                         "effort_estimate":  {
+                                                 "minutes":  180,
+                                                 "human_readable":  "~3 hours",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "30 min mechanical move + 60 min thin-delegate wiring for ~120 fns (scriptable) + 60 min workspace test/verify + 30 min docs"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo-workspace"
+                                        ],
+                         "category":  "refactoring",
+                         "detection_method":  {
+                                                  "tool":  "workspace line-count census + symbol outline grep",
+                                                  "query":  "Get-ChildItem crates -Recurse -Filter *.rs | % { (Get-Content $_).Count }; Select-String -Path crates\\buff-lang-types\\src\\ty.rs -Pattern \u0027^(impl|pub enum|    pub fn)\u0027"
+                                              },
+                         "verification_command":  "(Get-Content crates\\buff-lang-types\\src\\ty.rs).Count; Select-String -Path crates\\buff-lang-types\\src\\ty.rs -Pattern \"^impl Type|^pub enum|^mod \" | ForEach-Object { \"$($_.LineNumber): $($_.Line)\" }",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-types\\src\\ty.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-types\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.92,
+                                            "rationale":  "Line count, byte size, and internal structure (enum 18-1247, impl 1265-2461, ~60 repeated pairs) all directly verified by read + outline grep; split precedent (stmt_decl ITER-52) verified via git log."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Pure size/structure finding with no behavior claim. The repo itself established the threshold by splitting smaller files (rust_codegen.rs 2,459, stmt_decl.rs), so recommending the same for a larger file cannot contradict a documented choice. The per-crate AGENTS.md \u0027extensible registry\u0027 convention is honored â€” the recommendation changes file layout, not the registry pattern.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates\\buff-lang-types\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-RF-003",
+                         "severity":  "medium",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\src\\lib.rs",
+                         "line":  1,
+                         "endLine":  2234,
+                         "title":  "buff-lang-pipeline lib.rs is a 2,234-line god-module bundling six concerns plus 346 lines of inline tests",
+                         "description":  "crates\\buff-lang-pipeline\\src\\lib.rs (2,234 lines / 94,419 bytes) verifies as: option/config types (BuildMode:60, DebugInfoChoice:177, BackendChoice:236, LinkerChoice:274 + from_str helpers, lines ~60-365); the compile_to_rust* entry family (:397-1020); the .buffhtml pipeline (:773-1020, :1196-1264 format_buffhtml_parse_error, :1447-1542 compile_buffhtml_rust_to_exe); profiling instrumentation (ProfileMode:1021, inject_profiling:1068, build_instrumented_block:1114); rustc flag/profile/PGO tables (:1543-1850 rustc_fast_flags, rustc_release_flags, rustc_minimal_flags, release/minimal_profile_toml, rustc_pgo_*); error formatting (:1851-1887); and an inline `mod tests` at :1888-2234 (~346 lines). The project convention is \u0027Tests in per-crate tests/ (not src). Inline #[cfg(test)] ok for unit smoke tests\u0027 â€” 346 lines exceeds smoke-test scale, and rustc-invocation logic is duplicated concern-wise with buff-lang-cli/src/rustc_invoke.rs (T35 shared rustc subprocess helpers).",
+                         "root_cause":  "The crate grew task-by-task (v1.0 core, T131 ui_dev wasm build, v1.27 fast-linker/compile-speed, v1.31 PGO/profile flags, T133-T135 buffhtml) with every addition appended to lib.rs because the crate has only one module.",
+                         "impact":  "Highest-friction file for anyone touching the build pipeline: rustc flag changes, buffhtml error rendering, profiling injection and BuildMode semantics all share one 2,234-line namespace; the 346-line inline test block recompiles into the lib target and inflates every consumer\u0027s check time; new subcommand work must navigate unrelated PGO/linker code to find the entry points.",
+                         "recommendation":  "Split into sibling modules preserving the public API via lib.rs re-exports: options.rs (BuildMode/DebugInfoChoice/BackendChoice/LinkerChoice + *_from_str, ~300 lines), rustc_flags.rs (rustc_*_flags + *_profile_toml + PGO helpers + target_is_installed, ~350 lines), profiling.rs (ProfileMode + inject_profiling + build_instrumented_block, ~180 lines), buffhtml.rs (compile_buffhtml_to_rust, compile_buffhtml_rust_to_exe, derive_component_name, inline_script_block, format_buffhtml_parse_error, ~500 lines); move mod tests to tests/pipeline_unit.rs. Then evaluate folding the flag-table overlap with buff-lang-cli/src/rustc_invoke.rs into one home.",
+                         "fix_examples":  {
+                                              "before":  "// crates\\buff-lang-pipeline\\src\\lib.rs (2,234 lines)\npub enum BuildMode { /* ... */ }\npub fn compile_to_rust(file: \u0026Path) -\u003e Result\u003cCompileOutput\u003e { /* ... */ }\npub fn compile_buffhtml_to_rust(file: \u0026Path) -\u003e Result\u003cBuffHtmlCompileOutput\u003e { /* ... */ }\npub fn rustc_fast_flags() -\u003e Vec\u003c\u0026\u0027static str\u003e { /* ... */ }\npub fn inject_profiling(rust_source: \u0026str, mode: ProfileMode) -\u003e Result\u003cString\u003e { /* ... */ }\n#[cfg(test)]\nmod tests { /* 346 lines */ }",
+                                              "after":  "// crates\\buff-lang-pipeline\\src\\lib.rs (thin re-export root)\nmod options;\nmod rustc_flags;\nmod profiling;\nmod buffhtml;\npub use options::{BuildMode, DebugInfoChoice, BackendChoice, LinkerChoice};\npub use rustc_flags::{rustc_fast_flags, rustc_release_flags, rustc_minimal_flags};\npub use profiling::{ProfileMode, inject_profiling};\npub use buffhtml::{compile_buffhtml_to_rust, BuffHtmlCompileOutput};\n// compile_to_rust family stays in lib.rs (~650 lines)\n// tests moved to tests/pipeline_unit.rs"
+                                          },
+                         "fix_guide":  "1) Create the four modules and `pub(crate) use super::*` style imports so fn bodies move verbatim (same pattern the codegen-rust ITER-31..44 split used). 2) Keep every `pub` item re-exported from lib.rs so buff-lang-cli, buff-eval, buff-playground-wasm and LSP consumers need zero changes. 3) Move mod tests content to tests/pipeline_unit.rs; keep only true 3-line smoke tests inline per convention. 4) cargo test -p buff-lang-pipeline + cargo check --workspace. 5) Defer the rustc_invoke.rs unification to a separate commit (behavioral risk: flag ordering in rustc invocations is golden-harness-sensitive).",
+                         "effort_estimate":  {
+                                                 "minutes":  180,
+                                                 "human_readable":  "~3 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "60 min verbatim module moves + 30 min re-export wiring + 45 min test relocation + 45 min golden-harness + workspace verification"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "cargo-workspace",
+                                            "rustc"
+                                        ],
+                         "category":  "refactoring",
+                         "detection_method":  {
+                                                  "tool":  "line-count census + symbol outline grep",
+                                                  "query":  "Select-String -Path crates\\buff-lang-pipeline\\src\\lib.rs -Pattern \u0027^(impl|pub enum|pub struct|pub fn|fn |mod )\u0027"
+                                              },
+                         "verification_command":  "(Get-Content crates\\buff-lang-pipeline\\src\\lib.rs).Count; Select-String -Path crates\\buff-lang-pipeline\\src\\lib.rs -Pattern \"^pub (enum|struct|fn)|^fn |^mod tests\" | ForEach-Object { \"$($_.LineNumber): $($_.Line)\" }",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-pipeline\\src\\lib.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\src\\rustc_invoke.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.88,
+                                            "rationale":  "All segment boundaries verified from the symbol outline; the tests-block convention violation is directly checkable against root AGENTS.md. Rustc_invoke.rs overlap noted but not deep-read, hence flagged as follow-up rather than asserted."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "No documented decision declares the single-file lib.rs deliberate; per-crate AGENTS.md for buff-lang-pipeline was not found to bless it, and the repo\u0027s own split precedent argues the opposite. Tests-location convention is explicit in root AGENTS.md.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates\\buff-lang-cli\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-RF-004",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                         "line":  21,
+                         "endLine":  21,
+                         "title":  "Root AGENTS.md refactoring-state claims are stale â€” points refactorers at a file that is now 21 lines",
+                         "description":  "Root AGENTS.md line 21 states \u0027largest workspace file is now parser stmt/stmt_decl.rs at 2,843 lines\u0027. Verified false: crates\\buff-lang-parser\\src\\stmt\\stmt_decl.rs is 21 lines / 701 bytes (a mod re-export shim) â€” it was split by declaration family in commit 8293a99 (\u0027refactor(parser): split stmt_decl.rs by declaration family (ITER-52)\u0027), producing func.rs (651), trait_impl.rs (589), aggregates.rs (569), shared.rs (407), import_export.rs (385), extern_abi.rs (334). The same line also claims rust_codegen.rs is 2,437 lines; actual is 2,459. Per-crate AGENTS.md numbers have drifted similarly (buff-lang-types AGENTS.md: ty.rs \u00272641\u0027 actual 2,488, infer.rs \u00272028\u0027 actual 2,363; buff-lang-cli AGENTS.md: \u002721 subcommands\u0027 vs root\u0027s 37, and lists pipeline.rs 867 lines which root says was removed). The actual largest workspace file is ty.rs (2,488) â€” see AUD-RF-002.",
+                         "root_cause":  "Per-crate and root AGENTS.md embed hard-coded line counts and structural snapshots that are regenerated only during dedicated doc-refresh passes (last v1.24/v1.39); the ITER-52 parser split landed after the last root AGENTS.md regeneration (commit bcbb711 v1.39).",
+                         "impact":  "The \u0027WHERE TO LOOK\u0027/size guidance actively misdirects refactoring work: an auditor or contributor hunting \u0027the largest file\u0027 would examine a 21-line shim and miss ty.rs and pipeline/lib.rs. Doc-vs-code contradiction also erodes trust in every other AGENTS.md claim.",
+                         "recommendation":  "Update root AGENTS.md line 21 to reflect post-ITER-52 reality (largest files: ty.rs 2,488, rust_codegen.rs 2,459, infer.rs 2,363, pipeline lib.rs 2,234; stmt_decl.rs is a 21-line shim). Prefer relative phrasing (\u0027largest files are the types-crate ty.rs/infer.rs pending the same module-split treatment given to rust_codegen.rs and stmt_decl.rs\u0027) over hard-coded counts, and refresh per-crate AGENTS.md STRUCTURE line counts for buff-lang-types and buff-lang-cli.",
+                         "fix_examples":  {
+                                              "before":  "rust_codegen.rs is 2,437 lines after the ITER-31..44 module split (30 src files, ~26k LOC; largest workspace file is now parser stmt/stmt_decl.rs at 2,843 lines)",
+                                              "after":  "rust_codegen.rs is 2,459 lines after the ITER-31..44 module split (30 src files, ~26k LOC). Post-ITER-52 the parser stmt_decl split is done (stmt_decl.rs is a 21-line re-export shim); the largest remaining workspace files are buff-lang-types ty.rs (2,488) and infer.rs (2,363) â€” the natural next split targets"
+                                          },
+                         "fix_guide":  "1) Edit AGENTS.md line 21 (and the buff-lang-types/buff-lang-cli per-crate AGENTS.md STRUCTURE blocks). 2) Consider a tiny CI or script check (e.g. a docs/refresh script recomputing the top-5 file table) so counts stop rotting between doc passes. 3) Keep ErrorCode/API claims untouched â€” only size/count snapshots are stale.",
+                         "effort_estimate":  {
+                                                 "minutes":  20,
+                                                 "human_readable":  "~20 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "10 min root AGENTS.md + 10 min two per-crate AGENTS.md"
+                                             },
+                         "technology":  [
+                                            "markdown",
+                                            "documentation"
+                                        ],
+                         "category":  "refactoring",
+                         "detection_method":  {
+                                                  "tool":  "git log + PowerShell line counts vs AGENTS.md claims",
+                                                  "query":  "(Get-Content crates\\buff-lang-parser\\src\\stmt\\stmt_decl.rs).Count; git log --oneline -1 -- crates/buff-lang-parser/src/stmt/stmt_decl.rs"
+                                              },
+                         "verification_command":  "(Get-Content crates\\buff-lang-parser\\src\\stmt\\stmt_decl.rs).Count; (Get-Content crates\\buff-lang-codegen-rust\\src\\rust_codegen.rs).Count; git log --oneline -3 -- crates/buff-lang-parser/src/stmt/stmt_decl.rs",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-parser\\src\\stmt\\stmt_decl.rs",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-types\\AGENTS.md",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-cli\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.98,
+                                            "rationale":  "Direct numeric verification: 21 lines vs claimed 2,843; commit 8293a99 message confirms the split; rust_codegen.rs 2,459 vs claimed 2,437."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Pure documentation-vs-reality mismatch with executable verification commands. No convention declares stale counts acceptable; AGENTS.md itself presents the numbers as current facts.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-RF-005",
+                         "severity":  "low",
+                         "file":  "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-error\\src\\diagnostic.rs",
+                         "line":  474,
+                         "endLine":  612,
+                         "title":  "Pedantic-tier modernization debt is unmeasured and un-gated; verified instances in buff-lang-error (leaf crate)",
+                         "description":  "Because CI gates only default clippy (-D warnings), pedantic-tier modernization debt accumulates invisibly. Verified via targeted `cargo clippy -W clippy::pedantic` runs: buff-lang-error/src/diagnostic.rs has three instances â€” :474 and :523 out.push_str(\u0026format!(...)) (clippy::format_push_string â€” extra allocation per rendered diagnostic), and :606 source[..start].rfind(\u0027\\n\u0027).map(|i| i + 1).unwrap_or(0) (clippy::map_unwrap_or; sibling :609-612 has the same shape for line_end). Scale sample on one mid-size framework crate (buff-mock, all-targets, pedantic): 92 missing #[must_use], 27 doc_markdown backticks, 24 format_push_string, 16 redundant closures, 9 map_unwrap_or, 3 let-else rewrites. buff-plugins adds single_match_else at its dispatch match. These are polish-tier (no correctness impact) but the leaf crate diagnostic.rs sits on every user-facing error render.",
+                         "root_cause":  "The CI clippy gate intentionally enforces only default lints (correct for a young language workspace); no periodic pedantic sweep exists, so style-modernization opportunities (write! into String, map_or, let-else, must_use annotations) are never harvested systematically.",
+                         "impact":  "Minor allocations on the error-rendering hot path (format_push_string), missing #[must_use] on builder-style APIs lets results be silently dropped, and debt grows unbounded because nothing measures it. No correctness or performance cliff â€” hence low severity.",
+                         "recommendation":  "Two-track: (1) one-off fix batches starting with buff-lang-error (mechanical: push_str(\u0026format!()) â†’ write!() with std::fmt::Write; map(...).unwrap_or(a) â†’ map_or(a, ...)); (2) a periodic (per-release) advisory pedantic scan â€” e.g. a non-gating CI job running clippy -W clippy::pedantic and posting counts â€” respecting the no-[lints]/no-#[deny] conventions (advisory job or command-line -W only, never Cargo.toml [lints] sections). Do NOT mass-annotate #[allow] â€” fix or leave.",
+                         "fix_examples":  {
+                                              "before":  "// crates\\buff-lang-error\\src\\diagnostic.rs:474 and :606\nout.push_str(\u0026format!(\n    \"[{:?}] error[{}]: {}\\n\",\n    self.severity, code.code_str(), self.message\n));\n// ...\nlet line_start = source[..start].rfind(\u0027\\n\u0027).map(|i| i + 1).unwrap_or(0);",
+                                              "after":  "// crates\\buff-lang-error\\src\\diagnostic.rs\nuse std::fmt::Write as _;\n\nlet _ = write!(\n    out,\n    \"[{:?}] error[{}]: {}\\n\",\n    self.severity, code.code_str(), self.message\n); // String writes are infallible; Result deliberately ignored\n// ...\nlet line_start = source[..start].rfind(\u0027\\n\u0027).map_or(0, |i| i + 1);"
+                                          },
+                         "fix_guide":  "1) buff-lang-error first (leaf crate, 3 instances, zero deps): add `use std::fmt::Write as _;`, convert the two push_str(\u0026format!) sites to write!() (document why the Result is ignored â€” String writes cannot fail), convert :606/:609 map-unwrap_or pairs to map_or. 2) cargo test -p buff-lang-error (rendered-output snapshot tests must stay byte-identical â€” these are behavior-preserving rewrites, but the golden harness is the proof). 3) Then repeat per-crate for format_push_string + map_unwrap_or only (skip must_use_candidate/doc_markdown unless touching the file anyway â€” they are noisy). 4) Add an advisory (continue-on-error) CI job mirroring the existing advisory test jobs, running `cargo clippy --workspace --all-targets -- -W clippy::pedantic` with count reporting only, consistent with the self-host-check precedent.",
+                         "effort_estimate":  {
+                                                 "minutes":  120,
+                                                 "human_readable":  "~2 hours for the buff-lang-error + high-value batch; full workspace pedantic sweep is a multi-PR campaign",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "30 min diagnostic.rs fixes + 20 min snapshot verification + 30 min buff-plugins single_match_else + 40 min advisory CI job + workspace sweep deferred"
+                                             },
+                         "technology":  [
+                                            "rust",
+                                            "clippy",
+                                            "ci",
+                                            "edition-2021"
+                                        ],
+                         "category":  "refactoring",
+                         "detection_method":  {
+                                                  "tool":  "cargo clippy -W clippy::pedantic (targeted per-crate)",
+                                                  "query":  "cargo clippy -p buff-lang-error --all-targets -- -W clippy::pedantic"
+                                              },
+                         "verification_command":  "\u0026 \"$env:USERPROFILE\\.cargo\\bin\\cargo.exe\" clippy -p buff-lang-error --all-targets -- -W clippy::pedantic 2\u003e\u00261 | Select-String -Pattern \"format-push-string|map-unwrap-or\" -Context 4,0",
+                         "references":  [
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\crates\\buff-lang-error\\src\\diagnostic.rs",
+                                            "https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#format_push_string",
+                                            "https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#map_unwrap_or",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\.github\\workflows\\ci.yml",
+                                            "C:\\Users\\vsbb1\\source\\repos\\buff\\AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.85,
+                                            "rationale":  "All cited instances read directly at source (lines 474-480, 519-529, 598-615); lint-to-instance mapping confirmed via clippy --\u003e spans extracted from the saved clippy run. Workspace-wide scale is extrapolated from two sampled crates only."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "These lints do not fire under the CI default gate (verified: clippy -p buff-mock --all-targets -D warnings exits 0), so none of this contradicts a green-CI documented state. Recommendation explicitly respects the no-[lints]/no-crate-level-deny conventions by proposing command-line/advisory mechanisms only.",
+                                                         "verified_against_conventions":  true,
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates\\buff-lang-error\\AGENTS.md",
+                                                                                          "crates\\buff-plugins\\AGENTS.md",
+                                                                                          "crates\\buff-mock\\AGENTS.md"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           {
+                                               "path":  "AGENTS.md",
+                                               "lines_read":  245,
+                                               "bytes_read":  25394,
+                                               "examined_at":  "2026-10-10T03:40:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-types\\src\\ty.rs",
+                                               "lines_read":  2488,
+                                               "bytes_read":  120495,
+                                               "examined_at":  "2026-10-10T03:45:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-pipeline\\src\\lib.rs",
+                                               "lines_read":  2234,
+                                               "bytes_read":  94419,
+                                               "examined_at":  "2026-10-10T03:47:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-error\\src\\source_map.rs",
+                                               "lines_read":  80,
+                                               "bytes_read":  6675,
+                                               "examined_at":  "2026-10-10T03:50:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-pipeline\\src\\error_mapper.rs",
+                                               "lines_read":  30,
+                                               "bytes_read":  30988,
+                                               "examined_at":  "2026-10-10T03:52:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-dap\\src\\translation.rs",
+                                               "lines_read":  30,
+                                               "bytes_read":  22005,
+                                               "examined_at":  "2026-10-10T03:52:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-cli\\src\\commands\\coverage.rs",
+                                               "lines_read":  20,
+                                               "bytes_read":  17992,
+                                               "examined_at":  "2026-10-10T03:52:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-cli\\src\\commands\\refactor.rs",
+                                               "lines_read":  45,
+                                               "bytes_read":  37080,
+                                               "examined_at":  "2026-10-10T03:54:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lsp\\src\\position.rs",
+                                               "lines_read":  20,
+                                               "bytes_read":  10339,
+                                               "examined_at":  "2026-10-10T03:52:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-error\\src\\diagnostic.rs",
+                                               "lines_read":  54,
+                                               "bytes_read":  38268,
+                                               "examined_at":  "2026-10-10T04:05:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-codegen-rust\\src\\rust_codegen\\prelude_lowering\\instance_fns_extra.rs",
+                                               "lines_read":  60,
+                                               "bytes_read":  85289,
+                                               "examined_at":  "2026-10-10T03:56:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-codegen-rust\\src\\rust_codegen\\extern_crate_detection_extra.rs",
+                                               "lines_read":  50,
+                                               "bytes_read":  41520,
+                                               "examined_at":  "2026-10-10T03:56:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-plugins\\src\\registry.rs",
+                                               "lines_read":  40,
+                                               "bytes_read":  15904,
+                                               "examined_at":  "2026-10-10T03:57:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-types\\src\\recursion.rs",
+                                               "lines_read":  25,
+                                               "bytes_read":  32107,
+                                               "examined_at":  "2026-10-10T03:58:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-mock\\src\\state.rs",
+                                               "lines_read":  25,
+                                               "bytes_read":  8848,
+                                               "examined_at":  "2026-10-10T03:58:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-parser\\src\\stmt\\stmt_decl.rs",
+                                               "lines_read":  21,
+                                               "bytes_read":  701,
+                                               "examined_at":  "2026-10-10T03:44:00-03:00",
+                                               "findings_emitted":  1,
+                                               "verdict":  "findings"
+                                           },
+                                           {
+                                               "path":  "crates\\buff-lang-debug-info\\src\\lib.rs",
+                                               "lines_read":  100,
+                                               "bytes_read":  10967,
+                                               "examined_at":  "2026-10-10T03:59:00-03:00",
+                                               "findings_emitted":  0,
+                                               "verdict":  "clean"
+                                           }
+                                       ],
+                    "files_skipped":  [
+                                          {
+                                              "path":  "crates\\buff-jupyter\\src\\kernel.rs",
+                                              "reason":  "grep-level std::sync scan only; Mutex usage carries explicit in-code hold-across-await avoidance commentary; deep runtime audit out of scope",
+                                              "lines_not_examined":  1578
+                                          },
+                                          {
+                                              "path":  "crates\\buff-repl\\src\\lib.rs",
+                                              "reason":  "size census only; no refactor signal triaged",
+                                              "lines_not_examined":  1577
+                                          },
+                                          {
+                                              "path":  "crates\\buff-lsp\\src\\handlers.rs",
+                                              "reason":  "size census only; position.rs duplication already assessed separately",
+                                              "lines_not_examined":  1547
+                                          },
+                                          {
+                                              "path":  "crates\\buff-lang-codegen-rust\\src\\rust_codegen.rs",
+                                              "reason":  "residual hub documented as deliberate ITER-31..44 outcome; re-split audit deliberately out of scope per FP rule",
+                                              "lines_not_examined":  2459
+                                          },
+                                          {
+                                              "path":  "crates\\buff-* (44 framework crates, src trees)",
+                                              "reason":  "only buff-plugins/registry.rs, buff-mock/state.rs spot-checked; documented per-crate MVP shapes (10-fn caps, deferred backends) make blanket boilerplate findings high-FP",
+                                              "lines_not_examined":  40000
+                                          },
+                                          {
+                                              "path":  "book/, editors/vscode/, tree-sitter-buff/, website/, playground/, tests/, examples/",
+                                              "reason":  "non-Rust or fixture/education assets â€” outside refactoring scope for src code",
+                                              "lines_not_examined":  15000
+                                          }
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     {
+                                                         "area":  "Framework-crate boilerplate duplication (44 crates)",
+                                                         "reason":  "Sampled only 2 crates; every per-crate AGENTS.md documents the MVP shape as deliberate (T-numbered specs, deferred-backend seams), so pattern-level findings would violate the FP rule. A per-crate API-surface diff audit is needed to find real duplication."
+                                                     },
+                                                     {
+                                                         "area":  "rust_codegen.rs residual monolith (2,459 lines) and _extra suffix splits",
+                                                         "reason":  "Headers document verbatim mechanical extraction (T105a/ITER-43) with preserved arm order as an explicit invariant; flagging the residual size or the wildcard-seam arm-order fragility would contradict documented deliberate choices without behavioral evidence."
+                                                     },
+                                                     {
+                                                         "area":  "std::sync::Mutex usage in async contexts (buff-jupyter kernel, buff-lang-cli commands/doc.rs SSE)",
+                                                         "reason":  "Grep-level scan only; every site carries in-code or AGENTS.md justification (guards not held across await, nanosecond holds). Runtime verification of guard scopes was out of scope; a tokio-console/instrumented audit could still surface holds."
+                                                     },
+                                                     {
+                                                         "area":  "Deeper pedantic-clippy coverage",
+                                                         "reason":  "Only buff-plugins and buff-mock sampled; 73-crate sweep extrapolates to likely hundreds of must_use/doc_markdown instances. Counts in AUD-RF-005 are sample-derived, not workspace totals."
+                                                     },
+                                                     {
+                                                         "area":  "TODO/FIXME/HACK census beyond literal markers",
+                                                         "reason":  "All 32 literal matches resolved as bufflings product semantics or documented buffhtml-span spike notes (treated clean); deferred-work phrased as \u0027deferred/future task/follow-up\u0027 (dozens of per-crate AGENTS.md DEFERRED sections) was not censused as debt markers."
+                                                     }
+                                                 ],
+                    "totals":  {
+                                   "critical":  0,
+                                   "high":  0,
+                                   "medium":  3,
+                                   "low":  2,
+                                   "files_examined":  17
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

@@ -1,0 +1,55 @@
+﻿{
+    "note":  "from = prerequisite; to = dependent fix",
+    "edges":  [
+                  {
+                      "from":  "AUD-CC-004",
+                      "to":  "AUD-PR-001",
+                      "reason":  "systemic KB-refresh gate makes individual AGENTS.md header fixes stay fixed"
+                  },
+                  {
+                      "from":  "AUD-CC-004",
+                      "to":  "AUD-CQ-007",
+                      "reason":  "same: crate-level AGENTS regeneration"
+                  },
+                  {
+                      "from":  "AUD-CICD-001",
+                      "to":  "AUD-CICD-004",
+                      "reason":  "pin actions before trusting signing infra wiring"
+                  },
+                  {
+                      "from":  "AUD-SEC-001",
+                      "to":  "AUD-SEC-002",
+                      "reason":  "HMAC verify must work before non-loopback bind guard adds value"
+                  },
+                  {
+                      "from":  "AUD-PRIV-001",
+                      "to":  "AUD-PRIV-003",
+                      "reason":  "stop token serialization before at-rest hashing matters for rotation"
+                  },
+                  {
+                      "from":  "AUD-TC-005",
+                      "to":  "AUD-TC-001",
+                      "reason":  "flip tests to gating before coverage fixes are enforced"
+                  },
+                  {
+                      "from":  "AUD-TC-005",
+                      "to":  "AUD-TC-002",
+                      "reason":  "same gate dependency"
+                  },
+                  {
+                      "from":  "AUD-OB-001",
+                      "to":  "AUD-CI-002",
+                      "reason":  "wire or unclaim runtime parallelism before fixing book claims about it"
+                  },
+                  {
+                      "from":  "AUD-PR-006",
+                      "to":  "AUD-AM-001",
+                      "reason":  "decide canonical org (vinaosb vs buff-lang) once; all URL fixes follow"
+                  },
+                  {
+                      "from":  "AUD-PR-006",
+                      "to":  "AUD-LIC-001",
+                      "reason":  "copyright-holder naming (Buff Lang Project vs individual) rides the same identity decision"
+                  }
+              ]
+}

@@ -1,0 +1,271 @@
+﻿{
+    "squad":  "audit-acquisition-metrics",
+    "project":  "buff",
+    "timestamp":  "2026-10-10T03:36:26-03:00",
+    "findings":  [
+                     {
+                         "id":  "AUD-AM-001",
+                         "severity":  "medium",
+                         "file":  "website/index.html",
+                         "line":  402,
+                         "endLine":  402,
+                         "title":  "Primary GitHub CTA links to non-existent repo (HTTP 404)",
+                         "description":  "Footer conversion CTA \u0027GitHub â†—\u0027 targets https://github.com/buff-lang/buff, which returns HTTP 404 (mechanically verified via live fetch). Same broken target at website/benchmarks.html:514 and playground/index.html:54 (\u0027docs â†—\u0027). Canonical origin is https://github.com/vinaosb/buff.git (git remote -v); README badges correctly use vinaosb/buff. The main conversion link on every marketing page dead-ends.",
+                         "root_cause":  "Pages were authored against an anticipated \u0027buff-lang\u0027 GitHub org that was never created; the repo actually lives under the personal \u0027vinaosb\u0027 account.",
+                         "impact":  "All acquisition clicks from the website footer, benchmarks footer, and playground docs button 404 â€” direct conversion loss and a broken first impression at launch.",
+                         "recommendation":  "Point all three links at the canonical repo, or create/transfer to the buff-lang org. Then sweep the repo for remaining buff-lang/buff references (installers, README install taps) before launch.",
+                         "fix_examples":  {
+                                              "before":  "\u003ca class=\"footer-link\" href=\"https://github.com/buff-lang/buff\" target=\"_blank\" rel=\"noopener noreferrer\"\u003eGitHub â†—\u003c/a\u003e",
+                                              "after":  "\u003ca class=\"footer-link\" href=\"https://github.com/vinaosb/buff\" target=\"_blank\" rel=\"noopener noreferrer\"\u003eGitHub â†—\u003c/a\u003e"
+                                          },
+                         "fix_guide":  "1) Confirm canonical with git remote -v. 2) Replace github.com/buff-lang/buff with github.com/vinaosb/buff in website/index.html:402, website/benchmarks.html:514, playground/index.html:54. 3) grep -r \u0027buff-lang/buff\u0027 across installers/docs for stragglers. 4) Re-run website + playground Playwright suites.",
+                         "effort_estimate":  {
+                                                 "minutes":  15,
+                                                 "human_readable":  "15 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "5 min decide canonical target + 5 min edit 3 files + 5 min repo-wide sweep/test"
+                                             },
+                         "technology":  "HTML/Static site",
+                         "category":  "acquisition-metrics",
+                         "detection_method":  {
+                                                  "tool":  "webfetch + git remote -v + Select-String",
+                                                  "query":  "href github.com/buff-lang/buff vs origin remote vinaosb/buff; live GET returned 404"
+                                              },
+                         "verification_command":  "Select-String -Path website\\*.html,playground\\index.html -Pattern \u0027buff-lang/buff\u0027; try { Invoke-WebRequest \u0027https://github.com/buff-lang/buff\u0027 -UseBasicParsing | Select-Object StatusCode } catch { $_.Exception.Response.StatusCode.value__ }; git remote -v",
+                         "references":  [
+                                            ".github/workflows/pages.yml",
+                                            "website/benchmarks.html:514",
+                                            "playground/index.html:54",
+                                            "README.md CI badges (vinaosb/buff)"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.97,
+                                            "rationale":  "404 confirmed via live HTTP fetch; canonical remote confirmed via git; all three occurrences enumerated and read."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Mechanically verified 404 plus remote mismatch; not a style opinion. Residual risk: org could be created later, retroactively validating links.",
+                                                         "verified_against_conventions":  "root AGENTS.md (no convention mandates a buff-lang org), README.md badge URLs",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          ".sisyphus/plans/buff-conventions.md",
+                                                                                          "README.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AM-002",
+                         "severity":  "low",
+                         "file":  "website/benchmarks.html",
+                         "line":  196,
+                         "endLine":  196,
+                         "title":  "Playground CTA path inconsistent; breaks in deployed Pages layout",
+                         "description":  "benchmarks.html nav \u0027Playground\u0027 CTA uses ../playground/index.html while website/index.html and website/app.js try-links use ./playground/index.html. pages.yml publishes website/* at the site root with playground/ as a subdirectory, so the DEPLOYED benchmarks page escapes the site root and 404s; conversely index.html CTAs 404 when website/ is served raw locally. Exactly one path form can be correct per serving layout.",
+                         "root_cause":  "benchmarks.html was authored assuming repo-root-relative serving, while the Pages publish layout (and index.html/app.js) assume website/ as the site root.",
+                         "impact":  "Benchmark-page visitors (high-intent traffic) lose the playground conversion path in production; local raw-serving breaks the hero CTAs instead.",
+                         "recommendation":  "Standardize on ./playground/index.html to match the pages.yml deployed layout; fix benchmarks.html:196. Document in website/README.md that local preview must serve the publish-layout root, not website/ alone.",
+                         "fix_examples":  {
+                                              "before":  "\u003ca class=\"nav-btn nav-btn-accent\" href=\"../playground/index.html\"\u003e",
+                                              "after":  "\u003ca class=\"nav-btn nav-btn-accent\" href=\"./playground/index.html\"\u003e"
+                                          },
+                         "fix_guide":  "1) Confirm publish layout in .github/workflows/pages.yml (website/* to root; playground to ./playground/). 2) Edit benchmarks.html:196 to ./playground/index.html. 3) Smoke-test the deployed \u003cpages-url\u003e/benchmarks.html Playground button. 4) Optionally extend website.spec.cjs with a link-target-exists assertion.",
+                         "effort_estimate":  {
+                                                 "minutes":  10,
+                                                 "human_readable":  "10 minutes",
+                                                 "confidence":  "high",
+                                                 "breakdown":  "2 min edit + 8 min verify against pages.yml layout and tests"
+                                             },
+                         "technology":  "HTML/Static site",
+                         "category":  "acquisition-metrics",
+                         "detection_method":  {
+                                                  "tool":  "read + grep cross-reference",
+                                                  "query":  "\u0027(\\./|\\.\\./)playground/index\\.html\u0027 hrefs across website/*.html + website/app.js vs pages.yml publish-directory assembly"
+                                              },
+                         "verification_command":  "Select-String -Path website\\*.html,website\\app.js -Pattern \u0027(\\./|\\.\\./)playground/index\\.html\u0027; Select-String -Path .github\\workflows\\pages.yml -Pattern \u0027cp -r website|publish/playground\u0027",
+                         "references":  [
+                                            ".github/workflows/pages.yml:64-81",
+                                            "website/index.html:34,54",
+                                            "website/app.js:47,50"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.85,
+                                            "rationale":  "Path resolution and publish layout are mechanically verified; residual uncertainty is only which serving layout the maintainer considers canonical."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "Breakage depends on deployment root; pages.yml (deployed) verified as the layout, but a maintainer intending repo-root serving would flip the fix direction.",
+                                                         "verified_against_conventions":  "website/README.md deploy section, playground/README.md deploy section, root AGENTS.md",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "website/README.md",
+                                                                                          "playground/README.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AM-003",
+                         "severity":  "info",
+                         "file":  "crates/buff-registry/src/handlers.rs",
+                         "line":  889,
+                         "endLine":  901,
+                         "title":  "Registry download metrics exist â€” aggregate-only, privacy-clean",
+                         "description":  "The only usage-metrics surface in the repo: every tarball download calls record_download (handlers.rs:861); per-package totals are exposed via GET /api/v1/packages/{name}/stats ({\"downloads\":N}) and feed search ranking. Storage rows are keyed (name, version, count) only â€” storage_sqlite.rs:703, storage.rs:401 defaults to 0. No user/IP attribution is persisted; the IP rate-limiter keeps rolling 5-minute in-memory timestamps, pruned per request, never exposed. No action required â€” documented for the audit trail.",
+                         "root_cause":  "T57 stats feature shipped by design; registry AGENTS.md lists download stats as an intended capability, not an accident.",
+                         "impact":  "None â€” aggregate counts are standard registry practice (crates.io parity); no personal data collected or retained.",
+                         "recommendation":  "Optional doc-only: add a retention/privacy note stating download counts are aggregate and IP rate-limit state is in-memory with 5-minute TTL, before any public deployment.",
+                         "fix_examples":  {
+                                              "before":  "/// Returns the total download count for `name` across all versions.",
+                                              "after":  "/// Returns the total download count for `name` across all versions.\n/// Aggregate-only: no caller IP or user identity is recorded with a download."
+                                          },
+                         "fix_guide":  "1) Append aggregate-only wording to get_stats docs and lib.rs route docs. 2) No code change required. 3) Revisit only if a real backend adds request logging.",
+                         "effort_estimate":  {
+                                                 "minutes":  15,
+                                                 "human_readable":  "15 minutes (optional, doc-only)",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "15 min doc comments; no code/tests touched"
+                                             },
+                         "technology":  "Rust/axum 0.8 HTTP API",
+                         "category":  "acquisition-metrics",
+                         "detection_method":  {
+                                                  "tool":  "grep + read",
+                                                  "query":  "download_count|record_download|metrics across crates/buff-registry/src; route arm packages/{name}/stats in lib.rs:284"
+                                              },
+                         "verification_command":  "Select-String -Path crates\\buff-registry\\src\\handlers.rs,crates\\buff-registry\\src\\storage.rs,crates\\buff-registry\\src\\storage_sqlite.rs,crates\\buff-registry\\src\\rate_limit.rs -Pattern \u0027record_download|download_count|IpAddr\u0027",
+                         "references":  [
+                                            "crates/buff-registry/src/lib.rs:284",
+                                            "crates/buff-registry/src/storage.rs:390-403",
+                                            "crates/buff-registry/src/rate_limit.rs:37-73",
+                                            "crates/buff-registry/AGENTS.md"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.95,
+                                            "rationale":  "Both storage backends, the stats handler, and the rate limiter were read in full; no user-keyed metrics anywhere in the crate."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "low",
+                                                         "reasoning":  "Reported as clean/informational, not a violation; every backend verified aggregate-only and the IP limiter verified volatile/in-memory.",
+                                                         "verified_against_conventions":  "crates/buff-registry/AGENTS.md (in-memory MVP, DEFERRED list), root AGENTS.md pure-Rust rules",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "crates/buff-registry/AGENTS.md"
+                                                                                      ]
+                                                     }
+                     },
+                     {
+                         "id":  "AUD-AM-004",
+                         "severity":  "low",
+                         "file":  "website/index.html",
+                         "line":  11,
+                         "endLine":  13,
+                         "title":  "Third-party font/CDN fetches are the only external requests â€” zero beacons",
+                         "description":  "Exhaustive read of website/ and playground/ HTML+JS found ZERO analytics (no GA/GTM/Plausible/segment/mixpanel/posthog/sendBeacon). Only third-party fetches: Google Fonts CSS (website/index.html:11-13, benchmarks.html:10-12, playground/index.html:12-14) and CodeMirror 5 from cdnjs (playground/index.html:17-23). Google Fonts logs visitor IPs (GDPR enforcement precedent); cdnjs is a supply-chain surface. Playground wasm loads from local ./pkg only â€” no phoning home.",
+                         "root_cause":  "Convenience CDN links chosen at site creation; privacy-hardening (self-hosting) was never prioritized pre-launch.",
+                         "impact":  "Minor: visitor IPs disclosed to Google on every page load; pages degrade offline; a CDN outage breaks playground editor. Not a tracking violation â€” flagged for completeness only.",
+                         "recommendation":  "Self-host the three font families as woff2 (fontsource or google-webfonts-helper) and vendor CodeMirror 5.65.16 into playground/vendor/ for a zero-third-party, offline-capable static site.",
+                         "fix_examples":  {
+                                              "before":  "\u003clink href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono...\" rel=\"stylesheet\" /\u003e",
+                                              "after":  "\u003clink href=\"./fonts/ibm-plex-mono.css\" rel=\"stylesheet\" /\u003e"
+                                          },
+                         "fix_guide":  "1) Download woff2 for IBM Plex Mono/Sans + Space Mono into website/fonts/ and playground/fonts/. 2) Write local @font-face CSS. 3) Vendor codemirror.min.js/css + rust mode + 3 addons into playground/vendor/, update 6 tags in index.html. 4) Verify offline (serve, block network, transpile still works) and re-run both Playwright suites.",
+                         "effort_estimate":  {
+                                                 "minutes":  120,
+                                                 "human_readable":  "2 hours",
+                                                 "confidence":  "medium",
+                                                 "breakdown":  "45 min fonts + 30 min CodeMirror vendoring + 30 min offline verification + 15 min Playwright re-run"
+                                             },
+                         "technology":  "HTML/CSS/JS static sites",
+                         "category":  "acquisition-metrics",
+                         "detection_method":  {
+                                                  "tool":  "grep + full file read",
+                                                  "query":  "googletagmanager|gtag\\(|plausible|segment|mixpanel|amplitude|posthog|umami|matomo|hotjar|sendBeacon|beacon|telemetry|analytics over website/** + playground/** (0 matches); https?:// sweep (fonts + cdnjs only)"
+                                              },
+                         "verification_command":  "Select-String -Path website\\*.html,website\\*.js,playground\\*.html,playground\\*.js -Pattern \u0027sendBeacon|gtag\\(|analytics|telemetry|plausible|mixpanel|posthog|segment\u0027; Select-String -Path website\\*.html,playground\\index.html -Pattern \u0027fonts\\.googleapis|cdnjs\\.cloudflare\u0027",
+                         "references":  [
+                                            "playground/app.js:13 (imports ./pkg/buff_playground.js â€” local only)",
+                                            "website/benchmarks.html:10-12",
+                                            "playground/index.html:17-23"
+                                        ],
+                         "confidence":  {
+                                            "score":  0.92,
+                                            "rationale":  "Every HTML/JS line of both static sites was read plus keyword greps; residual risk limited to runtime CDN content, not repo code."
+                                        },
+                         "fp_risk_self_assessment":  {
+                                                         "risk_level":  "medium",
+                                                         "reasoning":  "Fonts are NOT analytics â€” main risk is over-reporting; mitigated by the explicit zero-beacon verdict and completeness-only framing.",
+                                                         "verified_against_conventions":  "root AGENTS.md (website/playground documented as static, no build step), website/README.md, playground/README.md",
+                                                         "convention_files_checked":  [
+                                                                                          "AGENTS.md",
+                                                                                          "website/README.md",
+                                                                                          "playground/README.md"
+                                                                                      ]
+                                                     }
+                     }
+                 ],
+    "summary":  {
+                    "files_examined":  [
+                                           "AGENTS.md",
+                                           "website/index.html",
+                                           "website/app.js",
+                                           "website/benchmarks.html",
+                                           "website/README.md",
+                                           "website/package.json",
+                                           "website/playwright.config.cjs",
+                                           "website/tests/website.spec.cjs",
+                                           "website/styles.css",
+                                           "playground/index.html",
+                                           "playground/app.js",
+                                           "playground/README.md",
+                                           "playground/package.json",
+                                           "playground/playwright.config.cjs",
+                                           "playground/tests/playground.spec.cjs",
+                                           "editors/vscode/package.json",
+                                           "editors/vscode/src/extension.ts",
+                                           "editors/vscode/AGENTS.md",
+                                           "editors/vscode/README.md",
+                                           "editors/vscode/buff-vscode-1.2.0.vsix (zip entries listed; extension.js string-scanned â€” clean)",
+                                           "crates/buff-registry/src/handlers.rs",
+                                           "crates/buff-registry/src/lib.rs",
+                                           "crates/buff-registry/src/storage.rs",
+                                           "crates/buff-registry/src/storage_sqlite.rs",
+                                           "crates/buff-registry/src/rate_limit.rs",
+                                           "crates/buff-registry/AGENTS.md",
+                                           ".github/FUNDING.yml",
+                                           ".github/workflows/pages.yml",
+                                           ".github/workflows/ci.yml",
+                                           ".github/workflows/security.yml",
+                                           ".github/workflows/release.yml",
+                                           ".github/workflows/bufflings.yml",
+                                           ".github/workflows/docker.yml",
+                                           ".git/hooks/ (15 entries, all *.sample â€” inactive)"
+                                       ],
+                    "files_skipped":  [
+                                          "playground/pkg/* (wasm-bindgen generated, gitignored, absent locally â€” by design per playground/README.md)",
+                                          "editors/vscode/out/extension.js (compiled output, absent locally; committed vsix copy string-scanned instead)",
+                                          "package-lock.json x3 (lockfiles, no executable logic)",
+                                          "website/styles.css + playground/styles.css (pure CSS, no JS surface)",
+                                          "transitive npm devDependencies (playwright/vsce only, standard tooling)"
+                                      ],
+                    "falseNegativesIdentified":  [
+                                                     "No GitHub Releases download/install counting: the buffup version-manager and setup-buff Action funnel is unmeasured â€” post-launch this is the primary adoption metric and would live outside the repo (GitHub API)",
+                                                     "No playground usage analytics: transpile success rate, example selection, error frequency, and try-to-install conversion are deliberately uninstrumented (privacy-first); any post-launch addition should be opt-in/self-hosted (e.g. Plausible) and disclosed",
+                                                     "No VSCode extension telemetry: marketplace install counts are the only adoption signal; no activation/crash/churn instrumentation exists (verified in extension.ts and the shipped 1.2.0 vsix)",
+                                                     "No registry data-retention/privacy documentation: if deployed publicly, the 5-minute in-memory IP rate-limit windows and the aggregate stats endpoint deserve a documented retention statement"
+                                                 ],
+                    "totals":  {
+                                   "files_examined":  34,
+                                   "files_skipped":  5,
+                                   "findings":  4,
+                                   "medium":  1,
+                                   "low":  2,
+                                   "info":  1,
+                                   "analytics_beacons_found":  0,
+                                   "third_party_fetch_surfaces":  2,
+                                   "ci_webhooks_found":  0,
+                                   "active_git_hooks":  0,
+                                   "vscode_telemetry":  false,
+                                   "playground_phones_home":  false
+                               }
+                },
+    "report_version":  "3.2",
+    "run_id":  "2026-10-10-0336"
+}

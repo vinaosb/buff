@@ -1,0 +1,620 @@
+﻿{
+    "validated_finding_ids":  [
+                                  "AUD-CICD-001",
+                                  "AUD-CQ-001",
+                                  "AUD-CQ-003",
+                                  "AUD-CI-001",
+                                  "AUD-CI-002",
+                                  "AUD-DEP-001",
+                                  "AUD-FT-001",
+                                  "AUD-OB-001",
+                                  "AUD-PRIV-001",
+                                  "AUD-PRIV-002",
+                                  "AUD-PR-001",
+                                  "AUD-PR-002",
+                                  "AUD-SEC-001",
+                                  "AUD-TC-001",
+                                  "AUD-TC-002",
+                                  "AUD-TC-003",
+                                  "AUD-LIC-001",
+                                  "AUD-SCH-001",
+                                  "AUD-AI-001",
+                                  "AUD-LMAS-002",
+                                  "AUD-AM-001",
+                                  "AUD-RC-001"
+                              ],
+    "sample_percent":  22,
+    "method":  "all 16 high-severity + 6 sampled medium/low; each verified against cited file:line via targeted grep/read by orchestrator; AM-001 re-verified via live HTTP (404)",
+    "false_positives":  [
+
+                        ],
+    "fp_notes":  "0 of 22 validated findings disproven. One count discrepancy adjudicated by consistency-coherence squad: AUD-CICD-001 cited 29 unpinned refs for ci.yml (actual 18 in ci.yml; 30 across all workflows) - finding substance confirmed, counts corrected in consolidation.",
+    "false_negatives":  [
+                            {
+                                "squad":  "acquisition-metrics",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "acquisition-metrics",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "acquisition-metrics",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "acquisition-metrics",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "ai-cost",
+                                "area":  "agent token-cost instrumentation",
+                                "reason":  "absent repo-wide: buff is a compiler with zero AI-context telemetry/metering; accepted as out of product scope"
+                            },
+                            {
+                                "squad":  "ai-cost",
+                                "area":  "buff-mcp inbound flood exposure",
+                                "reason":  "transport.rs/protocol.rs max request size and malformed-JSON handling not read line-by-line; only tool OUTPUTS audited for caps"
+                            },
+                            {
+                                "squad":  "ai-cost",
+                                "area":  "buff-lsp handler output shapes",
+                                "reason":  "completion item counts and hover sizes trusted per the delegation model; an uncapped completion list upstream would bypass the AUD-AI-001 fi"
+                            },
+                            {
+                                "squad":  "ai-cost",
+                                "area":  "bundled binaries",
+                                "reason":  "playground wasm + vscode out/extension.js verified only via source grep, not re-verified as compiled artifacts"
+                            },
+                            {
+                                "squad":  "ai-cost",
+                                "area":  "loop amplification",
+                                "reason":  "nothing server-side prevents an agent from calling buff_check in an unbounded retry loop; cost control assumed to live in the MCP client (in"
+                            },
+                            {
+                                "squad":  "architecture",
+                                "area":  "resolved dependency graph\",reason:\"All edges verified by manifest-text grep (.workspace = true syntax), not cargo metadata/cargo tree resolution; a path-dependency not using workspace syntax or a cfg-gated target-specific internal dependency (cf. CLI\u0027s unix-gated pprof, external) would evade the sweep. Likelihood low â€” repo convention mandates workspace deps â€” but unproven by resolution.",
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "architecture",
+                                "area":  "intra-crate visibility hygiene\",reason:\"Item-level pub leaks inside the large module splits (codegen-rust rust_codegen/ 19 files, parser stmt/stmt_decl/, types 22 modules) were not individually audited; only crate-boundary edges and entry lib.rs files were examined. Item-level findings may exist that wildcard use super::* delegation (documented deliberate) conceals.",
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "architecture",
+                                "area":  "framework crate source coupling\",reason:\"44 framework crates verified at edge level only; source bodies could couple to compiler internals more tightly than their manifests imply (e.g. deep AST-shape dependencies in mock/fuzz lowering) â€” such coupling would not surface without reading each src/ tree.",
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "architecture",
+                                "area":  "DTO serialization surfaces in tooling\",reason:\"AST crate verified free of serde derives and serde_json usage is the documented deterministic to_json only; but per-handler serialization behavior inside buff-lsp/buff-mcp/buff-dap (protocol DTO construction from AST types) was checked at invariant level, not line level â€” a leak of Span/Decl into a serialized protocol DTO could be missed.",
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  "branch protection / required checks",
+                                "reason":  "CONTRIBUTING.md:303 claims \u002711 required checks via branch protection on main\u0027 but branch protection is GitHub settings, not repo files â€” u"
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  "cargo-audit report upload path",
+                                "reason":  "security.yml:42-44 uploads target/audit/** â€” whether bare \u0027cargo audit\u0027 writes default reports there depends on cargo-audit version behavi"
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  "cargo-audit skipped on tag pushes",
+                                "reason":  "security.yml:19 if-condition skips the audit job for v* tag pushes â€” released binaries are audited via main-push/weekly runs, not the rele"
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  "crates.io publish absence",
+                                "reason":  "release.yml publishes GitHub Releases only; crates-io/ is a documented reserved dir (AGENTS.md) and README phrases crates.io as future â€” i"
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  null,
+                                "reason":  "comment claims \u00277 baseline files\u0027 (ci.yml:267-274) but the loop scans 4 self-host subdirs â€” count drift not independently verified against"
+                            },
+                            {
+                                "squad":  "cicd",
+                                "area":  null,
+                                "reason":  "continue-on-error at ci.yml:117,145,219 are all DOCUMENTED in CONTRIBUTING.md:101-104 â€” FP rule applied; documented-as-advisory is credite"
+                            },
+                            {
+                                "squad":  "code-quality",
+                                "area":  "unwrap/expect/panic! hard-rule compliance across all 73 crates",
+                                "reason":  "full census requires per-file #[cfg(test)] boundary parsing; cfg-test-aware spot checks of the 6 highest raw-hit files (lexer, autodiff, ten"
+                            },
+                            {
+                                "squad":  "code-quality",
+                                "area":  "build/run/pgo flag-threading triplication in commands/",
+                                "reason":  "run.rs evidence (:66/:72/:97/:116/:139/:154) suggests the same precedence logic is re-implemented per command across 42 command files; full "
+                            },
+                            {
+                                "squad":  "code-quality",
+                                "area":  "other clippy::allow families beyond dead_code/too_many_arguments",
+                                "reason":  "census limited to the two audited lints; e.g. clippy::new_without_default, type_complexity suppressions not surveyed"
+                            },
+                            {
+                                "squad":  "code-quality",
+                                "area":  "44 framework crates\u0027 deep code quality",
+                                "reason":  "only cited sites (fuzz/ecs/cache/ml/tensor/runtime/cache) read; remaining framework crates reviewed via census greps only"
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "competitive-intel",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "consistency-coherence",
+                                "area":  "line-level claim contradictions inside the 19 digest-only squad reports",
+                                "reason":  "bodies not deep-read; conflicting line references or verdicts within those reports would not surface at title level"
+                            },
+                            {
+                                "squad":  "consistency-coherence",
+                                "area":  "dynamic/matrix GitHub Actions uses (reusable workflows, composite actions)",
+                                "reason":  "counts cover literal uses: occurrences in the 5 workflow files only"
+                            },
+                            {
+                                "squad":  "consistency-coherence",
+                                "area":  "ErrorCode enum direct count",
+                                "reason":  "parser regex failure; 62 rests on triangulation (docs/errors=62 + CI-004 + TC-002), not an independent enum parse"
+                            },
+                            {
+                                "squad":  "consistency-coherence",
+                                "area":  "E14xx ErrorCode family presence (TC-002 mentions it; AGENTS.md lists only E10xx-E13xx)",
+                                "reason":  "not independently verified in code.rs; excluded from findings to avoid unverified claims"
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "Advisory ignores beyond the four analyzed",
+                                "reason":  ".cargo/audit.toml contains 24 RUSTSEC ignores; only RUSTSEC-2023-0071 (rsa), RUSTSEC-2026-0194/0195 (quick-xml), and the h2/ring chain were "
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "35 zero-dependent buff-* leaf framework crates",
+                                "reason":  "The scripted scan found 35 workspace path pins (buff-dataframe, buff-audio, buff-dsp, buff-geo, etc.) consumed by no other manifest. All spo"
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "deny.toml [sources] / unknown-registry guard",
+                                "reason":  "deny.toml has no [sources] section, but CI invokes only \u0027cargo deny check bans licenses\u0027, so sources checking is out of scope of the existin"
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "Exact resolved-version tier validation",
+                                "reason":  "Version-tier consistency was verified from manifests + the root tier comment; a resolver-level confirmation (cargo metadata --no-deps / carg"
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "Transitive duplicate-version chains",
+                                "reason":  "Root Cargo.toml documents accepted duplicates (windows-sys x5, hashbrown x5, tungstenite x4, darling x3, spin x3, quick-xml x4 discovered in"
+                            },
+                            {
+                                "squad":  "dependencies",
+                                "area":  "Non-Cargo dependency surfaces",
+                                "reason":  "editors/vscode npm packages, tree-sitter-buff generated parser provenance, docker base images, installers/homebrew formula, and website/play"
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "fault-tolerance",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "financial-model",
+                                "area":  "binary/generated artifacts",
+                                "reason":  "wasm bundle, generated parser.c, packaged .vsix cannot be text-searched"
+                            },
+                            {
+                                "squad":  "financial-model",
+                                "area":  "off-repo monetization surfaces",
+                                "reason":  "GitHub Sponsors profile, deploy-time ad/paywall injection, crates.io descriptions - not verifiable from working tree"
+                            },
+                            {
+                                "squad":  "financial-model",
+                                "area":  "paraphrased/semantic financial claims",
+                                "reason":  "literal-term grep cannot catch monetization phrased outside pattern vocabulary; requires full manual read of ~26k LOC docs"
+                            },
+                            {
+                                "squad":  "financial-model",
+                                "area":  "fixture-data bleed",
+                                "reason":  "examples/tests legitimately use financial domain data; confirming none is quoted as product marketing requires monitoring as examples multip"
+                            },
+                            {
+                                "squad":  "license",
+                                "area":  "book + examples third-party derivation",
+                                "reason":  "spot-check limited to license-keyword grep and AGENTS.md origin claims; a copied-but-reworded permissive snippet would not be caught without"
+                            },
+                            {
+                                "squad":  "license",
+                                "area":  "transitive dependency licenses",
+                                "reason":  "static-file audit only; no cargo deny check re-resolution run; lockfile licenses assumed to pass CI gate"
+                            },
+                            {
+                                "squad":  "license",
+                                "area":  "Google Fonts CDN assets",
+                                "reason":  "OFL-licensed fonts treated as hosted (not vendored); self-hosting would change the analysis"
+                            },
+                            {
+                                "squad":  "license",
+                                "area":  "committed .vsix binary blobs",
+                                "reason":  "embedded license texts not inspected; low risk since root LICENSE files adjacent"
+                            },
+                            {
+                                "squad":  "license",
+                                "area":  "NOTICE file absence",
+                                "reason":  "no NOTICE* at root; Apache-2.0 NOTICE is optional (4(d) applies only if the Work includes one) - recorded as observation, not a finding"
+                            },
+                            {
+                                "squad":  "lmas-traceability",
+                                "area":  "T-number exhaustiveness",
+                                "reason":  "brief mandated an 8-number sample; remaining ~130 T-numbers (T1-T141 range) were not individually traced to artifacts"
+                            },
+                            {
+                                "squad":  "lmas-traceability",
+                                "area":  "PR merge enumeration #29-#61",
+                                "reason":  "individual merges not all enumerated; count relied on range arithmetic plus log samples; GitHub-side merge state unverifiable from local clo"
+                            },
+                            {
+                                "squad":  "lmas-traceability",
+                                "area":  "grep tool dot-directory blindness",
+                                "reason":  "primary grep tool skipped .sisyphus/.cargo; mitigated with PowerShell Select-String for targeted patterns, but repo-wide hidden-dir sweeps w"
+                            },
+                            {
+                                "squad":  "observability",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "observability",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "observability",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "observability",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "observability",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "privacy-data",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "product-roadmap",
+                                "area":  "checkbox sampling depth",
+                                "reason":  "118 open/0 done counted in aggregate; individual items not each verified against shipped behavior - some may be legitimately blocked (Pages "
+                            },
+                            {
+                                "squad":  "product-roadmap",
+                                "area":  "network-external claims",
+                                "reason":  "existence/redirect of github.com/buff-lang org, live Pages URL, GitHub default branch not HTTP-checked by this squad (sibling squad verified"
+                            },
+                            {
+                                "squad":  "product-roadmap",
+                                "area":  "early-phase plan checkboxes",
+                                "reason":  "~700KB of v0.1-v1.24 plans not checkbox-audited; stale open boxes may exist beyond sampled v1.26 + self-host plans"
+                            },
+                            {
+                                "squad":  "product-roadmap",
+                                "area":  "deny.toml premise",
+                                "reason":  "deny.toml contains no DR/rsa references, contradicting the audit brief\u0027s premise; cargo-audit ignore list lives elsewhere (root audit config"
+                            },
+                            {
+                                "squad":  "product-roadmap",
+                                "area":  "CHANGELOG line-by-line diff vs tags",
+                                "reason":  "attribution errors of the AUD-PR-002 kind could exist inside CHANGELOG v1.26-v1.39"
+                            },
+                            {
+                                "squad":  "refactoring",
+                                "area":  "Framework-crate boilerplate duplication (44 crates)",
+                                "reason":  "Sampled only 2 crates; every per-crate AGENTS.md documents the MVP shape as deliberate (T-numbered specs, deferred-backend seams), so patter"
+                            },
+                            {
+                                "squad":  "refactoring",
+                                "area":  "rust_codegen.rs residual monolith (2,459 lines) and _extra suffix splits",
+                                "reason":  "Headers document verbatim mechanical extraction (T105a/ITER-43) with preserved arm order as an explicit invariant; flagging the residual siz"
+                            },
+                            {
+                                "squad":  "refactoring",
+                                "area":  "std::sync::Mutex usage in async contexts (buff-jupyter kernel, buff-lang-cli commands/doc.rs SSE)",
+                                "reason":  "Grep-level scan only; every site carries in-code or AGENTS.md justification (guards not held across await, nanosecond holds). Runtime verifi"
+                            },
+                            {
+                                "squad":  "refactoring",
+                                "area":  "Deeper pedantic-clippy coverage",
+                                "reason":  "Only buff-plugins and buff-mock sampled; 73-crate sweep extrapolates to likely hundreds of must_use/doc_markdown instances. Counts in AUD-RF"
+                            },
+                            {
+                                "squad":  "refactoring",
+                                "area":  "TODO/FIXME/HACK census beyond literal markers",
+                                "reason":  "All 32 literal matches resolved as bufflings product semantics or documented buffhtml-span spike notes (treated clean); deferred-work phrase"
+                            },
+                            {
+                                "squad":  "regulatory-contractual",
+                                "area":  "CLA/DCO machinery",
+                                "reason":  "no CLA bot or DCO sign-off requirement exists; judged deliberate (OSS project choice) rather than a gap - a stricter corporate-contributor r"
+                            },
+                            {
+                                "squad":  "regulatory-contractual",
+                                "area":  "SECURITY.md completeness",
+                                "reason":  "only the first 8 lines read; private-vulnerability-reporting format/expiry/PGP details not verified against current disclosure best practice"
+                            },
+                            {
+                                "squad":  "regulatory-contractual",
+                                "area":  "trademark usage guidance",
+                                "reason":  "no trademark/branding policy for the Buff name/logo; relevant if the project grows an ecosystem"
+                            },
+                            {
+                                "squad":  "regulatory-dataprotection",
+                                "area":  "website/playground analytics",
+                                "reason":  "prior squads verified none; static HTML covered only via repo-wide privacy grep"
+                            },
+                            {
+                                "squad":  "regulatory-dataprotection",
+                                "area":  "tarball content personal data",
+                                "reason":  "registry stores tarballs opaquely; inspecting package contents for embedded personal data was out of scope"
+                            },
+                            {
+                                "squad":  "regulatory-dataprotection",
+                                "area":  "reverse-proxy access logs",
+                                "reason":  "no proxy config ships in-repo; operational logging policy relevant only at deployment"
+                            },
+                            {
+                                "squad":  "regulatory-financial",
+                                "area":  "non-mandated file types (.js/.ts/.json/.wasm/.buff)",
+                                "reason":  "mandate fixed extension set; fundraising strings could theoretically reside in playground JS or wasm"
+                            },
+                            {
+                                "squad":  "regulatory-financial",
+                                "area":  "git history / tag annotations",
+                                "reason":  "HEAD-state sweep cannot detect removed fundraising content in earlier commits"
+                            },
+                            {
+                                "squad":  "regulatory-financial",
+                                "area":  "semantic/metaphorical financial language",
+                                "reason":  "regex-only detection misses terms like pre-mine/treasury/equity or PT-BR equivalents (captaÃ§Ã£o, oferta de valores mobiliÃ¡rios)"
+                            },
+                            {
+                                "squad":  "regulatory-financial",
+                                "area":  "binary/generated artifacts",
+                                "reason":  "embedded strings in compiled artifacts not analyzed"
+                            },
+                            {
+                                "squad":  "regulatory-sector",
+                                "area":  "sector vocabulary beyond pattern list",
+                                "reason":  "PT-BR regulator names (Agencia Nacional de Mineracao etc.) or other sectors (banking BACEN, telecoms Anatel) not in the mandated pattern set"
+                            },
+                            {
+                                "squad":  "regulatory-sector",
+                                "area":  "binary/generated artifacts",
+                                "reason":  "wasm bundles and generated C not text-scanned"
+                            },
+                            {
+                                "squad":  "regulatory-sector",
+                                "area":  "git history",
+                                "reason":  "HEAD-state audit only"
+                            },
+                            {
+                                "squad":  "regulatory-standards",
+                                "area":  "informal compliance language",
+                                "reason":  "phrases like \u0027hardened\u0027, \u0027production-grade\u0027 were not flagged (present in README v1.10 row \u0027Production hardening\u0027) - these are engineering la"
+                            },
+                            {
+                                "squad":  "regulatory-standards",
+                                "area":  "future certification claims",
+                                "reason":  "if the project later seeks SOC2/ISO for a hosted registry, claims must be re-audited"
+                            },
+                            {
+                                "squad":  "regulatory-standards",
+                                "area":  "vendor/dependency attestations",
+                                "reason":  "cargo-deny/audit advisories posture covered by compliance squads; standards-cert claims of dependencies not in scope"
+                            },
+                            {
+                                "squad":  "schema-metrics",
+                                "area":  "skip_serializing_if Option variance",
+                                "reason":  "Registry responses omit Option keys when None (VersionInfo.published_at/author, QualityAttachment.*, PackageSummary.*); judged deliberate le"
+                            },
+                            {
+                                "squad":  "schema-metrics",
+                                "area":  "buff-mcp output shapes",
+                                "reason":  "buff_complete returns full LSP CompletionResponse verbatim (superset of promised label/kind/detail); MCP 2024-11-05 has no outputSchema fiel"
+                            },
+                            {
+                                "squad":  "schema-metrics",
+                                "area":  "boulder.json schema version",
+                                "reason":  "internal orchestrator session state with free-text notes; not a public contract - not flagged"
+                            },
+                            {
+                                "squad":  "schema-metrics",
+                                "area":  "health vs ready status values",
+                                "reason":  "ok vs ready for same field name = intentional probe semantics - not flagged"
+                            },
+                            {
+                                "squad":  "schema-metrics",
+                                "area":  "metrics registry",
+                                "reason":  "CONFIRMED ABSENT (scope item 5 N/A): repo-wide grep hits only buff-observe (user-facing framework crate) and bench harness RunStats; no comp"
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "security",
+                                "area":  null,
+                                "reason":  ""
+                            },
+                            {
+                                "squad":  "tax-fiscal",
+                                "area":  "Maintainer-side Brazilian tax obligations (IRPF/MEI, municipal ISS on software services, GitHub Sponsors payouts via Stripe Connect)",
+                                "reason":  "repository content cannot evidence off-repo fiscal duties; content-only audit"
+                            },
+                            {
+                                "squad":  "tax-fiscal",
+                                "area":  "Cross-border payment and treaty documentation (W-8BEN-E, Brazil-US double-taxation treaty, 1099/1042-S exposure)",
+                                "reason":  "no fiscal documents exist in repo by design; would require financial-records review if monetization begins"
+                            },
+                            {
+                                "squad":  "tax-fiscal",
+                                "area":  "Future monetization surfaces (paid registry tier, sponsorship activation, paid courses)",
+                                "reason":  "FUNDING.yml fully commented; any future paid tier would invalidate this zero-finding result"
+                            },
+                            {
+                                "squad":  "tax-fiscal",
+                                "area":  "Out-of-scope file formats (*.json, *.js/ts bundles, *.wasm, *.buff/.buffhtml, tree-sitter C sources)",
+                                "reason":  "scope fixed to md/rs/html/toml/yml per spec"
+                            },
+                            {
+                                "squad":  "test-coverage",
+                                "area":  "Runtime test execution status",
+                                "reason":  "No cargo test run was performed (static analysis only); currently-failing or ignored tests, flaky tests, and doctest failures are invisible "
+                            },
+                            {
+                                "squad":  "test-coverage",
+                                "area":  "Inline #[cfg(test)] assertion quality",
+                                "reason":  "Unit-smoke tests embedded in src across ~50 crates were scanned only mechanically; buff-eval/src/lib.rs:841 assert!(ok.is_ok()) was spotted "
+                            },
+                            {
+                                "squad":  "test-coverage",
+                                "area":  "Rustdoc doctest coverage",
+                                "reason":  "cargo test --doc surface (fenced code examples in crate docs, including the ffi-guide GUIDE.md examples) was not audited at all; broken or m"
+                            },
+                            {
+                                "squad":  "test-coverage",
+                                "area":  "Snapshot content fidelity",
+                                "reason":  "285 insta snapshots counted but not diffed against intentional-output; a snapshot that redacts too much (e.g., normalizing away spans) would"
+                            },
+                            {
+                                "squad":  "test-coverage",
+                                "area":  "Property-based test breadth (proptest)",
+                                "reason":  "crates/buff-lang-parser/tests/proptest_properties.rs exists but the number/strength of properties and generators coverage vs the grammar sur"
+                            }
+                        ],
+    "fn_total":  117
+}

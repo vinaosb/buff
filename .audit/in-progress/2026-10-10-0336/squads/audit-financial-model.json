@@ -1,0 +1,38 @@
+{
+  "report_version": "3.2",
+  "run_id": "2026-10-10-0336",
+  "squad": "audit-financial-model",
+  "project": "buff",
+  "timestamp": "2026-10-10T03:36:26-03:00",
+  "findings": [],
+  "summary": {
+    "files_examined": [
+      {"path": "AGENTS.md", "lines_read": 120, "bytes_read": 8200, "examined_at": "2026-10-10T03:37:10-03:00", "findings_emitted": 0, "verdict": "clean; MANDATORY FP rule read: documented deliberate choices are not findings"},
+      {"path": "website/index.html", "lines_read": 408, "bytes_read": 15800, "examined_at": "2026-10-10T03:37:40-03:00", "findings_emitted": 0, "verdict": "clean; full read: zero enterprise plans/paid tiers; footer states Open source MIT + Apache-2.0"},
+      {"path": "crates/buff-registry/src/lib.rs", "lines_read": 598, "bytes_read": 25400, "examined_at": "2026-10-10T03:38:10-03:00", "findings_emitted": 0, "verdict": "clean; all 16 routes audited; no quota-for-payment, cost, price, plan, or billing fields"},
+      {"path": "crates/buff-registry/src/handlers.rs", "lines_read": 1184, "bytes_read": 46400, "examined_at": "2026-10-10T03:38:45-03:00", "findings_emitted": 0, "verdict": "clean; DTOs carry no monetary fields; stats = download counts; rate limits documented as abuse protection (P0.28/T57)"},
+      {"path": ".github/FUNDING.yml", "lines_read": 4, "bytes_read": 160, "examined_at": "2026-10-10T03:39:05-03:00", "findings_emitted": 0, "verdict": "clean; ALL lines commented out; no active donation link, no amounts"},
+      {"path": "grep-repo-wide:*.{md,html,js,css,yml,yaml,toml,json}:(?i)(price|pricing|revenue|billing|per month|paid)", "lines_read": 1, "bytes_read": 0, "examined_at": "2026-10-10T03:36:50-03:00", "findings_emitted": 0, "verdict": "1 match: buff-fsm/AGENTS.md FSM example state names (cart/paid/shipped/delivered), not a financial claim"},
+      {"path": "grep-repo-wide:*.{md,html,js,css,yml,yaml,toml,json}:(currency amounts USD/BRL/$N)", "lines_read": 7, "bytes_read": 0, "examined_at": "2026-10-10T03:36:55-03:00", "findings_emitted": 0, "verdict": "7 matches all false positives: SQL $1 placeholders + base64 integrity substrings in package-lock.json"},
+      {"path": "grep-repo-wide:*.rs:(?i)subscription", "lines_read": 30, "bytes_read": 0, "examined_at": "2026-10-10T03:37:00-03:00", "findings_emitted": 0, "verdict": "30 matches, 100% buff-pubsub EventBus semantics - not billing subscriptions"},
+      {"path": "grep-repo-wide:*.{md,html,yml,yaml,json,toml}:(?i)(sponsor|donat|funding)", "lines_read": 318, "bytes_read": 0, "examined_at": "2026-10-10T03:37:05-03:00", "findings_emitted": 0, "verdict": "318 matches: third-party npm funding URLs in package-lock.json + CHANGELOG FUNDING.yml mention"},
+      {"path": "grep-repo-wide:*.{md,html,js,css}:(PT-BR monetization terms)", "lines_read": 135, "bytes_read": 0, "examined_at": "2026-10-10T03:37:08-03:00", "findings_emitted": 0, "verdict": "135 matches all substrings of preconnect/precompute/Precondition; zero genuine PT-BR monetization terms"},
+      {"path": "grep-repo-wide:*.rs:(?i)(price|pricing|billing|payment|invoice|revenue|monetiz)", "lines_read": 30, "bytes_read": 0, "examined_at": "2026-10-10T03:39:20-03:00", "findings_emitted": 0, "verdict": "30 matches in 8 files, all language/library fixture data (Decimal literal tests, XML catalog demo, FSM/email examples, web3 ABI comment); none are project financial claims"},
+      {"path": "grep-repo-wide:*.{md,html}:(?i)(payment|enterprise plan|premium plan|paid tier|pricing page|license fee)", "lines_read": 0, "bytes_read": 0, "examined_at": "2026-10-10T03:39:25-03:00", "findings_emitted": 0, "verdict": "0 matches - no commercial positioning anywhere in docs or site"}
+    ],
+    "files_skipped": [
+      {"path": "playground/pkg/buff_playground_bg.wasm", "reason": "binary wasm bundle; text greps cannot inspect compiled content", "lines_not_examined": "all"},
+      {"path": "tree-sitter-buff/src/parser.c", "reason": "GENERATED from grammar.js (hand-edit forbidden per AGENTS.md); grammar tables not prose", "lines_not_examined": "all"},
+      {"path": "package-lock.json files", "reason": "only matched lines reviewed; lockfile metadata not project content", "lines_not_examined": "~7000 combined"},
+      {"path": "docs/errors/E*.html (60+ files)", "reason": "generated error pages; only preconnect lines matched; ErrorCode docs have no financial surface", "lines_not_examined": "~150 per file"},
+      {"path": "git history / GitHub Releases / crates.io metadata", "reason": "outside working tree; repo-scope audit only", "lines_not_examined": "all"}
+    ],
+    "falseNegativesIdentified": [
+      {"area": "binary/generated artifacts", "reason": "wasm bundle, generated parser.c, packaged .vsix cannot be text-searched"},
+      {"area": "off-repo monetization surfaces", "reason": "GitHub Sponsors profile, deploy-time ad/paywall injection, crates.io descriptions - not verifiable from working tree"},
+      {"area": "paraphrased/semantic financial claims", "reason": "literal-term grep cannot catch monetization phrased outside pattern vocabulary; requires full manual read of ~26k LOC docs"},
+      {"area": "fixture-data bleed", "reason": "examples/tests legitimately use financial domain data; confirming none is quoted as product marketing requires monitoring as examples multiply (v1.39 added 5 use-case batches)"}
+    ],
+    "totals": {"critical": 0, "high": 0, "medium": 0, "low": 0, "files_examined": 12}
+  }
+}
