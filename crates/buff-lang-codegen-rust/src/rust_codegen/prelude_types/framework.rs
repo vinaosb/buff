@@ -119,6 +119,22 @@ impl RustCodegen {
                 syn::parse2(tokens)
                     .map_err(|e| self.unsupported(&format!("Tensor.from_vec codegen parse: {e}")))
             }
+            // T8/ITER-56E: Tensor.filled(shape, value) - the 4th
+            // constructor, completing the Tensor family. Fallible like
+            // Zeros/Ones (TensorResult): panic-free via the
+            // unwrap_or_default Default fallback. Both args cast to the
+            // API's usize/f32 element types.
+            (T::Tensor, A::Filled) => {
+                let (shape, value) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_tensor::Tensor::filled(
+                        #shape.into_iter().map(|d| d as usize).collect::<Vec<usize>>(),
+                        #value as f32
+                    ).unwrap_or_default()
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Tensor.filled codegen parse: {e}")))
+            }
             (T::DataFrame, A::FromCsv) => {
                 let arg = one_arg(self)?;
                 let tokens: proc_macro2::TokenStream = quote::quote! {

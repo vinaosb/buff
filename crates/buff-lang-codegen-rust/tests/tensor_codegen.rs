@@ -19,6 +19,27 @@ fn gen(src: &str) -> String {
 }
 
 #[test]
+fn tensor_filled_lowers() {
+    let rust = gen("func main():\n    let f = Tensor.filled([2, 3], 1.5)\n    print(f.len())\n");
+    assert!(
+        rust.contains("buff_tensor::Tensor::filled"),
+        "filled ctor:\n{rust}"
+    );
+    assert!(
+        rust.contains(" as usize"),
+        "Vector<Int> shape must cast to the usize API:\n{rust}"
+    );
+    assert!(
+        rust.contains(" as f32"),
+        "Float value must cast to the T8 f32 element type:\n{rust}"
+    );
+    assert!(
+        rust.contains("unwrap_or_default"),
+        "fallible constructor needs the Default fallback:\n{rust}"
+    );
+}
+
+#[test]
 fn tensor_zeros_and_queries_lower() {
     let rust = gen(
         "func main():\n    let t = Tensor.zeros([3, 4])\n    let dims = t.shape()\n    print(t.rank())\n    print(t.len())\n",
