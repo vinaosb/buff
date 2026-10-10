@@ -1090,6 +1090,12 @@ pub enum Type {
     /// `Vec<Complex>` + sample_rate Ã¢â‚¬â€ hermitian half (`N/2 + 1` bins)
     /// of a length-N real input. **Additive** (T11).
     Spectrum,
+    /// T11/ITER-56C: the runtime-value DSP Window type. Maps to
+    /// `buff_dsp::Window` at codegen time. Constructed via
+    /// `Window.hann(n)` / `Window.hamming(n)` / `Window.blackman(n)` -
+    /// infallible constructors (no Result), so no Default fallback is
+    /// needed for panic-free lowering. The Buff Int arg casts to usize.
+    Window,
     /// T17: an HTTP web server runtime-value type, mapped to
     /// `buff_web::Web` at codegen time. Constructed via `Web.new()`
     /// (empty server) or `Web.bind(addr)`; carries the instance
