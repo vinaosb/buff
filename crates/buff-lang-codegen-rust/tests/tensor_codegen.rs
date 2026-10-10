@@ -40,6 +40,21 @@ fn tensor_filled_lowers() {
 }
 
 #[test]
+fn tensor_matmul_lowers() {
+    let rust = gen(
+        "func main():\n    let a = Tensor.zeros([2, 2])\n    let b = Tensor.zeros([2, 2])\n    let c = a.matmul(b)\n    print(c.len())\n",
+    );
+    assert!(
+        rust.contains(".matmul(&"),
+        "matmul takes rhs by reference at the Rust layer:\n{rust}"
+    );
+    assert!(
+        rust.contains("unwrap_or_default"),
+        "fallible matmul needs the Default fallback:\n{rust}"
+    );
+}
+
+#[test]
 fn tensor_zeros_and_queries_lower() {
     let rust = gen(
         "func main():\n    let t = Tensor.zeros([3, 4])\n    let dims = t.shape()\n    print(t.rank())\n    print(t.len())\n",
