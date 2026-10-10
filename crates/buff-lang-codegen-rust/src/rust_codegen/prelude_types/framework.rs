@@ -50,6 +50,21 @@ impl RustCodegen {
             // frame, matching Buff's "no panicking generated code"
             // rule). Records `buff-dataframe` in extern_crates via
             // the narrow `program_uses_namespace("DataFrame")` walker.
+            // T11/ITER-56D: Signal constructor. buff_dsp::Signal::
+            // from_vec(samples, rate) is INFALLIBLE (returns Self), so
+            // no fallback is needed. The Buff Vector<Float> data casts
+            // to the f64 API; the Int sample-rate casts to u32.
+            (T::Signal, A::FromVec) => {
+                let (data, rate) = two_args(self)?;
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_dsp::Signal::from_vec(
+                        #data.into_iter().map(|v| v as f64).collect::<Vec<f64>>(),
+                        #rate as u32
+                    )
+                };
+                syn::parse2(tokens)
+                    .map_err(|e| self.unsupported(&format!("Signal.from_vec codegen parse: {e}")))
+            }
             // T11/ITER-56C: DSP window constructors (Hann/Hamming/
             // Blackman). buff_dsp::Window::hann(n) et al. are
             // INFALLIBLE (return Self, no Result), so - unlike the
