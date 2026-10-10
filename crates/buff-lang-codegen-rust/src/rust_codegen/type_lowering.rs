@@ -712,6 +712,7 @@ impl RustCodegen {
             Type::Tensor => "buff_tensor::Tensor",
             Type::Signal => "buff_dsp::Signal",
             Type::Spectrum => "buff_dsp::Spectrum",
+            Type::Window => "buff_dsp::Window",
             Type::Web => "buff_web::Web",
             Type::Pool => "buff_db::Pool",
             Type::Strategy => "buff_fuzz::Strategy",

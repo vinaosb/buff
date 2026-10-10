@@ -183,6 +183,7 @@ impl fmt::Display for Type {
             Type::Tensor => f.write_str("Tensor"),
             Type::Signal => f.write_str("Signal"),
             Type::Spectrum => f.write_str("Spectrum"),
+            Type::Window => f.write_str("Window"),
             Type::Web => f.write_str("Web"),
             Type::Pool => f.write_str("Pool"),
             Type::Strategy => f.write_str("Strategy"),

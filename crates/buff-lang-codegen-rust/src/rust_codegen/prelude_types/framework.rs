@@ -50,6 +50,26 @@ impl RustCodegen {
             // frame, matching Buff's "no panicking generated code"
             // rule). Records `buff-dataframe` in extern_crates via
             // the narrow `program_uses_namespace("DataFrame")` walker.
+            // T11/ITER-56C: DSP window constructors (Hann/Hamming/
+            // Blackman). buff_dsp::Window::hann(n) et al. are
+            // INFALLIBLE (return Self, no Result), so - unlike the
+            // Tensor constructors - no unwrap_or_default fallback is
+            // needed. The Buff Int arg casts to usize.
+            (T::Window, A::Hann) | (T::Window, A::Hamming) | (T::Window, A::Blackman) => {
+                let arg = one_arg(self)?;
+                let ctor = match pmethod {
+                    A::Hann => "hann",
+                    A::Hamming => "hamming",
+                    _ => "blackman",
+                };
+                let ctor = syn::Ident::new(ctor, proc_macro2::Span::call_site());
+                let tokens: proc_macro2::TokenStream = quote::quote! {
+                    buff_dsp::Window::#ctor(#arg as usize)
+                };
+                syn::parse2(tokens).map_err(|e| {
+                    self.unsupported(&format!("Window constructor codegen parse: {e}"))
+                })
+            }
             // T8/ITER-56: Tensor constructors (Zeros/Ones/FromVec).
             // Panic-free via `unwrap_or_default()` — Tensor::default()
             // is the rank-1 scalar-zero fallback; shape-validation

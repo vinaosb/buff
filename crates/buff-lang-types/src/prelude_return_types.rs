@@ -511,9 +511,9 @@ pub fn assoc_fn_return_type(
         // variant now exists). Wraps `buff_dsp::Signal::from_vec(...)`.
         (PreludeType::Signal, PreludeAssocFn::FromVec) => Some(Type::Signal),
         // T11: Window constructors return Window (modeled as Void).
-        (PreludeType::Window, PreludeAssocFn::Hann) => Some(Type::Void),
-        (PreludeType::Window, PreludeAssocFn::Hamming) => Some(Type::Void),
-        (PreludeType::Window, PreludeAssocFn::Blackman) => Some(Type::Void),
+        (PreludeType::Window, PreludeAssocFn::Hann) => Some(Type::Window),
+        (PreludeType::Window, PreludeAssocFn::Hamming) => Some(Type::Window),
+        (PreludeType::Window, PreludeAssocFn::Blackman) => Some(Type::Window),
         // T21: Observe namespace methods return Void (namespace-only).
         // The codegen splices `buff_observe::*::new(...)` / `Tracer::bootstrap()`
         // directly — the return values are consumed by the generated Rust

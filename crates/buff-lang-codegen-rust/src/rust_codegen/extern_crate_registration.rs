@@ -49,6 +49,14 @@ impl RustCodegen {
         if super::extern_crate_detection::program_uses_namespace(decls, "Tensor") {
             self.extern_crates.insert("buff-tensor".to_string());
         }
+        // T11/ITER-56C: register `buff-dsp` when the program uses the
+        // Window prelude namespace (`Window.hann/hamming/blackman(n)`).
+        // The constructors are infallible; generated code uses
+        // fully-qualified `buff_dsp::...` paths. Mirrors the Tensor
+        // registration (ITER-56A).
+        if super::extern_crate_detection::program_uses_namespace(decls, "Window") {
+            self.extern_crates.insert("buff-dsp".to_string());
+        }
         // T124c: register the `tracing` + `tracing-subscriber` crates as
         // external dependencies when the program references the prelude
         // `Log` module (`Log.debug/info/warn/error(...)`). Generated code
