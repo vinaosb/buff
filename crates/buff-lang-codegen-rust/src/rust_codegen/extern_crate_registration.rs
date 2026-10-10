@@ -54,7 +54,9 @@ impl RustCodegen {
         // The constructors are infallible; generated code uses
         // fully-qualified `buff_dsp::...` paths. Mirrors the Tensor
         // registration (ITER-56A).
-        if super::extern_crate_detection::program_uses_namespace(decls, "Window") {
+        if super::extern_crate_detection::program_uses_namespace(decls, "Window")
+            || super::extern_crate_detection::program_uses_namespace(decls, "Signal")
+        {
             self.extern_crates.insert("buff-dsp".to_string());
         }
         // T124c: register the `tracing` + `tracing-subscriber` crates as

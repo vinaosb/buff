@@ -15,6 +15,27 @@ fn gen(src: &str) -> String {
 }
 
 #[test]
+fn signal_from_vec_lowers() {
+    let rust = gen("func main():\n    let s = Signal.from_vec([0.1, 0.2, 0.3], 44100)\n");
+    assert!(
+        rust.contains("buff_dsp::Signal::from_vec"),
+        "from_vec ctor:\n{rust}"
+    );
+    assert!(
+        rust.contains(" as f64"),
+        "Vector<Float> data must cast to the f64 API:\n{rust}"
+    );
+    assert!(
+        rust.contains(" as u32"),
+        "Int sample-rate must cast to u32:\n{rust}"
+    );
+    assert!(
+        !rust.contains("unwrap_or_default"),
+        "infallible constructor needs no fallback:\n{rust}"
+    );
+}
+
+#[test]
 fn window_constructors_lower() {
     let rust = gen(
         "func main():\n    let a = Window.hann(8)\n    let b = Window.hamming(8)\n    let c = Window.blackman(8)\n",

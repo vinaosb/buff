@@ -103,7 +103,6 @@ const DEFERRED_TYPES: &[&str] = &[
     "Rbac",
     "RestartStrategy",
     "RsaKeypair",
-    "Signal",
     "Spectrum",
     "StemAlgorithm",
     "Supervisor",
